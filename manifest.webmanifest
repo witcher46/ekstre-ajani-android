@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "Ekstre Ajanı Mobil",
+  "short_name": "Ekstre Ajanı",
+  "lang": "tr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#edf2ec",
+  "theme_color": "#12372d",
+  "icons": [
+    {"src":"icon-192.png","sizes":"192x192","type":"image/png"},
+    {"src":"icon-512.png","sizes":"512x512","type":"image/png"}
+  ]
+}

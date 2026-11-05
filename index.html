@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#12372d">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Ekstre Ajanı Mobil</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <script type="module" src="app.mjs"></script>
+</head>
+<body>
+  <header><div class="wrap"><p class="eyebrow">FİNANS CÜZDANIM · MOBİL</p><h1>Ekstre Ajanı</h1><p>Kart harcamalarını dönem dönem incele.</p></div></header>
+  <main class="wrap">
+    <section class="panel" aria-labelledby="import-title">
+      <h2 id="import-title">Kart işlemlerini aç</h2>
+      <p>Masaüstünde Raporlar → İşlemleri CSV olarak indir. Dosya bu cihazda işlenir.</p>
+      <label for="csv">Kart işlemleri CSV dosyası</label>
+      <input type="file" id="csv" accept=".csv,text/csv">
+      <button type="button" id="sample">Örnek veriyi aç</button>
+      <p id="status" role="status"></p>
+      <div id="confirm" hidden>
+        <button type="button" id="save">Bu listeyi kaydet</button>
+        <button type="button" id="cancel">Vazgeç</button>
+      </div>
+      <button type="button" id="return-saved" hidden>Kayıtlı listeye dön</button>
+    </section>
+    <section id="report" hidden aria-labelledby="report-title">
+      <div class="panel summary">
+        <h2 id="report-title">Dönem özeti</h2>
+        <p id="source"></p>
+        <label for="period">Ekstre dönemi</label>
+        <select id="period"></select>
+        <dl><div><dt>Net harcama</dt><dd id="net"></dd></div>
+          <div><dt>Harcamalar</dt><dd id="spent"></dd></div>
+          <div><dt>İadeler / indirimler</dt><dd id="refunds"></dd></div>
+          <div><dt>Kart ödemeleri</dt><dd id="payments"></dd></div></dl>
+      </div>
+      <div class="panel"><h2>Kategoriler</h2><p>Toplamlar CSV’deki işlem kategorilerine göre hesaplanır.</p><ul id="categories"></ul></div>
+      <div class="panel">
+        <h2>İşlemler</h2>
+        <label for="query">Açıklama veya kategori ara</label>
+        <input id="query" type="search" placeholder="Örn. Market">
+        <p id="count"></p><ul id="transactions"></ul>
+        <button id="more" type="button" hidden>Daha fazla göster</button>
+      </div>
+      <button id="clear" type="button" hidden>Telefondaki kart listesini sil</button>
+    </section>
+  </main>
+</body>
+</html>
