@@ -1,26 +1,52 @@
 * { box-sizing: border-box; }
-:root { font-family: system-ui, sans-serif; color: #172e26; background: #edf2ec; }
+:root {
+  color-scheme: dark;
+  --background: #11181e;
+  --panel: #1c252d;
+  --text: #edf2f5;
+  --muted: #a5b1bb;
+  --line: #37434c;
+  --accent: #8ed5b7;
+  --accent-soft: #213d33;
+  font-family: system-ui, sans-serif;
+  background: var(--background);
+  color: var(--text);
+}
 body { margin: 0; }
-header { background: #12372d; color: #f6fff8; padding: 1.5rem 0; }
-.wrap { width: min(100% - 2rem, 42rem); margin-inline: auto; }
-main { padding: 1rem 0 2rem; }
-h1 { margin: .35rem 0; font-size: clamp(2rem, 8vw, 3rem); }
-h2 { margin: 0 0 .6rem; font-size: 1.2rem; }
-p { margin: .4rem 0 .9rem; line-height: 1.45; }
-.eyebrow { color: #bde5c8; font-size: .75rem; letter-spacing: .12em; }
-.panel { background: #fff; border: 1px solid #d7e3d9; border-radius: 1rem; margin-bottom: .85rem; padding: 1rem; }
+header { padding: 1.2rem 0; border-bottom: 1px solid var(--line); }
+.wrap { width: min(100% - 2rem, 44rem); margin-inline: auto; }
+.brand { display: flex; align-items: center; gap: .8rem; }
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  flex: none;
+  border: 1px solid var(--accent);
+  border-radius: .9rem;
+  color: var(--accent);
+  font-size: 1.5rem;
+}
+main { padding: 1rem 0 max(2rem, env(safe-area-inset-bottom)); }
+h1 { margin: .12rem 0 0; font-size: clamp(1.55rem, 6vw, 2.1rem); letter-spacing: -.035em; }
+h2 { margin: 0 0 .6rem; font-size: 1.15rem; }
+p { margin: .4rem 0 .9rem; line-height: 1.5; color: var(--muted); }
+.eyebrow { margin: 0; font-size: .72rem; letter-spacing: .1em; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: .9rem; margin-bottom: .85rem; padding: 1rem; }
 label { display: block; margin: .5rem 0 .3rem; font-weight: 600; }
 input, select, button { font: inherit; min-height: 44px; max-width: 100%; }
-input, select { width: 100%; padding: .55rem; border: 1px solid #82998a; border-radius: .5rem; background: white; color: inherit; }
-button { margin: .55rem .25rem .15rem 0; padding: .5rem .75rem; color: #fff; background: #215740; border: 1px solid transparent; border-radius: .6rem; cursor: pointer; }
-#cancel, #clear { color: #214b39; border-color: #82998a; background: white; }
+input, select { width: 100%; padding: .55rem; border: 1px solid #75848e; border-radius: .5rem; background: var(--background); color: inherit; }
+button { margin: .55rem .25rem .15rem 0; padding: .5rem .75rem; color: #102019; background: var(--accent); border: 1px solid transparent; border-radius: .55rem; cursor: pointer; font-weight: 650; }
+#cancel, #clear, #return-saved { color: var(--accent); border-color: var(--line); background: var(--background); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 #status:empty { display: none; }
 dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; margin-bottom: 0; }
-dl div { background: #edf5ed; padding: .6rem; border-radius: .6rem; }
-dt, small { color: #465f53; font-size: .83rem; }
-dd { margin: .25rem 0 0; font-weight: 700; overflow-wrap: anywhere; }
+dl div { background: var(--background); padding: .65rem; border-radius: .6rem; }
+dl div:first-child { background: var(--accent-soft); }
+dt, small { color: var(--muted); font-size: .83rem; }
+dd { margin: .25rem 0 0; font-weight: 700; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 ul { list-style: none; padding: 0; margin: 0; }
-li { display: flex; justify-content: space-between; gap: .65rem; border-bottom: 1px solid #e0eae2; padding: .65rem 0; overflow-wrap: anywhere; }
+li { display: flex; justify-content: space-between; gap: .65rem; border-bottom: 1px solid var(--line); padding: .65rem 0; overflow-wrap: anywhere; }
 li:last-child { border-bottom: 0; }
 li small { display: block; margin-top: .2rem; }
-li strong { flex: 0 0 auto; max-width: 45%; }
+li strong { flex: 0 0 auto; max-width: 45%; color: var(--accent); font-variant-numeric: tabular-nums; }

@@ -1,4 +1,4 @@
-const name = 'ekstre-mobile-v2';
+const name = 'ekstre-mobile-v3';
 const shell = ['./', 'index.html', 'app.mjs', 'model.mjs', 'sample.mjs', 'style.css',
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', event => {

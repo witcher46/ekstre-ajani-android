@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+full_wallet/data/
+**/.streamlit/secrets.toml
+.env
+*.pem
+*.key
+*.db
+*.db-*
+*.pdf
+*.csv

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#12372d">
+  <meta name="theme-color" content="#11181e">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Ekstre Ajanı Mobil</title>
   <link rel="manifest" href="manifest.webmanifest">
@@ -12,11 +12,16 @@
   <script type="module" src="app.mjs"></script>
 </head>
 <body>
-  <header><div class="wrap"><p class="eyebrow">FİNANS CÜZDANIM · MOBİL</p><h1>Ekstre Ajanı</h1><p>Kart harcamalarını dönem dönem incele.</p></div></header>
+  <header>
+    <div class="wrap brand">
+      <span class="brand-mark" aria-hidden="true">₺</span>
+      <div><p class="eyebrow">FİNANS CÜZDANIM · MOBİL</p><h1>Kart raporu</h1></div>
+    </div>
+  </header>
   <main class="wrap">
     <section class="panel" aria-labelledby="import-title">
       <h2 id="import-title">Kart işlemlerini aç</h2>
-      <p>Masaüstünde Raporlar → İşlemleri CSV olarak indir. Dosya bu cihazda işlenir.</p>
+      <p>Çevrimdışı inceleme için masaüstünde Raporlar → İşlemleri CSV olarak indir. Dosya bu cihazda işlenir.</p>
       <label for="csv">Kart işlemleri CSV dosyası</label>
       <input type="file" id="csv" accept=".csv,text/csv">
       <button type="button" id="sample">Örnek veriyi aç</button>
