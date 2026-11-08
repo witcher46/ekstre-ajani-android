@@ -24,7 +24,7 @@ function go(next){page=next;query='';render();window.scrollTo(0,0);}
 const empty=message=>`<div class="empty"><b>Buradan başlayalım</b><p>${message}</p></div>`;
 function transactionList(rows){return rows.length?rows.slice(0,listLimit).map(t=>`<div class="row transaction" role="button" tabindex="0" data-edit="${esc(t.id)}"><div class="left"><strong>${esc(t.desc)}</strong><small>${esc(t.date)} · ${esc(accountName(t.account))}<br>${esc(t.category)} · ${esc(kinds[t.kind])}${t.installment?' · '+esc(t.installment):''}${t.matchStatus==='pending'?(t.kind==='payment'?'<br>Banka hareketi kaydedildi; ikinci kart etkisi incelemede':'<br>Olası eşleşme · henüz toplama eklenmedi'):t.linkedTo?'<br>Aynı işleme bağlı · ikinci kez sayılmıyor':''}</small></div><div class="amount">${fmt(t.amount)}${t.reviewed?'<small>İncelendi</small>':''}</div></div>`).join(''):empty('Henüz işlem yok. Hesap ekleyebilir veya bir ekstre aktarabilirsin.');}
 function render(){
- const sections=[['home','⌂','Özet'],['wallet','▣','Cüzdan'],['transactions','⇅','İşlemler'],['plan','◷','Planlama'],['import','↓','Ekstre']];
+ const sections=[['home','⌂','Özet'],['wallet','▣','Cüzdan'],['transactions','⇅','İşlem'],['plan','◷','Plan'],['import','↓','Ekstre']];
  $('nav').innerHTML=sections.map(([id,icon,label])=>`<button data-page="${id}" class="${page===id?'active':''}" ${page===id?'aria-current="page"':''}><span aria-hidden="true">${icon}</span>${label}</button>`).join('');
  const mode=['transactions','reports'].includes(page)?periodMode:'calendar';
  const s=C.summary(state,period,mode),rows=C.rowsForPeriod(state,period,mode),periodControl=`<input class="period" id="period" aria-label="Takvim ayı / ekstre dönemi" type="month" value="${period}">`;
