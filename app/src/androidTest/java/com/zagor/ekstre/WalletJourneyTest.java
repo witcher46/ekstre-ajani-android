@@ -34,6 +34,7 @@ public class WalletJourneyTest {
   try(FileOutputStream out=new FileOutputStream(new File(dir,name+".txt"))){String info="package="+device.getCurrentPackageName()+" screenOn="+device.isScreenOn()+"\n"+device.executeShellCommand("dumpsys window");out.write(info.getBytes(StandardCharsets.UTF_8));}
  }
  private WebView web(MainActivity a){return (WebView)((ViewGroup)a.findViewById(android.R.id.content)).getChildAt(0);}
+ private void drawn(ActivityScenario<MainActivity> a)throws Exception{CountDownLatch done=new CountDownLatch(1);a.onActivity(activity->{WebView w=web(activity);w.postVisualStateCallback(1,new WebView.VisualStateCallback(){@Override public void onComplete(long id){w.postOnAnimation(()->w.postOnAnimation(done::countDown));}});});assertTrue("WebView presents the updated frame",done.await(15,TimeUnit.SECONDS));}
  private String js(ActivityScenario<MainActivity> a,String code)throws Exception{CountDownLatch done=new CountDownLatch(1);AtomicReference<String> value=new AtomicReference<>();a.onActivity(activity->web(activity).evaluateJavascript(code,r->{value.set(r);done.countDown();}));assertTrue(done.await(10,TimeUnit.SECONDS));return value.get();}
  private void waitJs(ActivityScenario<MainActivity> a,String condition)throws Exception{String last="";for(int i=0;i<60;i++){last=js(a,condition);if("true".equals(last))return;Thread.sleep(200);}fail("WebView condition failed: "+condition+" returned "+last);}
  private void click(ActivityScenario<MainActivity> a,String selector)throws Exception{js(a,"document.querySelector("+JSONObject.quote(selector)+").click()");}
@@ -48,6 +49,11 @@ public class WalletJourneyTest {
  private Uri document(String name,String mime,byte[] bytes)throws Exception{Context c=InstrumentationRegistry.getInstrumentation().getTargetContext();ContentValues v=new ContentValues();v.put(MediaStore.MediaColumns.DISPLAY_NAME,name);v.put(MediaStore.MediaColumns.MIME_TYPE,mime);v.put(MediaStore.MediaColumns.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS);Uri uri=c.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,v);assertNotNull(uri);try(OutputStream out=c.getContentResolver().openOutputStream(uri)){out.write(bytes);}return uri;}
  private void waitPicker()throws Exception{long deadline=SystemClock.uptimeMillis()+12000;while(SystemClock.uptimeMillis()<deadline){if(String.valueOf(device.getCurrentPackageName()).contains("documentsui"))return;Thread.sleep(200);}evidence("picker-not-ready");fail("Document picker did not become visible: "+device.getCurrentPackageName()+" "+systemLabels());}
  private String readDocument(Context context,Uri uri)throws Exception{try(InputStream in=context.getContentResolver().openInputStream(uri);ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[4096];int n;while((n=in.read(b))!=-1)out.write(b,0,n);return out.toString("UTF-8");}}
+ private void selectDownload(String name)throws Exception{
+  UiObject2 file=device.wait(Until.findObject(By.text(name)),4000);
+  if(file==null){UiObject2 roots=device.wait(Until.findObject(By.desc("Show roots")),5000);assertNotNull("File picker roots are accessible",roots);roots.click();UiObject2 downloads=device.wait(Until.findObject(By.text("Downloads")),5000);assertNotNull("Downloads is available",downloads);downloads.click();file=device.wait(Until.findObject(By.text(name)),8000);}
+  if(file==null)evidence("download-not-found");assertNotNull("Synthetic file is visible in Android picker: "+name,file);file.click();
+ }
  @Before public void emptyTestApp(){InstrumentationRegistry.getInstrumentation().getTargetContext().deleteDatabase("wallet.db");}
  @Test public void previousApkIsPreservedAndCaptured()throws Exception{
   device.executeShellCommand("am start -W -n com.zagor.ekstre.preview/com.zagor.ekstre.MainActivity");
@@ -65,7 +71,7 @@ public class WalletJourneyTest {
    click(a,"[data-action=subscription]");value(a,"name","Sentetik abonelik");value(a,"amount","50");value(a,"next","2026-10-15");submit(a);click(a,"[data-pay]");value(a,"paidOn","2026-10-20");submit(a);assertEquals("\"2026-10-20\"",js(a,"JSON.parse(Android.load()).transactions.at(-1).date"));
    click(a,"nav [data-page=home]");click(a,"[data-page=reports]");waitJs(a,"document.body.innerText.includes('Kategori dağılımı')");
    // Verify a real Android file picker can open and cancel, then exercise actual ContentResolver PDF bytes.
-   click(a,"nav [data-page=import]");click(a,"[data-action=pdf]");device.waitForIdle();evidence("pdf-picker");assertTrue("PDF picker package="+device.getCurrentPackageName()+" "+systemLabels(),device.getCurrentPackageName().contains("documentsui"));device.pressBack();
+   click(a,"nav [data-page=import]");click(a,"[data-action=pdf]");waitPicker();evidence("pdf-picker");assertTrue("PDF picker package="+device.getCurrentPackageName()+" "+systemLabels(),device.getCurrentPackageName().contains("documentsui"));device.pressBack();
    Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();PDFBoxResourceLoader.init(context);byte[] pdfBytes;
    try(PDDocument pdf=new PDDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()){PDPage p=new PDPage();pdf.addPage(p);try(PDPageContentStream stream=new PDPageContentStream(pdf,p)){stream.beginText();stream.setFont(PDType1Font.HELVETICA,12);stream.setLeading(18);stream.newLineAtOffset(30,700);for(String line:new String[]{"QNB","Hesap Kesim Tarihi: 05/10/2026","04/10/2026 SENTETIK MARKET 123.00"}){stream.showText(line);stream.newLine();}stream.endText();}pdf.save(out);pdfBytes=out.toByteArray();}
    Uri uri=document("ekstre-synthetic.pdf","application/pdf",pdfBytes);
@@ -77,21 +83,36 @@ public class WalletJourneyTest {
    a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");assertEquals("10",js(a,"JSON.parse(Android.load()).transactions.length"));
   }
  }
- @Test public void keyboardBackFontScaleAndScreenshots()throws Exception{
+ private JSONObject layoutCase(ActivityScenario<MainActivity> a,String page,int width,File dir)throws Exception{
+  drawn(a);
+  JSONObject report=new JSONObject(js(a,"(()=>{const failures=[],money=[],viewport=document.documentElement.clientWidth;if(document.documentElement.scrollWidth>viewport+1)failures.push('page-overflow');for(const e of document.querySelectorAll('main .money')){const r=document.createRange();r.selectNodeContents(e);const t=r.getBoundingClientRect(),b=e.getBoundingClientRect();money.push({text:e.textContent,right:t.right,boxRight:b.right,font:getComputedStyle(e).fontSize});if(t.left<b.left-1||t.right>b.right+1||t.right>viewport+1)failures.push('money-clipped:'+e.textContent);}for(const row of document.querySelectorAll('main .row,main .chart-label,main .grid')){const children=[...row.children];for(let i=0;i<children.length;i++)for(let j=i+1;j<children.length;j++){const x=children[i].getBoundingClientRect(),y=children[j].getBoundingClientRect();if(x.left<y.right-1&&y.left<x.right-1&&x.top<y.bottom-1&&y.top<x.bottom-1)failures.push('sibling-overlap:'+row.className);}}return {viewport,innerWidth,failures,money};})()"));
+  report.put("page",page);report.put("width",width);
+  AtomicInteger bottom=new AtomicInteger(),safeBottom=new AtomicInteger();a.onActivity(activity->{WebView w=web(activity);int[] location=new int[2];w.getLocationOnScreen(location);bottom.set(location[1]+w.getHeight());safeBottom.set(device.getDisplayHeight()-w.getRootWindowInsets().getInsets(WindowInsets.Type.navigationBars()).bottom);});
+  report.put("webBottom",bottom.get());report.put("safeBottom",safeBottom.get());if(bottom.get()>safeBottom.get())report.getJSONArray("failures").put("system-bar-overlap");
+  assertTrue("Android screenshot captured",device.takeScreenshot(new File(dir,"android-"+page+"-"+width+"-150.png")));return report;
+ }
+ @Test public void keyboardBackAndModal()throws Exception{
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
-   waitJs(a,"!!document.querySelector('[data-action=demo]')");click(a,"[data-action=demo]");click(a,"[data-action=addTransaction]");
-   UiObject input=device.findObject(new UiSelector().className("android.widget.EditText").instance(0));boolean ready=input.waitForExists(5000);evidence("keyboard-input-"+ready);assertTrue("Text input visible; package="+device.getCurrentPackageName()+" "+systemLabels(),ready);input.click();device.waitForIdle();
-   AtomicBoolean keyboard=new AtomicBoolean(false);for(int i=0;i<20;i++){a.onActivity(activity->keyboard.set(web(activity).getRootWindowInsets().isVisible(WindowInsets.Type.ime())));if(keyboard.get())break;Thread.sleep(200);}assertTrue("Software keyboard opens",keyboard.get());js(a,"document.getElementById('submit').scrollIntoView({block:'end'})");evidence("keyboard-open");assertEquals("Submit remains reachable above the keyboard","true",js(a,"(()=>{const r=document.getElementById('submit').getBoundingClientRect();return r.top>=0&&r.bottom<=visualViewport.height+1;})()"));device.pressBack();device.pressBack();waitJs(a,"!document.querySelector('dialog[open]')");
-   js(a,"(()=>{const s=JSON.parse(Android.load());s.accounts[0].opening=999999999999;s.accounts[1].opening=999999999999;s.transactions[0].amount=999999999999;s.transactions[0].desc='Sentetik uzun mağaza açıklaması '.repeat(8);return Android.save(JSON.stringify(s));})()");
-   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();File dir=new File(context.getExternalFilesDir(null),"screens");dir.mkdirs();
-   try{device.executeShellCommand("settings put system font_scale 1.5");a.recreate();waitJs(a,"!!document.querySelector('nav')");AtomicInteger zoom=new AtomicInteger();a.onActivity(activity->zoom.set(web(activity).getSettings().getTextZoom()));assertEquals(150,zoom.get());
-     for(int width:new int[]{320,360,390,412}){device.executeShellCommand("wm size "+width+"x844");device.executeShellCommand("wm density 160");device.waitForIdle();a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");assertTrue("Home is drawn before capture",device.wait(Until.hasObject(By.textContains("Parana genel")),15000));Thread.sleep(300);assertEquals("true",js(a,"document.documentElement.scrollWidth<=innerWidth"));evidence("android-home-"+width+"-150");
-      String geometry=js(a,"JSON.stringify([...document.querySelectorAll('.hero .money,.metric .money')].map(e=>{const r=document.createRange();r.selectNodeContents(e);const text=r.getBoundingClientRect(),box=e.getBoundingClientRect();return {text:e.textContent,left:text.left,right:text.right,boxLeft:box.left,boxRight:box.right,font:getComputedStyle(e).fontSize,scroll:e.scrollWidth,client:e.clientWidth,viewport:innerWidth}}))");
-      try(FileOutputStream out=new FileOutputStream(new File(dir,"money-"+width+".json"))){out.write(geometry.getBytes(StandardCharsets.UTF_8));}
-      assertEquals("Money must fit its box on Android: "+geometry,"true",js(a,"[...document.querySelectorAll('.hero .money,.metric .money')].every(e=>{const r=document.createRange();r.selectNodeContents(e);const t=r.getBoundingClientRect(),b=e.getBoundingClientRect();return t.left>=b.left-1&&t.right<=b.right+1&&t.right<=innerWidth-12;})"));
-      AtomicInteger bottom=new AtomicInteger(),safeBottom=new AtomicInteger();a.onActivity(activity->{WebView w=web(activity);int[] location=new int[2];w.getLocationOnScreen(location);bottom.set(location[1]+w.getHeight());safeBottom.set(device.getDisplayHeight()-w.getRootWindowInsets().getInsets(WindowInsets.Type.navigationBars()).bottom);});assertTrue("WebView bottom "+bottom+" must clear Android navigation bar "+safeBottom,bottom.get()<=safeBottom.get());
+   waitJs(a,"!!document.querySelector('[data-action=demo]')");click(a,"[data-action=demo]");click(a,"[data-action=addTransaction]");drawn(a);
+   UiObject input=device.findObject(new UiSelector().className("android.widget.EditText").instance(0));boolean ready=input.waitForExists(10000);evidence("keyboard-input-"+ready);assertTrue("Text input visible; package="+device.getCurrentPackageName()+" "+systemLabels(),ready);input.click();device.waitForIdle();
+   AtomicBoolean keyboard=new AtomicBoolean(false);for(int i=0;i<20;i++){a.onActivity(activity->keyboard.set(web(activity).getRootWindowInsets().isVisible(WindowInsets.Type.ime())));if(keyboard.get())break;Thread.sleep(200);}assertTrue("Software keyboard opens",keyboard.get());js(a,"document.getElementById('submit').scrollIntoView({block:'end'})");drawn(a);evidence("keyboard-open");assertEquals("Submit remains reachable above the keyboard","true",js(a,"(()=>{const r=document.getElementById('submit').getBoundingClientRect();return r.top>=0&&r.bottom<=visualViewport.height+1;})()"));device.pressBack();device.pressBack();waitJs(a,"!document.querySelector('dialog[open]')");
+  }
+ }
+ @Test public void fontScaleSystemBarsAndScreenshots()throws Exception{
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();File dir=new File(context.getExternalFilesDir(null),"screens");dir.mkdirs();JSONArray reports=new JSONArray();
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=demo]')");click(a,"[data-action=demo]");
+   js(a,"(()=>{const s=JSON.parse(Android.load()),date=new Date().toISOString().slice(0,10),category='Sentetik uzun kategori adı '.repeat(4);s.accounts[0].opening=999999999999;s.accounts[1].opening=999999999999;s.transactions[0].amount=999999999999;s.transactions[0].desc='Sentetik uzun mağaza açıklaması '.repeat(8);s.transactions[0].category=category;s.categories.push(category);s.budgets[date.slice(0,7)+'|Toplam']=999999999999;s.subscriptions.push({id:'native-long-sub',name:'Uzun isimli aylık internet ve dijital içerik aboneliği',account:s.accounts[0].id,amount:999999999999,next:date,category:'Abonelik'});return Android.save(JSON.stringify(s));})()");
+   try{device.executeShellCommand("settings put system font_scale 1.5");
+    for(int width:new int[]{320,360,390,412}){
+     device.executeShellCommand("wm size "+width+"x844");device.executeShellCommand("wm density 160");a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");AtomicInteger zoom=new AtomicInteger();a.onActivity(activity->zoom.set(web(activity).getSettings().getTextZoom()));assertEquals(150,zoom.get());
+     reports.put(layoutCase(a,"home",width,dir));
+     if(width==320)for(String page:new String[]{"wallet","transactions","plan","reports","import","settings"}){
+      if(page.equals("settings"))click(a,"#settings");else if(page.equals("reports")){click(a,"nav [data-page=home]");click(a,"[data-page=reports]");}else click(a,"nav [data-page="+page+"]");reports.put(layoutCase(a,page,width,dir));
      }
-   }finally{device.executeShellCommand("settings put system font_scale 1.0");device.executeShellCommand("wm size reset");device.executeShellCommand("wm density reset");}
+    }
+   }finally{try(FileOutputStream out=new FileOutputStream(new File(dir,"native-layout-results.json"))){out.write(reports.toString().getBytes(StandardCharsets.UTF_8));}device.executeShellCommand("settings put system font_scale 1.0");device.executeShellCommand("wm size reset");device.executeShellCommand("wm density reset");}
+   JSONArray failures=new JSONArray();for(int i=0;i<reports.length();i++){JSONObject report=reports.getJSONObject(i);if(report.getJSONArray("failures").length()>0)failures.put(report);}assertEquals("All native money, overlap and system bar bounds: "+failures,0,failures.length());assertEquals(10,reports.length());
   }
  }
  @Test public void backupFileRoundTripRetainsRecovery()throws Exception{
@@ -104,8 +125,8 @@ public class WalletJourneyTest {
    a.onActivity(activity->activity.onActivityResult(103,Activity.RESULT_OK,new Intent().setData(output)));
    String written="";for(int i=0;i<50;i++){written=readDocument(context,output);if(written.equals(original))break;Thread.sleep(100);}assertEquals("Native export writes complete JSON bytes",original,written);device.pressBack();
    click(a,"nav [data-page=wallet]");account(a,"Yedek sonrası sentetik hesap","bank");assertEquals(originalAccounts+1,new JSONObject(ref.get().load()).getJSONArray("accounts").length());
-   click(a,"#settings");js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");UiObject2 restore=device.wait(Until.findObject(By.text("Yedek yükle")),10000);assertNotNull("Restore button is touchable",restore);restore.click();waitPicker();a.onActivity(activity->activity.onActivityResult(102,Activity.RESULT_OK,new Intent().setData(output)));device.pressBack();
-   UiObject2 confirm=device.wait(Until.findObject(By.text("Onayla")),10000);assertNotNull("Restore asks before replacing wallet",confirm);confirm.click();
+   click(a,"#settings");js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");UiObject2 restore=device.wait(Until.findObject(By.text("Yedek yükle")),10000);assertNotNull("Restore button is touchable",restore);restore.click();waitPicker();selectDownload("synthetic-wallet-backup.json");
+   UiObject2 confirm=device.wait(Until.findObject(By.text("Onayla")),10000);if(confirm==null)evidence("restore-no-confirm");assertNotNull("Restore asks before replacing wallet",confirm);confirm.click();
    waitJs(a,"JSON.parse(Android.load()).accounts.length==="+originalAccounts);assertEquals(3,new JSONObject(ref.get().load()).getJSONArray("transactions").length());assertEquals(originalAccounts+1,new JSONObject(ref.get().recovery()).getJSONArray("accounts").length());
    a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");assertEquals("3",js(a,"JSON.parse(Android.load()).transactions.length"));
   }finally{context.getContentResolver().delete(output,null,null);}

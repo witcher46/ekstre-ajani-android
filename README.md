@@ -44,7 +44,7 @@ JDK 17, Android SDK 35, Gradle 8.11.1:
 gradle -p android_app assembleDebug
 ```
 
-Çıktı: `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions aynı derlemeyi özel dalda yapıp `ekstre-ajani-android-revision-0.1.1` artefaktında APK ve SHA256SUMS.txt olarak saklar. Test APK'sı debug anahtarıyla imzalanır. Bu revizyon önceki 0.1.0 uygulamasının yanına kurulur. Gelecekteki revizyon derlemelerinde imza anahtarı farklı olabilir; kurulu uygulamayı kaldırmadan önce JSON yedek alın. Üretim imzalama anahtarı bu depoya konmaz.
+Çıktı: `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions aynı derlemeyi özel dalda yapıp `ekstre-ajani-android-revision-0.1.1` artefaktında `ekstre-ajani-revizyon-0.1.1.apk` ve SHA256SUMS.txt olarak saklar. Test APK'sı debug anahtarıyla imzalanır. Bu revizyon önceki 0.1.0 uygulamasının yanına kurulur; dosya adı da önceki APK'dan ayrıdır. Gelecekteki revizyon derlemelerinde imza anahtarı farklı olabilir; kurulu uygulamayı kaldırmadan önce JSON yedek alın. Üretim imzalama anahtarı bu depoya konmaz.
 
 ## Testler
 

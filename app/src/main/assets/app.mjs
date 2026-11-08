@@ -4,6 +4,7 @@ import {parseStatementCsv} from './csv.mjs';
 const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const plainMoney=n=>new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(n/100);
 const fmt=n=>`<span class="money">${plainMoney(n)}</span>`,key='ekstre-android-v1';
+const nativeTextScale=window.Android?.textZoom?Android.textZoom()/100:1;
 const kinds={expense:'Harcama',income:'Gelir',refund:'İade',cardPayment:'Ekstre kart ödemesi',payment:'Hesaptan kart ödemesi',transfer:'Transfer'};
 let state=C.empty(),page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,onSubmit=null,toastTimer,loadFailed=false;
 try{const raw=window.Android?Android.load():localStorage.getItem(key);if(raw)state=C.reviewLegacy(C.validate(JSON.parse(raw)));}catch(e){loadFailed=true;notice('Kayıtlar okunamadı. Mevcut verilerin üzerine yazılmayacak. '+e.message);}
@@ -85,7 +86,7 @@ function reviewPage(){const pending=state.transactions.filter(t=>t.matchStatus==
 
 function subscriptionPayment(rid,due){const r=state.subscriptions.find(r=>r.id===rid);if(!r)return;modal('Abonelik ödemesi',`<p>${esc(r.name)} · Planlanan vade ${esc(due)}</p><b>${fmt(r.amount)}</b>`+field('paidOn','Gerçek ödeme tarihi',C.today(),'date','required'),f=>commit(C.paySubscription(state,rid,{paidOn:f.get('paidOn'),expectedDue:due})),'Ödemeyi kaydet');}
 function fitLayout(){
- for(const e of document.querySelectorAll('.money')){const width=e.clientWidth;if(width&&e.scrollWidth>width+1){const size=parseFloat(getComputedStyle(e).fontSize);e.style.fontSize=Math.max(14,size*width/e.scrollWidth*.98)+'px';}}
+ for(const e of document.querySelectorAll('.money')){const width=e.clientWidth,range=document.createRange();range.selectNodeContents(e);const textWidth=Math.max(e.scrollWidth,range.getBoundingClientRect().width);if(width&&textWidth>width+1){const size=parseFloat(getComputedStyle(e).fontSize);e.style.fontSize=Math.max(14,size*width/textWidth*.98/nativeTextScale)+'px';}}
  const nav=$('nav');if(!nav.classList.contains('expanded')&&[...nav.children].some(b=>b.scrollWidth>b.clientWidth+1))nav.classList.add('expanded');
  document.documentElement.style.setProperty('--nav-height',nav.getBoundingClientRect().height+'px');
 }
