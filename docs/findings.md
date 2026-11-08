@@ -26,3 +26,5 @@ Kaynak: Android dalı da51ba5; gerçek Chrome/WebView varlıkları, sentetik kul
 2. Kart limiti/faiz/OCR/gelecek taksit ve çoklu profil bu revizyonun kapsamı dışında; bilinmeyen veriler uydurulmamalı.
 
 Finans örneklerini kapsayan 15 yeni testin ilk çalışmasında 13 test beklenen mevcut davranış kusurları nedeniyle başarısız, 2 test başarılı. Mevcut 14 çekirdek testi başlangıçta geçti; bu eski testlerin sorunları yakalamadığını gösteriyor.
+
+Ölçüm düzeltmesi: ilk büyük-yazı simülasyonu aynı başlığı ekran geçişleri boyunca tekrar büyütüyordu ve iç içe metin kutularındaki birkaç piksellik farkı satır kırılması sayıyordu. Test düzeltildi; aynı test eski varlıklarda yeniden çalıştırıldı: gerçek karşılaştırma **26/56 eski başarısız, 0/56 yeni başarısız**. Eski sonuçların üzeri örtülmedi; bu not başlangıç 38/56 sayısını düzeltir.

@@ -63,6 +63,7 @@ jobs:
           working-directory: android_app
           script: |
             adb install -r test-output/previous-apk/app-debug.apk
+            adb shell settings put secure show_ime_with_hard_keyboard 1
             gradle connectedDebugAndroidTest --no-daemon
             adb pull /sdcard/Android/data/com.zagor.ekstre.preview.revision/files/screens test-output/android-screens
       - uses: actions/upload-artifact@v4

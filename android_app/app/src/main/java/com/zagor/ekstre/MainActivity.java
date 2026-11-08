@@ -25,6 +25,7 @@ public class MainActivity extends Activity {
  private String exportText;
  private static final int PDF=101,FILE=102,EXPORT=103;
  private static final String HOME="https://appassets.androidplatform.net/assets/index.html";
+ private static final int BACKUP_LIMIT=32000000;
  @Override public void onCreate(Bundle b){
   super.onCreate(b);
   getWindow().setStatusBarColor(0xff11181e);getWindow().setNavigationBarColor(0xff11181e);
@@ -58,7 +59,7 @@ public class MainActivity extends Activity {
   return content.toString();
  }
  private synchronized boolean writeSnapshot(String content,boolean restore){
-  if(content==null||content.length()>8_000_000)return false;
+  if(content==null||content.getBytes(StandardCharsets.UTF_8).length>BACKUP_LIMIT)return false;
   try{JSONObject v=new JSONObject(content);if(!v.optString("format").equals("ekstre-android")||v.optInt("version")!=1)return false;
    for(String name:new String[]{"accounts","transactions","statements","subscriptions","categories"})v.getJSONArray(name);v.getJSONObject("budgets");
    db.beginTransaction();try{if(restore)db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 3,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 2,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});db.setTransactionSuccessful();}finally{db.endTransaction();}return true;
@@ -70,7 +71,7 @@ public class MainActivity extends Activity {
   @JavascriptInterface public boolean save(String content){return writeSnapshot(content,false);}
   @JavascriptInterface public boolean restore(String content){return writeSnapshot(content,true);}
   @JavascriptInterface public void pickPdf(){runOnUiThread(()->{try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/pdf"),PDF);}catch(Exception e){callback("nativeError","Dosya seçici açılamadı.");}});}
-  @JavascriptInterface public void exportBackup(String content){if(content==null||content.length()>8_000_000)return;runOnUiThread(()->{exportText=content;try{startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json").putExtra(Intent.EXTRA_TITLE,"ekstre-ajani-yedek.json"),EXPORT);}catch(Exception e){exportText=null;callback("nativeError","Yedek dosyası oluşturulamadı.");}});}
+  @JavascriptInterface public void exportBackup(String content){if(content==null||content.getBytes(StandardCharsets.UTF_8).length>BACKUP_LIMIT){callback("nativeError","Yedek 32 MB sınırını aşıyor; mevcut kayıtlar korunuyor.");return;}runOnUiThread(()->{exportText=content;try{startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json").putExtra(Intent.EXTRA_TITLE,"ekstre-ajani-yedek.json"),EXPORT);}catch(Exception e){exportText=null;callback("nativeError","Yedek dosyası oluşturulamadı.");}});}
  }
  @Override protected void onActivityResult(int req,int result,Intent data){
   super.onActivityResult(req,result,data);Uri uri=data==null?null:data.getData();
