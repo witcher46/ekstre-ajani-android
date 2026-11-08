@@ -12,9 +12,9 @@ const root=path.resolve(__dirname,'../app/src/main/assets'),out=path.resolve(__d
  await page.locator('[data-action=addTransaction]').click();await page.locator('[name=kind]').selectOption('payment');await page.locator('[name=account]').selectOption(bank);await page.locator('[name=target]').selectOption(card);await page.locator('[name=amount]').fill('100');await page.locator('[name=desc]').fill('Manuel kart ödemesi');await page.locator('[name=date]').fill('2026-10-04');await page.locator('#submit').click();
  assert.equal((await read()).transactions.length,4);
  const pdf='QNB\nHesap Kesim Tarihi: 05/10/2026\n04/10/2026 ODEME INTERNET +100.00';
- await page.evaluate(text=>window.onPdfText(text),pdf);await page.locator('#import-account').selectOption(card);await page.locator('[data-action=confirmImport]').click();
+ await page.evaluate(text=>window.onPdfText(text),pdf);await page.locator('#import-account').selectOption(card);await page.locator('#acknowledge-import').check();await page.locator('[data-action=confirmImport]').click();
  s=await read();assert.equal(s.transactions.length,5);assert.equal(s.transactions.filter(t=>t.matchStatus==='pending').length,1);
- await page.evaluate(text=>window.onPdfText(text),pdf);await page.locator('#import-account').selectOption(card);await page.locator('[data-action=confirmImport]').click();assert.equal((await read()).transactions.length,5);
+ await page.evaluate(text=>window.onPdfText(text),pdf);await page.locator('#import-account').selectOption(card);await page.locator('#acknowledge-import').check();await page.locator('[data-action=confirmImport]').click();assert.equal((await read()).transactions.length,5);
  await page.locator('nav [data-page=home]').click();await page.locator('[data-page=review]').click();await page.locator('[data-link]').click();s=await read();assert.equal(s.transactions.filter(t=>t.linkedTo).length,1);
  // CSV repeated in another order must not duplicate transactions.
  const header='bank,kart,period,date,desc,amount_cents,category,tur\n',csvrows=['QNB,Kart,2026-10,2026-10-01,Sentetik market,10000,Market,harcama','QNB,Kart,2026-10,2026-10-02,Sentetik iade,-2000,Market,indirim'];
