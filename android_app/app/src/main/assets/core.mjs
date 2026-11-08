@@ -18,10 +18,75 @@ export function validate(s){
  if(s.categories.some(c=>!text(c)||!c.trim())||new Set(s.categories).size!==s.categories.length)throw Error('Kategori listesi geçersiz.');
  return s;
 }
-export function addTransaction(s,t){const a=s.accounts.find(a=>a.id===t.account);if(!a)throw Error('Önce bir hesap ekle.');if(t.kind==='income'&&a.type==='card')throw Error('Gelir banka veya nakit hesabına eklenir.');if(['payment','transfer'].includes(t.kind)){const b=s.accounts.find(b=>b.id===t.target);if(!b||b.id===a.id||a.type==='card'||(t.kind==='payment'?b.type!=='card':b.type==='card'))throw Error('Transfer iki banka/nakit hesabı arasında; kart ödemesi banka/nakitten karta yapılır.');}const copy=structuredClone(s);copy.transactions.push({...t,id:t.id||id(),period:t.period||t.date.slice(0,7)});return validate(copy);}
-export function balance(s,a){let n=a.opening;for(const t of s.transactions){if(t.account===a.id){if(a.type==='card')n+=t.kind==='expense'?t.amount:['refund','cardPayment'].includes(t.kind)?-t.amount:0;else n+=['income','refund'].includes(t.kind)?t.amount:-t.amount;}if(t.target===a.id)n+=a.type==='card'?-t.amount:t.amount;}return n;}
-export function summary(s,period){const rows=s.transactions.filter(t=>t.period===period), cats={};let spent=0,refunds=0,income=0;for(const t of rows){if(t.kind==='income')income+=t.amount;if(!['expense','refund'].includes(t.kind))continue;const n=t.kind==='refund'?-t.amount:t.amount;cats[t.category]=(cats[t.category]||0)+n;if(n>=0)spent+=n;else refunds-=n;}return {spent,refunds,income,net:spent-refunds,categories:Object.entries(cats).sort((a,b)=>b[1]-a[1])};}
-export function nextMonth(date){const d=new Date(date+'T12:00:00Z'),day=d.getUTCDate();d.setUTCDate(1);d.setUTCMonth(d.getUTCMonth()+1);d.setUTCDate(Math.min(day,new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0)).getUTCDate()));return d.toISOString().slice(0,10);}
-export function paySubscription(s,rid){const r=s.subscriptions.find(r=>r.id===rid);if(!r)throw Error('Abonelik bulunamadı.');const next=addTransaction(s,{account:r.account,date:r.next,desc:r.name,amount:r.amount,kind:'expense',category:r.category||'Abonelik',note:'Abonelik ödemesi'});next.subscriptions.find(x=>x.id===rid).next=nextMonth(r.next);return next;}
-export function importStatement(s,p,account){const a=s.accounts.find(x=>x.id===account);if(!a||a.type!=='card')throw Error('Bir kredi kartı seç.');const copy=structuredClone(s), key=account+'|'+p.period;const previous=copy.transactions.filter(t=>t.statement===key);copy.transactions=copy.transactions.filter(t=>t.statement!==key);for(const [i,r] of p.rows.entries()){const old=previous.find(t=>t.importKey===r.importKey);copy.transactions.push({...r,id:old?.id||id(),account,statement:key,category:old?.category||r.category,note:old?.note||'',reviewed:old?.reviewed||false});}copy.statements=copy.statements.filter(x=>x.id!==key);copy.statements.push({id:key,account,bank:p.bank,period:p.period,cut:p.cut,due:p.due,debt:p.debt,imported:today()});return validate(copy);}
+export const sourceOf=t=>t.source||(t.statement?'pdf':t.csvKey?'csv':'manual');
+export const effective=t=>!t.linkedTo&&t.matchStatus!=='pending';
+const cardAccount=t=>t.kind==='payment'?t.target:t.account;
+const effectKind=t=>['payment','cardPayment'].includes(t.kind)?'cardPayment':t.kind;
+const normalized=s=>String(s??'').replace(/ı/g,'i').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+const signature=t=>JSON.stringify([cardAccount(t),effectKind(t),t.date,t.amount,normalized(t.sourceDesc??t.desc),t.installment||'']);
+function matchingRows(rows,t){return rows.filter(r=>r.id!==t.id&&effective(r)&&cardAccount(r)===cardAccount(t)&&effectKind(r)===effectKind(t)&&r.date===t.date&&r.amount===t.amount&&sourceOf(r)!==sourceOf(t));}
+function markCandidate(t,rows){if(t.matchStatus==='distinct'||t.linkedTo)return;const candidates=matchingRows(rows,t);if(candidates.length){t.matchStatus='pending';t.matchCandidates=candidates.map(r=>r.id);}}
+function validateKind(s,t){
+ const a=s.accounts.find(a=>a.id===t.account),b=s.accounts.find(a=>a.id===t.target);
+ if(!a)throw Error('Önce bir hesap ekle.');
+ if(t.kind==='income'&&a.type==='card')throw Error('Gelir banka veya nakit hesabına eklenir.');
+ if(t.kind==='cardPayment'&&a.type!=='card')throw Error('Ekstre ödemesi bir kredi kartına ait olmalı.');
+ if(['payment','transfer'].includes(t.kind)&&(!b||a.id===b.id||a.type==='card'||(t.kind==='payment'?b.type!=='card':b.type==='card')))throw Error('Transfer iki banka/nakit hesabı arasında; kart ödemesi banka/nakitten karta yapılır.');
+}
+export function addTransaction(s,t){
+ validateKind(s,t);const next=structuredClone(s),row={...t,id:t.id||id(),period:t.period||t.date.slice(0,7),source:sourceOf(t)};
+ if(row.kind==='payment'){
+  // Bank-side cash movement must remain active. Imported copies wait for review.
+  for(const imported of matchingRows(next.transactions,row).filter(r=>r.kind==='cardPayment')){imported.matchStatus='pending';imported.matchCandidates=[row.id];delete imported.linkedTo;}
+ }else if(!row.statement&&!row.csvKey&&!row.matchStatus)markCandidate(row,next.transactions);
+ next.transactions.push(row);return validate(next);
+}
+function ledgerEffect(t,a){let n=0;if(t.account===a.id)n=a.type==='card'?(t.kind==='expense'?t.amount:['refund','cardPayment'].includes(t.kind)?-t.amount:0):(['income','refund'].includes(t.kind)?t.amount:-t.amount);if(t.target===a.id)n+=a.type==='card'?-t.amount:t.amount;return n;}
+export function cardStatus(s,account){
+ const a=s.accounts.find(a=>a.id===(typeof account==='string'?account:account.id));if(!a||a.type!=='card')throw Error('Kredi kartı bulunamadı.');
+ const latest=s.statements.filter(st=>st.account===a.id).sort((x,y)=>y.cut.localeCompare(x.cut))[0];
+ const rows=s.transactions.filter(effective),anchored=latest&&latest.debt!==null;
+ let current=anchored?latest.debt:a.opening;
+ for(const t of rows)if(!anchored||t.date>latest.cut)current+=ledgerEffect(t,a);
+ const paidAfterCut=anchored?rows.filter(t=>t.date>latest.cut&&cardAccount(t)===a.id&&effectKind(t)==='cardPayment').reduce((n,t)=>n+t.amount,0):0;
+ return {current,statementDebt:latest?.debt??null,statementRemaining:anchored?Math.max(0,latest.debt-paidAfterCut):null,paidAfterCut,latest:latest||null,pending:s.transactions.filter(t=>t.matchStatus==='pending'&&cardAccount(t)===a.id).length};
+}
+export function balance(s,a){return a.type==='card'?cardStatus(s,a).current:s.transactions.filter(effective).reduce((n,t)=>n+ledgerEffect(t,a),a.opening);}
+export function summary(s,period,mode='calendar'){
+ const rows=s.transactions.filter(t=>effective(t)&&(mode==='statement'?t.period:t.date.slice(0,7))===period),cats=new Map();let spent=0,refunds=0,income=0;
+ for(const t of rows){if(t.kind==='income')income+=t.amount;if(!['expense','refund'].includes(t.kind))continue;const n=t.kind==='refund'?-t.amount:t.amount;cats.set(t.category,(cats.get(t.category)||0)+n);if(n>=0)spent+=n;else refunds-=n;}
+ return {spent,refunds,income,net:spent-refunds,categories:[...cats].sort((a,b)=>b[1]-a[1])};
+}
+export function nextMonth(date,anchorDay=Number(date.slice(8,10))){const d=new Date(date+'T12:00:00Z');d.setUTCDate(1);d.setUTCMonth(d.getUTCMonth()+1);d.setUTCDate(Math.min(anchorDay,new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0)).getUTCDate()));return d.toISOString().slice(0,10);}
+export function paySubscription(s,rid,options={}){
+ const r=s.subscriptions.find(r=>r.id===rid);if(!r)throw Error('Abonelik bulunamadı.');const due=options.expectedDue||r.next,paidOn=options.paidOn||today();
+ if(due!==r.next||s.transactions.some(t=>t.subscriptionId===rid&&t.subscriptionDue===due))throw Error('Bu vade zaten işlendi. Abonelik ekranını yenile.');
+ if(!validDate(paidOn))throw Error('Gerçek ödeme tarihini seç.');
+ const next=addTransaction(s,{account:r.account,date:paidOn,desc:r.name,amount:r.amount,kind:'expense',category:r.category||'Abonelik',note:'Abonelik ödemesi',subscriptionId:rid,subscriptionDue:due});
+ const sub=next.subscriptions.find(x=>x.id===rid);sub.billingDay=r.billingDay||Number(due.slice(8,10));sub.next=nextMonth(due,sub.billingDay);sub.lastPaidOn=paidOn;return next;
+}
+function repairReferences(s){const ids=new Set(s.transactions.map(t=>t.id));for(const t of s.transactions){if(t.linkedTo&&!ids.has(t.linkedTo)){delete t.linkedTo;t.matchStatus='distinct';}if(t.matchStatus==='pending'){t.matchCandidates=(t.matchCandidates||[]).filter(x=>ids.has(x)&&x!==t.id);if(!t.matchCandidates.length){delete t.matchStatus;delete t.matchCandidates;}}}return s;}
+export function resolveCandidate(s,tid,decision,targetId){
+ const next=structuredClone(s),row=next.transactions.find(t=>t.id===tid);if(!row||row.matchStatus!=='pending')throw Error('İncelenecek aday bulunamadı.');
+ if(decision==='link'){const target=next.transactions.find(t=>t.id===targetId);if(!target||!effective(target)||!row.matchCandidates?.includes(targetId))throw Error('Geçerli eşleşme seç.');row.linkedTo=targetId;row.matchStatus='linked';}
+ else if(decision==='distinct'){row.matchStatus='distinct';delete row.linkedTo;}else throw Error('Aynı veya ayrı işlem kararını seç.');delete row.matchCandidates;return validate(next);
+}
+export function removeTransaction(s,tid){const next=structuredClone(s);next.transactions=next.transactions.filter(t=>t.id!==tid);return validate(repairReferences(next));}
+export function reviewLegacy(s){const next=structuredClone(s);for(const t of next.transactions){if(t.matchStatus||t.linkedTo)continue;if(sourceOf(t)==='pdf'||sourceOf(t)==='csv'){const matches=matchingRows(next.transactions,t);if(matches.length&&(t.kind==='cardPayment'||matches.some(r=>sourceOf(r)==='manual')||sourceOf(t)==='csv'))markCandidate(t,next.transactions);}}return repairReferences(next);}
+export function importStatement(s,p,account){
+ const a=s.accounts.find(x=>x.id===account);if(!a||a.type!=='card')throw Error('Bir kredi kartı seç.');const next=structuredClone(s),key=account+'|'+p.period;
+ const previous=next.transactions.filter(t=>t.statement===key);next.transactions=next.transactions.filter(t=>t.statement!==key);
+ const candidates=[...next.transactions];
+ for(const r of p.rows){const old=previous.find(t=>t.importKey===r.importKey),row={...r,id:old?.id||id(),account,statement:key,source:'pdf',sourceDesc:r.desc,desc:old?.desc??r.desc,category:old?.category??r.category,note:old?.note??'',reviewed:old?.reviewed||false};
+  if(old){for(const k of ['matchStatus','matchCandidates','linkedTo'])if(old[k]!==undefined)row[k]=old[k];}else markCandidate(row,candidates);next.transactions.push(row);
+ }
+ next.statements=next.statements.filter(x=>x.id!==key);next.statements.push({id:key,account,bank:p.bank,period:p.period,cut:p.cut,due:p.due,debt:p.debt,imported:today()});return validate(repairReferences(next));
+}
+export function importCsv(s,rows,account){
+ const a=s.accounts.find(a=>a.id===account);if(!a||a.type!=='card')throw Error('CSV için bir kredi kartı seç.');const next=structuredClone(s),seen=new Set(),candidates=[...next.transactions];
+ for(const r of rows){const row={id:id(),account,date:r.date,period:r.period,desc:r.desc,sourceDesc:r.desc,amount:Math.abs(r.cents),kind:r.kind==='odeme'?'cardPayment':r.kind==='indirim'?'refund':'expense',category:r.category,note:'',source:'csv'};
+  const old=next.transactions.find(t=>sourceOf(t)==='csv'&&!seen.has(t.id)&&signature(t)===signature(row));if(old){seen.add(old.id);continue;}
+  row.csvKey=signature(row);markCandidate(row,candidates);next.transactions.push(row);seen.add(row.id);
+ }return validate(next);
+}
 export function demo(){const s=empty(),a={id:id(),name:'Banka hesabım',type:'bank',opening:2000000},c={id:id(),name:'Deneme kartı',type:'card',opening:0};s.accounts.push(a,c);for(const [desc,amount,category] of [['Market alışverişi',42500,'Market / Gıda'],['Kahve molası',12000,'Dışarıda yeme'],['Akaryakıt',90000,'Akaryakıt']])s.transactions.push({id:id(),account:c.id,date:today(),period:today().slice(0,7),desc,amount,category,kind:'expense',note:''});return s;}
