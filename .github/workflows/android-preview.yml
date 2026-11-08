@@ -65,7 +65,7 @@ jobs:
             adb install -r test-output/previous-apk/app-debug.apk
             adb shell settings put secure show_ime_with_hard_keyboard 1
             result=0
-            gradle connectedDebugAndroidTest --no-daemon || result=$?
+            gradle connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true --no-daemon || result=$?
             adb pull /sdcard/Android/data/com.zagor.ekstre.preview.revision/files/screens test-output/android-screens || result=1
             exit "$result"
       - name: Report native test diagnostics
