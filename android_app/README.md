@@ -1,6 +1,6 @@
 # Ekstre Ajanı Android — 0.1.1 revizyon adayı
 
-Bu revizyonun kaynak testleri yerelde doğrulandı; Android derleme ve genişletilmiş emülatör testleri GitHub gönderim onayını bekliyor. Yeni APK henüz üretilmedi. Önceki 0.1.0 APK korunur.
+Bu revizyon kullanıcı onayıyla `android/ux-finance-revision` düzeltme dalında hazırlanır. Güncel Android derleme/emülatör sonuçları ve indirilebilir APK bağlantısı `docs/REVIEW_REPORT.md` içinde tutulur. Önceki 0.1.0 APK korunur; main'e veya eski Android dalına doğrudan değişiklik yapılmaz.
 
 ## Revizyondaki davranış
 
@@ -18,7 +18,7 @@ Bu revizyonun kaynak testleri yerelde doğrulandı; Android derleme ve genişlet
 
 ## Doğrulama sınırı
 
-Yerel sonuçlar: 43 finans/uyumluluk testi, mevcut 9 UI kontrolü, 56 görsel matris durumu ve 13 genişletilmiş UI akışı geçti. Chrome testleri Android emülatörü yerine geçmez. Tarayıcı ortamı indirmeyi engellediği için yedek dosyasının gerçek içeriği doğrulandı; native dosya yazma/Android klavye ve geri tuşu kontrolleri CI aşamasında bekliyor. Gerçek banka belgeleri kullanılmadı.
+Yerel sonuçlar: 43 finans/uyumluluk testi, mevcut 9 UI kontrolü, 56 görsel matris durumu ve 13 genişletilmiş UI akışı geçti. Chrome testleri Android emülatörü yerine geçmez. Yerel ortam tarayıcı indirmesini engellediği için Blob içeriği doğrulandı; GitHub CI'daki Chrome testinde gerçek dosya indirmesi de geçti. Android dosya seçici, klavye, geri tuşu, SQLite ve PDF kontrollerinin kapsamı ve sonuçları güncel inceleme raporundadır. Gerçek banka belgeleri kullanılmadı.
 
 Bilgisayar veya sunucu gerektirmeyen ayrı Android uygulaması. Eski masaüstü ve mobil Python sürümlerini değiştirmez. Android 8+ ve güncel Android System WebView gerekir.
 
@@ -44,7 +44,7 @@ JDK 17, Android SDK 35, Gradle 8.11.1:
 gradle -p android_app assembleDebug
 ```
 
-Çıktı: `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions aynı derlemeyi özel dalda yapıp `ekstre-ajani-android-deneme` artefaktı olarak saklar. Test APK'sı debug anahtarıyla imzalanır. Farklı derleme makinelerinin debug anahtarları farklı olabilir; yeni APK güncelleme olarak kurulmazsa kaldırmadan önce JSON yedek alın. Üretim imzalama anahtarı bu depoya konmaz.
+Çıktı: `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions aynı derlemeyi özel dalda yapıp `ekstre-ajani-android-revision-0.1.1` artefaktında APK ve SHA256SUMS.txt olarak saklar. Test APK'sı debug anahtarıyla imzalanır. Bu revizyon önceki 0.1.0 uygulamasının yanına kurulur. Gelecekteki revizyon derlemelerinde imza anahtarı farklı olabilir; kurulu uygulamayı kaldırmadan önce JSON yedek alın. Üretim imzalama anahtarı bu depoya konmaz.
 
 ## Testler
 

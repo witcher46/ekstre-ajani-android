@@ -82,6 +82,15 @@ jobs:
           for name in glob.glob('android_app/test-output/android-screens/*.png'):
               p = pathlib.Path(name)
               print('ANDROID_SCREEN', p.name, base64.b64encode(p.read_bytes()).decode())
+          for name in glob.glob('android_app/test-output/android-screens/*.xml'):
+              p = pathlib.Path(name)
+              print('ANDROID_UI', p.name, p.read_text())
+          for name in glob.glob('android_app/test-output/android-screens/*.txt'):
+              p = pathlib.Path(name)
+              print('ANDROID_WINDOW', p.name)
+              for line in p.read_text().splitlines():
+                  if any(key in line for key in ['package=', 'mCurrentFocus', 'mFocusedApp', 'mAwake', 'Keyguard', 'keyguard', 'mShowingLockscreen', 'mScreenOn', 'mInputMethodTarget']):
+                      print(line)
           PY
       - uses: actions/upload-artifact@v4
         with:

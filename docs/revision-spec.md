@@ -1,6 +1,6 @@
 # Android UX ve finans revizyonu
 
-Kullanıcının 8 Kasım 2026 ayrıntılı talebi bağlayıcı kapsamdır. Var olan Java/WebView/SQLite mimarisi, koyu tema, paket kimliği ve JSON format/version=1 korunur. Yeni alanlar isteğe bağlıdır; eski yedekler kayıpsız açılır. Masaüstü, eski mobil ve gerçek veriler değişmez. GitHub gönderimi için ayrıca onay gerekir.
+Kullanıcının 8 Kasım 2026 ayrıntılı talebi bağlayıcı kapsamdır. Var olan Java/WebView/SQLite mimarisi, koyu tema ve JSON format/version=1 korunur. Yeni alanlar isteğe bağlıdır; eski yedekler kayıpsız açılır. Eski debug imza anahtarı mevcut olmadığından revizyon ayrı paket kimliğiyle yan yana kurulur; eski uygulamanın kimliği ve kayıtları korunur. Masaüstü, eski mobil ve gerçek veriler değişmez. GitHub gönderimi için ayrıca onay gerekir; kullanıcı 19 dosyanın yeni dala aktarılmasını ve CI derlemesini onayladı.
 
 ## Beklenen finans davranışı
 
@@ -22,4 +22,4 @@ Yalnız CSS yaması finans hatalarını çözmez. Geniş mimari yeniden yazımı
 
 ## Ortam sınırı
 
-Yerel SDK/emülatör yok, ağdan indirme kısıtlı. Eski APK'nın Android 15 test kaydı mevcut ama yeni talebin akışlarını kanıtlamaz. Yeni Android testleri GitHub'a gönderilene kadar çalıştırılmış sayılmaz. Kullanıcının gönderim onayı beklenir.
+Yerel SDK/emülatör yok, ağdan indirme kısıtlı. Android derleme ve emülatör doğrulamaları onaylanan GitHub Actions çalışmasında yürütülür. Eski APK'nın ilk testleri yeni talebin akışlarını kanıtlamaz; revizyon için ayrı genişletilmiş test sonuçları gerekir. Güncel kanıtlar REVIEW_REPORT.md içinde tutulur.
