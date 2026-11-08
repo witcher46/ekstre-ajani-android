@@ -26,6 +26,11 @@ import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public class WalletJourneyTest {
  private final UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
+ private void evidence(String name)throws Exception{
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();File dir=new File(context.getExternalFilesDir(null),"screens");dir.mkdirs();
+  device.takeScreenshot(new File(dir,name+".png"));device.dumpWindowHierarchy(new File(dir,name+".xml"));
+  try(FileOutputStream out=new FileOutputStream(new File(dir,name+".txt"))){String info="package="+device.getCurrentPackageName()+" screenOn="+device.isScreenOn()+"\n"+device.executeShellCommand("dumpsys window");out.write(info.getBytes(StandardCharsets.UTF_8));}
+ }
  private WebView web(MainActivity a){return (WebView)((ViewGroup)a.findViewById(android.R.id.content)).getChildAt(0);}
  private String js(ActivityScenario<MainActivity> a,String code)throws Exception{CountDownLatch done=new CountDownLatch(1);AtomicReference<String> value=new AtomicReference<>();a.onActivity(activity->web(activity).evaluateJavascript(code,r->{value.set(r);done.countDown();}));assertTrue(done.await(10,TimeUnit.SECONDS));return value.get();}
  private void waitJs(ActivityScenario<MainActivity> a,String condition)throws Exception{String last="";for(int i=0;i<60;i++){last=js(a,condition);if("true".equals(last))return;Thread.sleep(200);}fail("WebView condition failed: "+condition+" returned "+last);}
@@ -42,7 +47,7 @@ public class WalletJourneyTest {
  @Before public void emptyTestApp(){InstrumentationRegistry.getInstrumentation().getTargetContext().deleteDatabase("wallet.db");}
  @Test public void previousApkIsPreservedAndCaptured()throws Exception{
   device.executeShellCommand("am start -W -n com.zagor.ekstre.preview/com.zagor.ekstre.MainActivity");
-  assertTrue(device.wait(Until.hasObject(By.textContains("Parana genel")),15000));
+   boolean ready=device.wait(Until.hasObject(By.textContains("Parana genel")),15000);evidence("previous-ready-"+ready);assertTrue("Previous APK text visible; package="+device.getCurrentPackageName(),ready);
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();File dir=new File(context.getExternalFilesDir(null),"screens");dir.mkdirs();
   device.takeScreenshot(new File(dir,"previous-apk-home.png"));
   assertTrue(device.executeShellCommand("pm list packages com.zagor.ekstre.preview").contains("com.zagor.ekstre.preview"));
@@ -56,7 +61,7 @@ public class WalletJourneyTest {
    click(a,"[data-action=subscription]");value(a,"name","Sentetik abonelik");value(a,"amount","50");value(a,"next","2026-10-15");submit(a);click(a,"[data-pay]");value(a,"paidOn","2026-10-20");submit(a);assertEquals("\"2026-10-20\"",js(a,"JSON.parse(Android.load()).transactions.at(-1).date"));
    click(a,"nav [data-page=home]");click(a,"[data-page=reports]");waitJs(a,"document.body.innerText.includes('Kategori dağılımı')");
    // Verify a real Android file picker can open and cancel, then exercise actual ContentResolver PDF bytes.
-   click(a,"nav [data-page=import]");click(a,"[data-action=pdf]");device.waitForIdle();assertTrue(device.getCurrentPackageName().contains("documentsui"));device.pressBack();
+   click(a,"nav [data-page=import]");click(a,"[data-action=pdf]");device.waitForIdle();evidence("pdf-picker");assertTrue("PDF picker package="+device.getCurrentPackageName(),device.getCurrentPackageName().contains("documentsui"));device.pressBack();
    Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();PDFBoxResourceLoader.init(context);byte[] pdfBytes;
    try(PDDocument pdf=new PDDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()){PDPage p=new PDPage();pdf.addPage(p);try(PDPageContentStream stream=new PDPageContentStream(pdf,p)){stream.beginText();stream.setFont(PDType1Font.HELVETICA,12);stream.setLeading(18);stream.newLineAtOffset(30,700);for(String line:new String[]{"QNB","Hesap Kesim Tarihi: 05/10/2026","04/10/2026 SENTETIK MARKET 123.00"}){stream.showText(line);stream.newLine();}stream.endText();}pdf.save(out);pdfBytes=out.toByteArray();}
    Uri uri=document("ekstre-synthetic.pdf","application/pdf",pdfBytes);
@@ -71,7 +76,7 @@ public class WalletJourneyTest {
  @Test public void keyboardBackFontScaleAndScreenshots()throws Exception{
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
    waitJs(a,"!!document.querySelector('[data-action=demo]')");click(a,"[data-action=demo]");click(a,"[data-action=addTransaction]");
-   UiObject input=device.findObject(new UiSelector().className("android.widget.EditText").instance(0));assertTrue(input.waitForExists(5000));input.click();device.waitForIdle();
+   UiObject input=device.findObject(new UiSelector().className("android.widget.EditText").instance(0));boolean ready=input.waitForExists(5000);evidence("keyboard-input-"+ready);assertTrue("Text input visible; package="+device.getCurrentPackageName(),ready);input.click();device.waitForIdle();
    AtomicBoolean keyboard=new AtomicBoolean(false);for(int i=0;i<20;i++){a.onActivity(activity->keyboard.set(web(activity).getRootWindowInsets().isVisible(WindowInsets.Type.ime())));if(keyboard.get())break;Thread.sleep(200);}assertTrue("Software keyboard opens",keyboard.get());device.pressBack();device.pressBack();waitJs(a,"!document.querySelector('dialog[open]')");
    js(a,"(()=>{const s=JSON.parse(Android.load());s.accounts[0].opening=999999999999;s.accounts[1].opening=999999999999;s.transactions[0].amount=999999999999;s.transactions[0].desc='Sentetik uzun mağaza açıklaması '.repeat(8);return Android.save(JSON.stringify(s));})()");
    Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();File dir=new File(context.getExternalFilesDir(null),"screens");dir.mkdirs();
