@@ -26,6 +26,7 @@ jobs:
           node android_app/tests/ui.cjs
           node android_app/tests/audit.cjs
           node android_app/tests/journey.cjs
+          node android_app/tests/wallet-v2-journey.cjs
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -42,14 +43,14 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose android_app/app/build/outputs/apk/debug/app-debug.apk
           cd android_app/app/build/outputs/apk/debug
-          cp app-debug.apk ekstre-ajani-revizyon-0.1.1.apk
-          sha256sum ekstre-ajani-revizyon-0.1.1.apk | tee SHA256SUMS.txt
+          cp app-debug.apk ekstre-ajani-cuzdan-0.2.0.apk
+          sha256sum ekstre-ajani-cuzdan-0.2.0.apk | tee SHA256SUMS.txt
       - name: Preserve verified APK before emulator tests
         uses: actions/upload-artifact@v4
         with:
-          name: ekstre-ajani-android-revision-0.1.1
+          name: ekstre-ajani-android-wallet-0.2.0
           path: |
-            android_app/app/build/outputs/apk/debug/ekstre-ajani-revizyon-0.1.1.apk
+            android_app/app/build/outputs/apk/debug/ekstre-ajani-cuzdan-0.2.0.apk
             android_app/app/build/outputs/apk/debug/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
@@ -61,8 +62,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: 42429142631
-          name: ekstre-ajani-android-deneme
+          run-id: 42485996720
+          name: ekstre-ajani-android-revision-0.1.1
           path: android_app/test-output/previous-apk
       - name: Test offline app and PDF engine on Android
         uses: reactivecircus/android-emulator-runner@v2
@@ -73,11 +74,11 @@ jobs:
           emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim
           working-directory: android_app
           script: |
-            adb install -r test-output/previous-apk/app-debug.apk
+            adb install -r test-output/previous-apk/ekstre-ajani-revizyon-0.1.1.apk
             adb shell settings put secure show_ime_with_hard_keyboard 1
             result=0
             gradle connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true --no-daemon || result=$?
-            adb pull /sdcard/Android/data/com.zagor.ekstre.preview.revision/files/screens test-output/android-screens || result=1
+            adb pull /sdcard/Android/data/com.zagor.ekstre.preview.wallet/files/screens test-output/android-screens || result=1
             exit "$result"
       - name: Report native test diagnostics
         if: always()
@@ -92,6 +93,8 @@ jobs:
                       print('ANDROID_TEST_FAILURE', case.attrib, failure.attrib, failure.text)
           for name in glob.glob('android_app/test-output/android-screens/*.png'):
               p = pathlib.Path(name)
+              if p.name not in {'previous-apk-home.png', 'android-home-390-150.png', 'android-cardDetail-320-150.png', 'keyboard-open.png'}:
+                  continue  # All screenshots remain in the reports artifact; keep logs bounded.
               data = base64.b64encode(p.read_bytes()).decode()
               parts = [data[i:i+4096] for i in range(0, len(data), 4096)]
               for index, part in enumerate(parts):
@@ -112,7 +115,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-revision-reports
+          name: android-wallet-v2-reports
           path: |
             android_app/app/build/reports/
             android_app/test-output/**/*.png
