@@ -56,11 +56,12 @@ public class WalletJourneyTest {
  }
  @Before public void emptyTestApp(){InstrumentationRegistry.getInstrumentation().getTargetContext().deleteDatabase("wallet.db");}
  @Test public void previousApkIsPreservedAndCaptured()throws Exception{
-  device.executeShellCommand("am start -W -n com.zagor.ekstre.preview/com.zagor.ekstre.MainActivity");
+  device.executeShellCommand("am start -W -n com.zagor.ekstre.preview.revision/com.zagor.ekstre.MainActivity");
    boolean ready=device.wait(Until.hasObject(By.textContains("Parana genel")),15000);evidence("previous-ready-"+ready);assertTrue("Previous APK text visible; package="+device.getCurrentPackageName()+" "+systemLabels(),ready);
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();File dir=new File(context.getExternalFilesDir(null),"screens");dir.mkdirs();
   device.takeScreenshot(new File(dir,"previous-apk-home.png"));
-  assertTrue(device.executeShellCommand("pm list packages com.zagor.ekstre.preview").contains("com.zagor.ekstre.preview"));
+  assertEquals("Previous revision is in the foreground", "com.zagor.ekstre.preview.revision", device.getCurrentPackageName());
+  assertTrue(device.executeShellCommand("pm list packages com.zagor.ekstre.preview.revision").contains("package:com.zagor.ekstre.preview.revision\n"));
  }
  @Test public void allWalletFlowsUseRealWebViewAndNativeStorage()throws Exception{
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
@@ -75,7 +76,7 @@ public class WalletJourneyTest {
    Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();PDFBoxResourceLoader.init(context);byte[] pdfBytes;
    try(PDDocument pdf=new PDDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()){PDPage p=new PDPage();pdf.addPage(p);try(PDPageContentStream stream=new PDPageContentStream(pdf,p)){stream.beginText();stream.setFont(PDType1Font.HELVETICA,12);stream.setLeading(18);stream.newLineAtOffset(30,700);for(String line:new String[]{"QNB","Hesap Kesim Tarihi: 05/10/2026","04/10/2026 SENTETIK MARKET 123.00"}){stream.showText(line);stream.newLine();}stream.endText();}pdf.save(out);pdfBytes=out.toByteArray();}
    Uri uri=document("ekstre-synthetic.pdf","application/pdf",pdfBytes);
-   try{for(int i=0;i<2;i++){a.onActivity(activity->activity.onActivityResult(101,Activity.RESULT_OK,new Intent().setData(uri)));waitJs(a,"!!document.querySelector('#import-account')");String card=js(a,"JSON.parse(Android.load()).accounts[3].id");js(a,"document.getElementById('import-account').value="+card);click(a,"[data-action=confirmImport]");}assertEquals("9",js(a,"JSON.parse(Android.load()).transactions.length"));}finally{context.getContentResolver().delete(uri,null,null);}
+   try{for(int i=0;i<2;i++){a.onActivity(activity->activity.onActivityResult(101,Activity.RESULT_OK,new Intent().setData(uri)));waitJs(a,"!!document.querySelector('#import-account')");String card=js(a,"JSON.parse(Android.load()).accounts[3].id");js(a,"document.getElementById('import-account').value="+card);js(a,"document.getElementById('acknowledge-import').checked=true");click(a,"[data-action=confirmImport]");}assertEquals("9",js(a,"JSON.parse(Android.load()).transactions.length"));}finally{context.getContentResolver().delete(uri,null,null);}
    // CSV still passes through its actual file-input change handler, using a synthetic File.
    js(a,"(()=>{const input=document.getElementById('csv-file'),dt=new DataTransfer();dt.items.add(new File(['bank,kart,period,date,desc,amount_cents,category,tur\\nQNB,Kart,2026-10,2026-10-05,SENTETIK CSV,8000,Market,harcama'],'synthetic.csv',{type:'text/csv'}));input.files=dt.files;input.dispatchEvent(new Event('change'));})()");waitJs(a,"!!document.querySelector('[name=card-0]')");submit(a);assertEquals("10",js(a,"JSON.parse(Android.load()).transactions.length"));
    // Native restore is atomic and retains the previous JSON; UI restore is separately tested in Chrome.
@@ -85,7 +86,7 @@ public class WalletJourneyTest {
  }
  private JSONObject layoutCase(ActivityScenario<MainActivity> a,String page,int width,File dir)throws Exception{
   drawn(a);
-  JSONObject report=new JSONObject(js(a,"(()=>{const failures=[],money=[],viewport=document.documentElement.clientWidth;if(document.documentElement.scrollWidth>viewport+1)failures.push('page-overflow');for(const e of document.querySelectorAll('main .money')){const r=document.createRange();r.selectNodeContents(e);const t=r.getBoundingClientRect(),b=e.getBoundingClientRect();money.push({text:e.textContent,right:t.right,boxRight:b.right,font:getComputedStyle(e).fontSize});if(t.left<b.left-1||t.right>b.right+1||t.right>viewport+1)failures.push('money-clipped:'+e.textContent);}for(const row of document.querySelectorAll('main .row,main .chart-label,main .grid')){const children=[...row.children];for(let i=0;i<children.length;i++)for(let j=i+1;j<children.length;j++){const x=children[i].getBoundingClientRect(),y=children[j].getBoundingClientRect();if(x.left<y.right-1&&y.left<x.right-1&&x.top<y.bottom-1&&y.top<x.bottom-1)failures.push('sibling-overlap:'+row.className);}}return {viewport,innerWidth,failures,money};})()"));
+  JSONObject report=new JSONObject(js(a,"(()=>{const failures=[],money=[],viewport=document.documentElement.clientWidth;if(document.documentElement.scrollWidth>viewport+1)failures.push('page-overflow');for(const e of document.querySelectorAll('main .money,dialog .money')){const r=document.createRange();r.selectNodeContents(e);const t=r.getBoundingClientRect(),b=e.getBoundingClientRect();money.push({text:e.textContent,right:t.right,boxRight:b.right,font:getComputedStyle(e).fontSize});if(t.left<b.left-1||t.right>b.right+1||t.right>viewport+1)failures.push('money-clipped:'+e.textContent);}for(const row of document.querySelectorAll('main .row,main .chart-label,main .grid,main .summary-grid,main .comparison-values,main .quick-actions,main .compact-totals>div,main .card-details>div')){const children=[...row.children];for(let i=0;i<children.length;i++)for(let j=i+1;j<children.length;j++){const x=children[i].getBoundingClientRect(),y=children[j].getBoundingClientRect();if(x.left<y.right-1&&y.left<x.right-1&&x.top<y.bottom-1&&y.top<x.bottom-1)failures.push('sibling-overlap:'+row.className);}}return {viewport,innerWidth,failures,money};})()"));
   report.put("page",page);report.put("width",width);
   AtomicInteger bottom=new AtomicInteger(),safeBottom=new AtomicInteger();a.onActivity(activity->{WebView w=web(activity);int[] location=new int[2];w.getLocationOnScreen(location);bottom.set(location[1]+w.getHeight());safeBottom.set(device.getDisplayHeight()-w.getRootWindowInsets().getInsets(WindowInsets.Type.navigationBars()).bottom);});
   report.put("webBottom",bottom.get());report.put("safeBottom",safeBottom.get());if(bottom.get()>safeBottom.get())report.getJSONArray("failures").put("system-bar-overlap");
@@ -94,11 +95,17 @@ public class WalletJourneyTest {
  @Test public void keyboardBackAndModal()throws Exception{
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
    waitJs(a,"!!document.querySelector('[data-action=demo]')");click(a,"[data-action=demo]");click(a,"[data-action=addTransaction]");drawn(a);
-   UiObject input=device.findObject(new UiSelector().className("android.widget.EditText").instance(0));boolean ready=input.waitForExists(10000);evidence("keyboard-input-"+ready);assertTrue("Text input visible; package="+device.getCurrentPackageName()+" "+systemLabels(),ready);input.click();device.waitForIdle();
+   // WebView DOM inputs are not reliably exposed as android.widget.EditText.
+   // Tap the rendered input on the device; focus and real IME remain mandatory.
+   js(a,"document.querySelector('[name=desc]').scrollIntoView({block:'center'})");drawn(a);
+   JSONObject rect=new JSONObject(js(a,"(()=>{const r=document.querySelector('[name=desc]').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2,viewport:innerWidth};})()"));
+   AtomicInteger tapX=new AtomicInteger(),tapY=new AtomicInteger();a.onActivity(activity->{WebView w=web(activity);int[] offset=new int[2];w.getLocationOnScreen(offset);double scale=w.getWidth()/rect.optDouble("viewport",1);tapX.set(offset[0]+(int)Math.round(rect.optDouble("x")*scale));tapY.set(offset[1]+(int)Math.round(rect.optDouble("y")*scale));});
+   assertTrue("Rendered description input accepts a native touch",device.click(tapX.get(),tapY.get()));
+   waitJs(a,"document.activeElement===document.querySelector('[name=desc]')");
    AtomicBoolean keyboard=new AtomicBoolean(false);for(int i=0;i<20;i++){a.onActivity(activity->keyboard.set(web(activity).getRootWindowInsets().isVisible(WindowInsets.Type.ime())));if(keyboard.get())break;Thread.sleep(200);}assertTrue("Software keyboard opens",keyboard.get());js(a,"document.getElementById('submit').scrollIntoView({block:'end'})");drawn(a);evidence("keyboard-open");assertEquals("Submit remains reachable above the keyboard","true",js(a,"(()=>{const r=document.getElementById('submit').getBoundingClientRect();return r.top>=0&&r.bottom<=visualViewport.height+1;})()"));device.pressBack();device.pressBack();waitJs(a,"!document.querySelector('dialog[open]')");
   }
  }
- @Test public void fontScaleSystemBarsAndScreenshots()throws Exception{
+ @Test(timeout=180000) public void fontScaleSystemBarsAndScreenshots()throws Exception{
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();File dir=new File(context.getExternalFilesDir(null),"screens");dir.mkdirs();JSONArray reports=new JSONArray();
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
    waitJs(a,"!!document.querySelector('[data-action=demo]')");click(a,"[data-action=demo]");
@@ -107,12 +114,41 @@ public class WalletJourneyTest {
     for(int width:new int[]{320,360,390,412}){
      device.executeShellCommand("wm size "+width+"x844");device.executeShellCommand("wm density 160");a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");AtomicInteger zoom=new AtomicInteger();a.onActivity(activity->zoom.set(web(activity).getSettings().getTextZoom()));assertEquals(150,zoom.get());
      reports.put(layoutCase(a,"home",width,dir));
-     if(width==320)for(String page:new String[]{"wallet","transactions","plan","reports","import","settings"}){
-      if(page.equals("settings"))click(a,"#settings");else if(page.equals("reports")){click(a,"nav [data-page=home]");click(a,"[data-page=reports]");}else click(a,"nav [data-page="+page+"]");reports.put(layoutCase(a,page,width,dir));
+     for(String page:new String[]{"wallet","transactions","plan","reports","import","settings","bankDetail","cardDetail","incomePlans","importPreview","transactionModal","paymentModal"}){
+      js(a,"if(document.querySelector('dialog[open]'))window.handleBack()");
+      if(page.equals("settings"))click(a,"#settings");
+      else if(page.equals("reports")){click(a,"nav [data-page=home]");click(a,"[data-page=reports]");}
+      else if(page.equals("bankDetail")||page.equals("cardDetail")){click(a,"nav [data-page=wallet]");click(a,page.equals("cardDetail")?"[data-card-view]":"[data-account-view]");}
+      else if(page.equals("incomePlans")){click(a,"nav [data-page=home]");click(a,"[data-page=incomePlans]");}
+      else if(page.equals("importPreview"))js(a,"window.onPdfText('QNB\\nHesap Kesim Tarihi: 05/10/2026\\n04/10/2026 SENTETIK MAGAZA PEN 4.ndirim 9999999999.99')");
+      else if(page.equals("transactionModal")||page.equals("paymentModal")){click(a,"nav [data-page=home]");click(a,page.equals("paymentModal")?"[data-action=payCard]":"[data-action=addTransaction]");}
+      else click(a,"nav [data-page="+page+"]");
+      reports.put(layoutCase(a,page,width,dir));
      }
     }
    }finally{try(FileOutputStream out=new FileOutputStream(new File(dir,"native-layout-results.json"))){out.write(reports.toString().getBytes(StandardCharsets.UTF_8));}device.executeShellCommand("settings put system font_scale 1.0");device.executeShellCommand("wm size reset");device.executeShellCommand("wm density reset");}
-   JSONArray failures=new JSONArray();for(int i=0;i<reports.length();i++){JSONObject report=reports.getJSONObject(i);if(report.getJSONArray("failures").length()>0)failures.put(report);}assertEquals("All native money, overlap and system bar bounds: "+failures,0,failures.length());assertEquals(10,reports.length());
+   JSONArray failures=new JSONArray();for(int i=0;i<reports.length();i++){JSONObject report=reports.getJSONObject(i);if(report.getJSONArray("failures").length()>0)failures.put(report);}assertEquals("All native money, overlap and system bar bounds: "+failures,0,failures.length());assertEquals(52,reports.length());
+  }
+ }
+ @Test public void salaryCardPaymentAndIncomePlanStayConsistent()throws Exception{
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=addAccount]')");account(a,"Sentetik banka","bank");
+   click(a,"nav [data-page=wallet]");account(a,"Sentetik kart","card");
+   transaction(a,"income",0,-1,"30000","Sentetik maaş");transaction(a,"expense",1,-1,"2000","Sentetik kart harcaması");
+   click(a,"nav [data-page=wallet]");click(a,"[data-card-view]");click(a,"[data-pay-card]");
+   String bank=new JSONArray("["+js(a,"JSON.parse(Android.load()).accounts[0].id")+"]").getString(0);
+   value(a,"account",bank);value(a,"amount","2000");value(a,"date","2026-10-04");submit(a);
+   click(a,"nav [data-page=home]");js(a,"document.getElementById('period').value='2026-10';document.getElementById('period').dispatchEvent(new Event('change'))");
+   assertEquals("30000.00 income without opening balance","true",js(a,"document.querySelector('[data-stat=income]').textContent.includes('30.000,00')"));
+   assertEquals("Card repayment is not a second expense","true",js(a,"document.querySelector('[data-stat=netExpense]').textContent.includes('2.000,00')"));
+   // This synthetic card deliberately starts with 10000 debt; only the new purchase is repaid.
+   assertEquals("Card opening obligation is retained","true",js(a,"document.querySelector('[data-stat=cardDebt]').textContent.includes('10.000,00')"));
+   click(a,"nav [data-page=plan]");click(a,"[data-action=incomePlan]");value(a,"name","Sentetik gelir planı");value(a,"amount","30000");value(a,"next","2026-11-03");submit(a);
+   assertEquals("3",js(a,"JSON.parse(Android.load()).transactions.length"));
+   click(a,"[data-income-receive]");value(a,"receivedOn","2026-11-05");submit(a);
+   assertEquals("\"2026-11-05\"",js(a,"JSON.parse(Android.load()).transactions.at(-1).date"));
+   assertEquals("\"2026-11-03\"",js(a,"JSON.parse(Android.load()).transactions.at(-1).incomePlanDue"));
+   a.recreate();waitJs(a,"!!document.querySelector('[data-action=addIncome]')");assertEquals("4",js(a,"JSON.parse(Android.load()).transactions.length"));
   }
  }
  @Test public void backupFileRoundTripRetainsRecovery()throws Exception{
