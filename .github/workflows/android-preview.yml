@@ -81,7 +81,13 @@ jobs:
                       print('ANDROID_TEST_FAILURE', case.attrib, failure.attrib, failure.text)
           for name in glob.glob('android_app/test-output/android-screens/*.png'):
               p = pathlib.Path(name)
-              print('ANDROID_SCREEN', p.name, base64.b64encode(p.read_bytes()).decode())
+              data = base64.b64encode(p.read_bytes()).decode()
+              parts = [data[i:i+4096] for i in range(0, len(data), 4096)]
+              for index, part in enumerate(parts):
+                  print('ANDROID_SCREEN_PART', p.name, index, len(parts), part)
+          for name in glob.glob('android_app/test-output/android-screens/*.json'):
+              p = pathlib.Path(name)
+              print('ANDROID_GEOMETRY', p.name, p.read_text())
           for name in glob.glob('android_app/test-output/android-screens/*.xml'):
               p = pathlib.Path(name)
               print('ANDROID_UI', p.name, p.read_text())
