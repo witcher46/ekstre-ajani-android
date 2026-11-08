@@ -9,6 +9,42 @@ const manual=(extra={})=>tx({id:'manual',account:'bank',target:'card',date:'2026
 const imported=(extra={})=>tx({id:undefined,date:'2026-10-04',kind:'cardPayment',amount:100000,importKey:'payment',...extra});
 const wallet=()=>import('../app/src/main/assets/wallet.mjs');
 
+test('a newer unknown statement keeps the last known debt anchor for current debt only',()=>{
+ let s=C.importStatement(base(),pdf([tx({id:undefined,date:'2026-10-01',amount:10000,importKey:'oct'})]),'card');
+ s=C.importStatement(s,pdf([tx({id:undefined,date:'2026-11-01',period:'2026-11',amount:20000,importKey:'nov'})],{period:'2026-11',cut:'2026-11-05',due:null,debt:null}),'card');
+ const d=C.cardStatus(s,'card');assert.equal(d.current,120000);assert.equal(d.latest.period,'2026-11');
+ assert.equal(d.statementDebt,null);assert.equal(d.statementRemaining,null);
+});
+
+test('large legacy wallets keep home and card detail responsive without changing totals',async()=>{
+ const W=await wallet(),V=await import('../app/src/main/assets/views.mjs'),s=base();
+ s.transactions=Array.from({length:35000},(_,i)=>tx({id:'synthetic-history-'+i,amount:1}));C.validate(s);
+ const ctx={state:W.normalizeWallet(s),period:'2026-10',fmt:n=>String(n),esc:x=>String(x??''),transactionList:rows=>String(rows.length),periodControl:'',dateStatus:x=>x};
+ let start=performance.now();const html=V.homeView(ctx),homeMs=performance.now()-start;
+ assert.ok(html.includes('35000'));assert.ok(homeMs<3000,`Synthetic home render took ${Math.round(homeMs)}ms`);
+ start=performance.now();const detail=W.cardDetail(s,'card'),cardMs=performance.now()-start;
+ assert.equal(detail.debt,35000);assert.equal(detail.movements.length,35000);assert.ok(cardMs<3000,`Synthetic card detail took ${Math.round(cardMs)}ms`);
+});
+
+test('identical PDF reimport preserves an explicitly confirmed distant payment date through reopening',async()=>{
+ const W=await wallet(),p=pdf([imported()]);let s=C.importStatement(base(),p,'card');const pdfId=s.transactions[0].id;
+ s=W.attachPaymentSource(s,pdfId,'bank',{paidOn:'2026-10-12'});
+ s=C.resolveCandidate(s,pdfId,'unlink');s=C.importStatement(s,p,'card');
+ const pending=s.transactions.find(t=>t.matchStatus==='pending');assert.ok(pending);
+ s=C.resolveCandidate(s,pending.id,'link',pending.matchCandidates[0]);
+ assert.equal(C.cardStatus(s,'card').current,100000);assert.equal(C.balance(s,s.accounts[0]),1900000);
+ assert.equal(s.transactions.length,2);assert.equal(s.transactions.find(t=>t.kind==='payment').date,'2026-10-12');
+});
+
+test('identical PDF reimport keeps the review reason when a linked bank record was removed',async()=>{
+ const W=await wallet(),p=pdf([imported()]);let s=C.importStatement(base(),p,'card');const pdfId=s.transactions[0].id;
+ s=W.attachPaymentSource(s,pdfId,'bank',{paidOn:'2026-10-04'});const bankId=s.transactions.find(t=>t.kind==='payment').id;
+ s=C.removeTransaction(s,bankId);assert.equal(s.transactions[0].matchReason,'sourceChanged');
+ s=C.importStatement(s,p,'card');assert.equal(s.transactions[0].matchStatus,'pending');
+ assert.equal(s.transactions[0].matchReason,'sourceChanged');assert.deepEqual(s.transactions[0].matchCandidates,[]);
+ assert.equal(s.transactions[0].id,pdfId);assert.equal(C.balance(s,s.accounts[0]),2000000);
+});
+
 test('cross-cut date difference is reviewed without subtracting an anchored payment twice',()=>{
  let s=C.addTransaction(base(),manual());
  s=C.importStatement(s,pdf([imported()]),'card');

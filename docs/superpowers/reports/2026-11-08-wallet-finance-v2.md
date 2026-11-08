@@ -1,4 +1,6 @@
-# Ekstre Ajanı cüzdan revizyonu — yerel teslim raporu
+# Ekstre Ajanı cüzdan revizyonu — yerel teslim ve CI öncesi inceleme kaydı
+
+İlk bölümler ilk yerel teslimin tarihsel kaydıdır. Kullanıcı onayından sonraki aktarım ve bağımsız incelemenin güncel sonucu bu belgenin sonundadır. Android/Actions sonucu bu CI öncesi kayıtta başarılı gösterilmez.
 
 Tarih: 8 Kasım 2026. Dal: `feature/mobile-wallet-finance-v2` (yerel).
 Başlangıç: uzak `fa723276472f484edd6e41e9f343cadb5fb9ddcd`, yerel eşdeğeri `fc4215e`.
@@ -113,3 +115,23 @@ docs/superpowers/reports/2026-11-08-wallet-finance-v2.md
 ```
 
 Onay sonrası hedef yalnız `feature/mobile-wallet-finance-v2` dalıdır. `main` veya önceki Android dalı güncellenmez. GitHub Actions tek çalışma olarak başlatılır; hata çıkarsa aynı çalışma raporlanır, yeni çalıştırma kendiliğinden başlatılmaz.
+
+## Onaylı aktarım ve bağımsız inceleme — CI öncesi
+
+Kullanıcı 8 Kasım 2026 tarihinde bu 20 dosyanın aktarımını, bağımsız incelemeyi, gerekli en küçük düzeltmeleri ve ardından tek Android doğrulama/derlemesini onayladı. İlk uzak kaynak commit'i [a091486](https://github.com/witcher46/ekstre-ajani/commit/a09148639dc50de74b37b96ac86718ed20ab698d). Commit tam olarak onaylanan 20 dosyayı değiştirdi; dosyaların Git blob özetleri ve değişmeyen MainActivity/CSV kaynağı yerel kaynakla doğrulandı. PR açılmadığı için inceleme sırasında otomatik CI çalışması tetiklenmedi.
+
+Ayrı bağlamdaki bağımsız inceleme üç gerçek sorun saptadı ve düzeltme farkını tekrar kontrol etti:
+
+| Öncelik | Kanıtlanan sorun | En küçük düzeltme ve test |
+| --- | --- | --- |
+| P1, önceki sürümden gelen | Yeni belgenin borcu null olduğunda önceki bilinen dönem borcu hesaplamadan düşüyordu. Sentetik örnekte güncel borç 120000 kuruş yerine 30000 çıkıyordu. | Güncel tahmin son bilinen borçtan hesaplanır; en son belgenin dönem/kalan borcu bilinmiyorsa null kalır. Önce kırmızı, sonra yeşil regresyon. |
+| P2 | Açıkça onaylanan uzak banka tarihiyle bağlantıyı yeniden incele → aynı PDF'yi tekrar aktar → yeniden bağla akışı önceki onay kanıtını kaybediyordu. | Değişmeyen PDF satırının `previousLinkedTo` alanı korunur. Önce kırmızı, sonra yeşil regresyon. Silinmiş banka kaydı için ayrı koruma testi de var. |
+| P2 | Ana sayfa uyarısı her kartın bütün geçmişini kuruyordu; kart geçmişi her satır için tüm kayıtları tekrar tarıyordu. | Uyarı doğrudan ilgili ödeme satırlarını sayar. Kart/taksit görünümünde kaynak grupları bir kez hazırlanır. 35000 sentetik hareketli yerel testte önce 17,6 saniye, düzeltme sonrası kurulum + ana ekran + kart ayrıntısı yaklaşık 0,34 saniye. Android performansı henüz ölçülmedi. |
+
+Bağımsız incelemede gelir/ödeme ayrımı, iade/indirim, QNB/Yapı Kredi ayrıştırması, kaynak güvenliği ve v1 modelinde başka doğrulanmış engel bulunmadı. Gerçek eski 0.1.0 çekirdeğinin oluşturduğu sentetik v1 yedek de kimlikleri, ek alanları, maaş/harcama/ödeme tutarlarını ve değiştirilmemiş girdi JSON'unu koruyarak okundu.
+
+İlk gönderilen 76 test tekrar geçti; dört yeni regresyonla son finans paketi **80/80 geçti**. Bağımsız inceleyen de 80/80 sonucunu doğruladı. Son yerel tarayıcı kontrolleri **9 + 13 + 16** ve düzen matrisi **104/104** olarak yeniden çalıştırılır. Son rapor güncel koşu sonuçlarını ayrıca bildirir.
+
+Android kabul testi banka 20000 TL + maaş 30000 TL → kart harcaması/ödeme sonrası banka 48000 TL senaryosunu, gerçek Android dosya seçicisinden sentetik PDF seçimini ve iki satırın açık native Onayla onayıyla eşleştirilmesini kapsar. Mevcut gerçek dosya seçicisinden JSON geri yükleme testi korunur. Klavye gerçek cihaz dokunuşu, odak ve IME koşullarıyla kontrol edilir; native çalıştırma öncesinde geçmiş sayılmaz.
+
+Paketlenen APK'nın uygulama kimliği ve sürümü aapt ile doğrulanır; `APK-INFO.txt`, SHA256SUMS ve imzalanmış debug APK emülatörden önce saklanır. Paket `.preview.wallet` olduğu için eski iki uygulamanın üzerine kurulmaz. Tek PR açılışı tek Actions çalışmasını tetikleyecek; bundan sonra otomatik yeni commit/yeniden derleme başlatılmayacak. Hata olursa ilk çalışmanın kanıtı raporlanıp yeni tam derleme için kullanıcı onayı beklenecek.

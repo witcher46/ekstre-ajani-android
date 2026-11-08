@@ -43,6 +43,10 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose android_app/app/build/outputs/apk/debug/app-debug.apk
           cd android_app/app/build/outputs/apk/debug
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app-debug.apk | sed -n '1p' | tee APK-INFO.txt
+          grep -F "name='com.zagor.ekstre.preview.wallet'" APK-INFO.txt
+          grep -F "versionCode='3'" APK-INFO.txt
+          grep -F "versionName='0.2.0-deneme'" APK-INFO.txt
           cp app-debug.apk ekstre-ajani-cuzdan-0.2.0.apk
           sha256sum ekstre-ajani-cuzdan-0.2.0.apk | tee SHA256SUMS.txt
       - name: Preserve verified APK before emulator tests
@@ -52,6 +56,7 @@ jobs:
           path: |
             android_app/app/build/outputs/apk/debug/ekstre-ajani-cuzdan-0.2.0.apk
             android_app/app/build/outputs/apk/debug/SHA256SUMS.txt
+            android_app/app/build/outputs/apk/debug/APK-INFO.txt
           if-no-files-found: error
           retention-days: 14
       - name: Enable emulator acceleration

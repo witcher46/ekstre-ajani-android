@@ -60,13 +60,14 @@ export function cardEffectDate(s,t){const canonical=t.linkedTo?s.transactions.fi
 export function cardStatus(s,account){
  const a=s.accounts.find(a=>a.id===(typeof account==='string'?account:account.id));if(!a||a.type!=='card')throw Error('Kredi kartı bulunamadı.');
  const latest=s.statements.filter(st=>st.account===a.id).sort((x,y)=>y.cut.localeCompare(x.cut))[0];
+ const currentAnchor=s.statements.filter(st=>st.account===a.id&&st.debt!==null).sort((x,y)=>y.cut.localeCompare(x.cut))[0];
  const rows=s.transactions.filter(effective),anchored=latest&&latest.debt!==null;
  const pdfDates=new Map();for(const t of s.transactions)if(sourceOf(t)==='pdf'&&!pdfDates.has(t.linkedTo||t.id))pdfDates.set(t.linkedTo||t.id,t.date);
  const dateOf=t=>pdfDates.get(t.id)??t.date;
- let current=anchored?latest.debt:a.opening;
- for(const t of rows)if(!anchored||dateOf(t)>latest.cut)current+=ledgerEffect(t,a);
+ let current=currentAnchor?currentAnchor.debt:a.opening;
+ for(const t of rows)if(!currentAnchor||dateOf(t)>currentAnchor.cut)current+=ledgerEffect(t,a);
  const paidAfterCut=anchored?rows.filter(t=>dateOf(t)>latest.cut&&cardAccount(t)===a.id&&effectKind(t)==='cardPayment').reduce((n,t)=>n+t.amount,0):0;
- return {current,statementDebt:latest?.debt??null,statementRemaining:anchored?Math.max(0,latest.debt-paidAfterCut):null,paidAfterCut,latest:latest||null,pending:s.transactions.filter(t=>t.matchStatus==='pending'&&cardAccount(t)===a.id).length};
+ return {current,statementDebt:latest?.debt??null,statementRemaining:anchored?Math.max(0,latest.debt-paidAfterCut):null,paidAfterCut,latest:latest||null,currentAnchor:currentAnchor||null,pending:s.transactions.filter(t=>t.matchStatus==='pending'&&cardAccount(t)===a.id).length};
 }
 export function balance(s,a){return a.type==='card'?cardStatus(s,a).current:s.transactions.filter(t=>effective(t)||(t.matchStatus==='pending'&&t.kind==='payment'&&!t.linkedTo)).reduce((n,t)=>n+ledgerEffect(t,a),a.opening);}
 export function isCardTransaction(s,t){return s.accounts.find(a=>a.id===cardAccount(t))?.type==='card';}
@@ -119,7 +120,7 @@ export function importStatement(s,p,account){
  for(const old of previous){if(!p.rows.some(r=>r.importKey===old.importKey&&sameEconomic({...r,account},old))){invalidated.add(old.id);const canonical=old.linkedTo?next.transactions.find(t=>t.id===old.linkedTo):null;if(canonical){canonical.matchStatus='pending';canonical.matchReason='sourceChanged';canonical.matchCandidates=[];}for(const alias of next.transactions.filter(t=>t.linkedTo===old.id)){alias.previousLinkedTo=old.id;delete alias.linkedTo;alias.matchStatus='pending';alias.matchReason='sourceChanged';alias.matchCandidates=[];}}}
  const candidates=[...next.transactions];
  for(const r of p.rows){const old=previous.find(t=>t.importKey===r.importKey),row={...r,id:old?.id||id(),account,statement:key,source:'pdf',sourceDesc:r.sourceDesc??r.desc,desc:old&&old.desc!==old.sourceDesc?old.desc:r.desc,category:old?.category??r.category,note:old?.note??'',reviewed:old?.reviewed||false};
-  if(old&&!invalidated.has(old.id)){for(const k of ['matchStatus','matchCandidates','linkedTo'])if(old[k]!==undefined)row[k]=old[k];}else markCandidate(row,candidates);next.transactions.push(row);
+  if(old&&!invalidated.has(old.id)){for(const k of ['matchStatus','matchCandidates','linkedTo','previousLinkedTo'])if(old[k]!==undefined)row[k]=old[k];}else markCandidate(row,candidates);next.transactions.push(row);
  }
  next.statements=next.statements.filter(x=>x.id!==key);next.statements.push({id:key,account,bank:p.bank,period:p.period,cut:p.cut,due:p.due,debt:p.debt,imported:today()});return validate(repairReferences(preferPdfAcrossCut(next)));
 }

@@ -56,10 +56,16 @@ export function accountOverview(s,accountId,period){
  return {balance,cash,cardDebt,cardCredit,netWorth:cash-cardDebt+cardCredit,...periodFigures(s,period,a)};
 }
 
+function sourceGroups(s){
+ const groups=new Map();for(const t of s.transactions)if(t.linkedTo){if(!groups.has(t.linkedTo))groups.set(t.linkedTo,[]);groups.get(t.linkedTo).push(t);}
+ const aliases=id=>groups.get(id)||[];
+ return {aliases,dateOf:t=>C.sourceOf(t)==='pdf'?t.date:aliases(t.id).find(r=>C.sourceOf(r)==='pdf')?.date??t.date};
+}
+
 export function cardDetail(s,accountId){
- const status=C.cardStatus(s,accountId),movements=s.transactions.filter(t=>C.effective(t)&&cardId(t)===accountId).map(t=>({...t,cardDate:C.cardEffectDate(s,t),sources:s.transactions.filter(r=>r.linkedTo===t.id).map(r=>({...r}))})).sort((a,b)=>b.cardDate.localeCompare(a.cardDate));
+ const status=C.cardStatus(s,accountId),sources=sourceGroups(s),movements=s.transactions.filter(t=>C.effective(t)&&cardId(t)===accountId).map(t=>({...t,cardDate:sources.dateOf(t),sources:sources.aliases(t.id).map(r=>({...r}))})).sort((a,b)=>b.cardDate.localeCompare(a.cardDate));
  const afterCut=status.latest?movements.filter(t=>t.cardDate>status.latest.cut):[];
- return {...status,debt:Math.max(0,status.current),credit:Math.max(0,-status.current),postCutExpenses:total(afterCut.filter(t=>t.kind==='expense')),postCutRefunds:total(afterCut.filter(t=>t.kind==='refund')),unassignedPayments:movements.filter(t=>t.kind==='cardPayment'&&C.sourceOf(t)!=='manual'),movements,installments:installmentOverview(s,accountId)};
+ return {...status,debt:Math.max(0,status.current),credit:Math.max(0,-status.current),postCutExpenses:total(afterCut.filter(t=>t.kind==='expense')),postCutRefunds:total(afterCut.filter(t=>t.kind==='refund')),unassignedPayments:movements.filter(t=>t.kind==='cardPayment'&&C.sourceOf(t)!=='manual'),movements,installments:installmentOverview(s,accountId,sources)};
 }
 
 export function addIncomePlan(s,plan){
@@ -89,11 +95,11 @@ export function attachPaymentSource(s,transactionId,bankId,{paidOn}={}){
  return C.validate(next);
 }
 
-export function installmentOverview(s,accountId){
+export function installmentOverview(s,accountId,sources=sourceGroups(s)){
  const groups=new Map(),rows=s.transactions.filter(t=>C.effective(t)&&cardId(t)===accountId&&t.kind==='expense'&&t.installment);
  for(const t of rows){
   const [current,count]=t.installment.split('/').map(Number);if(current<1||count<current)continue;
-  const date=C.cardEffectDate(s,t),month=Number(date.slice(0,4))*12+Number(date.slice(5,7))-current;
+  const date=sources.dateOf(t),month=Number(date.slice(0,4))*12+Number(date.slice(5,7))-current;
   const name=String(t.sourceDesc??t.desc).replace(/\b\d{1,3}\/\d{1,3}\b/g,'').replace(/\s+/g,' ').trim().toLocaleUpperCase('tr');
   const key=JSON.stringify([name,t.amount,count,month]);if(!groups.has(key))groups.set(key,[]);groups.get(key).push({t,current,total:count});
  }

@@ -27,7 +27,7 @@ function reviewWarning(ctx,transactions=ctx.state.transactions) {
 }
 
 function sourceWarning(ctx) {
-  const missing = ctx.state.accounts.filter(a => a.type === 'card').flatMap(a => W.cardDetail(ctx.state,a.id).unassignedPayments || []);
+  const missing = ctx.state.transactions.filter(t => t.kind === 'cardPayment' && C.effective(t) && C.sourceOf(t) !== 'manual');
   return missing.length ? `<aside class="warning"><strong>${ctx.esc(missing.length)} ekstre ödemesinin kaynak hesabı bilinmiyor</strong><p>Kart ödemesi ekstrede görünüyor; hangi banka veya nakit hesabından çıktığı henüz kayıtlı değil. Kullanılabilir para tutarını doğrulamak için kaynağı bağla.</p><button data-page="wallet">Kartları ve ödeme kaynaklarını incele</button></aside>` : '';
 }
 
@@ -89,7 +89,7 @@ function cardView(ctx,account) {
   const statements = state.statements.filter(st => st.account === account.id).sort((a,b) => b.cut.localeCompare(a.cut));
   const unassigned = card.unassignedPayments || [];
   return `<div class="detail-heading"><div><h1>${esc(account.name)}</h1><p class="lead">Kredi kartı · belge ve kayıtlara göre</p></div><button class="primary" data-pay-card="${esc(account.id)}">Bu kartın borcunu öde</button></div>
-    <section class="hero panel"><div class="summary-grid">${metric(ctx,'cardDebt','Güncel borç tahmini',card.debt)}${metric(ctx,'cardCredit','Kart artı bakiyesi',card.credit)}</div><p class="notice">Son ekstre ve kesim sonrasındaki kayıtlar kullanılır. Bankanın canlı kart bakiyesi değildir; gelecek taksitler bu tahmine eklenmez.</p></section>
+    <section class="hero panel"><div class="summary-grid">${metric(ctx,'cardDebt','Güncel borç tahmini',card.debt)}${metric(ctx,'cardCredit','Kart artı bakiyesi',card.credit)}</div><p class="notice">Bilinen son ekstre borcu veya açılış borcu ile sonraki kayıtlar kullanılır. Son belgenin borcu okunamadıysa önceki bilinen tutar tahmine temel olur. Bankanın canlı bakiyesi değildir; gelecek taksitler eklenmez.</p></section>
     <section class="panel"><h2>Son ekstre ve ödeme durumu</h2><dl class="card-details">${detail(ctx,'Ekstre dönemi',card.latest?.period || 'Henüz ekstre yok')}${detail(ctx,'Hesap kesim tarihi',card.latest?.cut)}${detail(ctx,'Son ödeme tarihi',card.latest?.due)}${detail(ctx,'Belgedeki son ekstre borcu',card.statementDebt,true)}${detail(ctx,'Kesim sonrası kaydedilmiş ödemeler',card.paidAfterCut,true)}${detail(ctx,'Ödemelere göre kalan ekstre borcu',card.statementRemaining,true)}</dl><p class="notice">Kalan ekstre borcundan yalnızca kaydedilmiş ödemeler düşer. İadeler aşağıda ayrı gösterilir. Bankanın iadeyi son ödeme yükümlülüğüne saydığı varsayılmaz.</p></section>
     <section class="panel"><h2>Kesim sonrası hareketler</h2><div class="summary-grid">${metric(ctx,'postCutExpenses','Yeni harcamalar',card.postCutExpenses)}${metric(ctx,'postCutRefunds','İadeler',card.postCutRefunds)}</div><p class="notice">İade güncel borç tahminini etkileyebilir; ekstre ödeme yükümlülüğünü tek başına doğrulamaz.</p></section>
     ${reviewWarning(ctx,state.transactions.filter(t => t.account === account.id || t.target === account.id))}
