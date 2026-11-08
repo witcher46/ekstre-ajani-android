@@ -64,8 +64,25 @@ jobs:
           script: |
             adb install -r test-output/previous-apk/app-debug.apk
             adb shell settings put secure show_ime_with_hard_keyboard 1
-            gradle connectedDebugAndroidTest --no-daemon
-            adb pull /sdcard/Android/data/com.zagor.ekstre.preview.revision/files/screens test-output/android-screens
+            result=0
+            gradle connectedDebugAndroidTest --no-daemon || result=$?
+            adb pull /sdcard/Android/data/com.zagor.ekstre.preview.revision/files/screens test-output/android-screens || result=1
+            exit "$result"
+      - name: Report native test diagnostics
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import base64, glob, pathlib, xml.etree.ElementTree as ET
+          for name in glob.glob('android_app/app/build/outputs/androidTest-results/connected/**/*.xml', recursive=True):
+              root = ET.parse(name).getroot()
+              print('ANDROID_TEST_RESULT', name, root.attrib)
+              for case in root.iter('testcase'):
+                  for failure in list(case.findall('failure')) + list(case.findall('error')):
+                      print('ANDROID_TEST_FAILURE', case.attrib, failure.attrib, failure.text)
+          for name in glob.glob('android_app/test-output/android-screens/*.png'):
+              p = pathlib.Path(name)
+              print('ANDROID_SCREEN', p.name, base64.b64encode(p.read_bytes()).decode())
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: ekstre-ajani-android-revision-0.1.1
