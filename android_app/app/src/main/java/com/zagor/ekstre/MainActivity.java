@@ -33,7 +33,7 @@ public class MainActivity extends Activity {
   PDFBoxResourceLoader.init(getApplicationContext());
   web=new WebView(this);setContentView(web);
   web.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
-  WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(true);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setTextZoom(100);
+  WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(true);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setTextZoom(Math.round(getResources().getConfiguration().fontScale*100));
   WebViewAssetLoader assets=new WebViewAssetLoader.Builder().addPathHandler("/assets/",new WebViewAssetLoader.AssetsPathHandler(this)).build();
   web.setWebViewClient(new WebViewClient(){
    @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){
@@ -49,15 +49,26 @@ public class MainActivity extends Activity {
   });
   web.addJavascriptInterface(new Bridge(),"Android");web.loadUrl(HOME);
  }
- private void callback(String fn,String value){runOnUiThread(()->{if(!isFinishing())web.evaluateJavascript("window."+fn+"("+JSONObject.quote(value)+")",null);});}
+ private void callback(String fn,String value){runOnUiThread(()->{if(!isFinishing()&&!isDestroyed())web.evaluateJavascript("window."+fn+"("+JSONObject.quote(value)+")",null);});}
+ private String readSnapshot(int id){
+  int length;try(Cursor c=db.rawQuery("SELECT length(content) FROM snapshots WHERE id=?",new String[]{String.valueOf(id)})){if(!c.moveToFirst())return "";length=c.getInt(0);}
+  StringBuilder content=new StringBuilder(length);
+  // Small SQL chunks avoid the CursorWindow limit for valid large JSON backups.
+  for(int start=1;start<=length;start+=100000){try(Cursor c=db.rawQuery("SELECT substr(content,?,100000) FROM snapshots WHERE id=?",new String[]{String.valueOf(start),String.valueOf(id)})){if(c.moveToFirst())content.append(c.getString(0));}}
+  return content.toString();
+ }
+ private synchronized boolean writeSnapshot(String content,boolean restore){
+  if(content==null||content.length()>8_000_000)return false;
+  try{JSONObject v=new JSONObject(content);if(!v.optString("format").equals("ekstre-android")||v.optInt("version")!=1)return false;
+   for(String name:new String[]{"accounts","transactions","statements","subscriptions","categories"})v.getJSONArray(name);v.getJSONObject("budgets");
+   db.beginTransaction();try{if(restore)db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 3,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 2,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});db.setTransactionSuccessful();}finally{db.endTransaction();}return true;
+  }catch(Exception e){return false;}
+ }
  public class Bridge {
-  @JavascriptInterface public synchronized String load(){try(Cursor c=db.rawQuery("SELECT content FROM snapshots WHERE id=1",null)){return c.moveToFirst()?c.getString(0):"";}}
-  @JavascriptInterface public synchronized boolean save(String content){
-   if(content==null||content.length()>8_000_000)return false;
-   try {JSONObject v=new JSONObject(content);if(!v.optString("format").equals("ekstre-android")||v.optInt("version")!=1)return false;
-    db.beginTransaction();try{db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 2,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});db.setTransactionSuccessful();}finally{db.endTransaction();}return true;
-   }catch(Exception e){return false;}
-  }
+  @JavascriptInterface public String load(){synchronized(MainActivity.this){return readSnapshot(1);}}
+  @JavascriptInterface public String recovery(){synchronized(MainActivity.this){return readSnapshot(3);}}
+  @JavascriptInterface public boolean save(String content){return writeSnapshot(content,false);}
+  @JavascriptInterface public boolean restore(String content){return writeSnapshot(content,true);}
   @JavascriptInterface public void pickPdf(){runOnUiThread(()->{try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/pdf"),PDF);}catch(Exception e){callback("nativeError","Dosya seçici açılamadı.");}});}
   @JavascriptInterface public void exportBackup(String content){if(content==null||content.length()>8_000_000)return;runOnUiThread(()->{exportText=content;try{startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json").putExtra(Intent.EXTRA_TITLE,"ekstre-ajani-yedek.json"),EXPORT);}catch(Exception e){exportText=null;callback("nativeError","Yedek dosyası oluşturulamadı.");}});}
  }

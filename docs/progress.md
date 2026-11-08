@@ -9,3 +9,7 @@ Ruling: original android_app is an export without local Git history. Create an i
 Pre-flight: Task 3 consumes Task 2 summary/cardStatus/importCsv/resolveCandidate/paySubscription signatures; existing function names preserved and optional parameters added. Task 4 keeps version=1 and package ID, so old records remain readable.
 
 Task 1: in progress. Native baseline cannot be newly executed until remote diagnostic tests are approved for upload; no Android-only claim will be made from Chrome evidence.
+
+Task 1: complete — baseline UI journey created bank/cash/two cards and seven actual form-entered records; persisted reload verified. 56 layout scenarios, 38 failed; screenshots saved. 15 revision tests: 13 RED, 2 already passing. Findings in docs/findings.md.
+
+Task 2: initial RED→GREEN complete — existing 14 + new 15 = 29/29 passed. Source import candidates remain pending until explicit linking/distinct choice. Calendar summary defaults to transaction date; latest statement anchors card estimate; subscription actual date and billing day preserved. Remaining cross-component validation will be tested during UI and final review.

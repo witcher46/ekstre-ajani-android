@@ -16,6 +16,13 @@ export function validate(s){
  for(const [k,v] of Object.entries(s.budgets))if(!/^\d{4}-(0[1-9]|1[0-2])\|.{1,200}$/.test(k)||!cents(v)||v<0)throw Error('Bütçe kaydı geçersiz.');
  for(const r of s.subscriptions)if(!text(r.id)||!text(r.name)||!ids.has(r.account)||!validDate(r.next)||!cents(r.amount)||r.amount<=0)throw Error('Abonelik geçersiz.');
  if(s.categories.some(c=>!text(c)||!c.trim())||new Set(s.categories).size!==s.categories.length)throw Error('Kategori listesi geçersiz.');
+ for(const t of s.transactions){
+  validateKind(s,t);
+  if(t.linkedTo){const target=s.transactions.find(r=>r.id===t.linkedTo);if(!target||target.id===t.id||!effective(target))throw Error('Eşleşme bağlantısı geçersiz.');}
+  if(t.matchStatus&&!['pending','linked','distinct'].includes(t.matchStatus))throw Error('Eşleşme durumu geçersiz.');
+  if(t.matchStatus==='linked'&&!t.linkedTo)throw Error('Eşleşme hedefi eksik.');
+  if(t.matchStatus==='pending'&&(!Array.isArray(t.matchCandidates)||!t.matchCandidates.length||t.matchCandidates.some(x=>!txids.has(x)||x===t.id)))throw Error('İnceleme adayı geçersiz.');
+ }
  return s;
 }
 export const sourceOf=t=>t.source||(t.statement?'pdf':t.csvKey?'csv':'manual');
@@ -23,7 +30,8 @@ export const effective=t=>!t.linkedTo&&t.matchStatus!=='pending';
 const cardAccount=t=>t.kind==='payment'?t.target:t.account;
 const effectKind=t=>['payment','cardPayment'].includes(t.kind)?'cardPayment':t.kind;
 const normalized=s=>String(s??'').replace(/ı/g,'i').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
-const signature=t=>JSON.stringify([cardAccount(t),effectKind(t),t.date,t.amount,normalized(t.sourceDesc??t.desc),t.installment||'']);
+function originalDescription(t){if(t.sourceDesc!==undefined)return t.sourceDesc;if(t.csvKey){try{const key=JSON.parse(t.csvKey);if(key[1]&&typeof key[1]==='object'&&typeof key[1].desc==='string')return key[1].desc;}catch{}}return t.desc;}
+const signature=t=>JSON.stringify([cardAccount(t),effectKind(t),t.date,t.amount,normalized(originalDescription(t)),t.installment||'']);
 function matchingRows(rows,t){return rows.filter(r=>r.id!==t.id&&effective(r)&&cardAccount(r)===cardAccount(t)&&effectKind(r)===effectKind(t)&&r.date===t.date&&r.amount===t.amount&&sourceOf(r)!==sourceOf(t));}
 function markCandidate(t,rows){if(t.matchStatus==='distinct'||t.linkedTo)return;const candidates=matchingRows(rows,t);if(candidates.length){t.matchStatus='pending';t.matchCandidates=candidates.map(r=>r.id);}}
 function validateKind(s,t){
@@ -53,7 +61,7 @@ export function cardStatus(s,account){
 }
 export function balance(s,a){return a.type==='card'?cardStatus(s,a).current:s.transactions.filter(effective).reduce((n,t)=>n+ledgerEffect(t,a),a.opening);}
 export function summary(s,period,mode='calendar'){
- const rows=s.transactions.filter(t=>effective(t)&&(mode==='statement'?t.period:t.date.slice(0,7))===period),cats=new Map();let spent=0,refunds=0,income=0;
+ const rows=s.transactions.filter(t=>effective(t)&&(mode==='statement'?t.period:t.date.slice(0,7))===period&&(mode!=='statement'||s.accounts.find(a=>a.id===t.account)?.type==='card')),cats=new Map();let spent=0,refunds=0,income=0;
  for(const t of rows){if(t.kind==='income')income+=t.amount;if(!['expense','refund'].includes(t.kind))continue;const n=t.kind==='refund'?-t.amount:t.amount;cats.set(t.category,(cats.get(t.category)||0)+n);if(n>=0)spent+=n;else refunds-=n;}
  return {spent,refunds,income,net:spent-refunds,categories:[...cats].sort((a,b)=>b[1]-a[1])};
 }

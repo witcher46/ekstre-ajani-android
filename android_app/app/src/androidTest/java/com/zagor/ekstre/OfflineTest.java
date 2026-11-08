@@ -4,6 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.Test;
+import org.junit.Before;
 import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 import android.view.ViewGroup;
@@ -18,6 +19,7 @@ import java.io.ByteArrayOutputStream;
 
 @RunWith(AndroidJUnit4.class)
 public class OfflineTest {
+ @Before public void emptyTestApp(){InstrumentationRegistry.getInstrumentation().getTargetContext().deleteDatabase("wallet.db");}
  private String js(ActivityScenario<MainActivity> activity,String code)throws Exception{
   CountDownLatch done=new CountDownLatch(1);AtomicReference<String> result=new AtomicReference<>();
   activity.onActivity(a->{WebView web=(WebView)((ViewGroup)a.findViewById(android.R.id.content)).getChildAt(0);web.evaluateJavascript(code,v->{result.set(v);done.countDown();});});
@@ -42,5 +44,16 @@ public class OfflineTest {
    doc.save(out);bytes=out.toByteArray();
   }
   try(PDDocument doc=PDDocument.load(bytes)){assertTrue(new PDFTextStripper().getText(doc).contains("QNB Hesap Kesim Tarihi"));}
+ }
+ @Test public void recoveryAndLargeLegacySnapshotsRemainReadable()throws Exception{
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   AtomicReference<MainActivity.Bridge> ref=new AtomicReference<>();a.onActivity(activity->ref.set(activity.new Bridge()));
+   MainActivity.Bridge bridge=ref.get();
+   String old="{\"format\":\"ekstre-android\",\"version\":1,\"accounts\":[],\"transactions\":[],\"statements\":[],\"budgets\":{},\"subscriptions\":[],\"categories\":[],\"legacyPadding\":\""+"x".repeat(3000000)+"\"}";
+   assertTrue(bridge.save(old));assertEquals(old,bridge.load());
+   String restored=old.replace("legacyPadding","restoredPadding");
+   assertTrue(bridge.restore(restored));assertEquals(old,bridge.recovery());assertEquals(restored,bridge.load());
+   assertFalse(bridge.restore("{bad json"));assertEquals(old,bridge.recovery());assertEquals(restored,bridge.load());
+  }
  }
 }
