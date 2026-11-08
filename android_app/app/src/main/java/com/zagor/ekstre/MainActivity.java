@@ -23,6 +23,7 @@ public class MainActivity extends Activity {
  private final ExecutorService worker=Executors.newSingleThreadExecutor();
  private ValueCallback<Uri[]> chooser;
  private String exportText;
+ private int textZoom=100;
  private static final int PDF=101,FILE=102,EXPORT=103;
  private static final String HOME="https://appassets.androidplatform.net/assets/index.html";
  private static final int BACKUP_LIMIT=32000000;
@@ -32,9 +33,18 @@ public class MainActivity extends Activity {
   db=openOrCreateDatabase("wallet.db",MODE_PRIVATE,null);
   db.execSQL("CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY, content TEXT NOT NULL)");
   PDFBoxResourceLoader.init(getApplicationContext());
-  web=new WebView(this);setContentView(web);
-  web.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
-  WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(true);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setTextZoom(Math.round(getResources().getConfiguration().fontScale*100));
+  getWindow().getDecorView().setBackgroundColor(0xff11181e);
+  web=new WebView(this);web.setBackgroundColor(0xff11181e);setContentView(web);
+  web.setOnApplyWindowInsetsListener((v,insets)->{
+   int left=insets.getSystemWindowInsetLeft(),top=insets.getSystemWindowInsetTop(),right=insets.getSystemWindowInsetRight(),bottom=insets.getStableInsetBottom();
+   if(Build.VERSION.SDK_INT>=30){android.graphics.Insets safe=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());left=safe.left;top=safe.top;right=safe.right;bottom=safe.bottom;
+    if(Build.VERSION.SDK_INT>=35)bottom=Math.max(bottom,insets.getInsets(WindowInsets.Type.ime()).bottom);
+   }
+   ViewGroup.MarginLayoutParams p=(ViewGroup.MarginLayoutParams)v.getLayoutParams();
+   if(p.leftMargin!=left||p.topMargin!=top||p.rightMargin!=right||p.bottomMargin!=bottom){p.setMargins(left,top,right,bottom);v.setLayoutParams(p);}return insets;
+  });
+  textZoom=Math.round(getResources().getConfiguration().fontScale*100);
+  WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(true);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setTextZoom(textZoom);
   WebViewAssetLoader assets=new WebViewAssetLoader.Builder().addPathHandler("/assets/",new WebViewAssetLoader.AssetsPathHandler(this)).build();
   web.setWebViewClient(new WebViewClient(){
    @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){
@@ -66,6 +76,7 @@ public class MainActivity extends Activity {
   }catch(Exception e){return false;}
  }
  public class Bridge {
+  @JavascriptInterface public int textZoom(){return textZoom;}
   @JavascriptInterface public String load(){synchronized(MainActivity.this){return readSnapshot(1);}}
   @JavascriptInterface public String recovery(){synchronized(MainActivity.this){return readSnapshot(3);}}
   @JavascriptInterface public boolean save(String content){return writeSnapshot(content,false);}

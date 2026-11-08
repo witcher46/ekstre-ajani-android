@@ -42,7 +42,8 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose android_app/app/build/outputs/apk/debug/app-debug.apk
           cd android_app/app/build/outputs/apk/debug
-          sha256sum app-debug.apk > SHA256SUMS.txt
+          cp app-debug.apk ekstre-ajani-revizyon-0.1.1.apk
+          sha256sum ekstre-ajani-revizyon-0.1.1.apk | tee SHA256SUMS.txt
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -60,6 +61,7 @@ jobs:
           api-level: 35
           arch: x86_64
           profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim
           working-directory: android_app
           script: |
             adb install -r test-output/previous-apk/app-debug.apk
@@ -102,7 +104,7 @@ jobs:
         with:
           name: ekstre-ajani-android-revision-0.1.1
           path: |
-            android_app/app/build/outputs/apk/debug/app-debug.apk
+            android_app/app/build/outputs/apk/debug/ekstre-ajani-revizyon-0.1.1.apk
             android_app/app/build/outputs/apk/debug/SHA256SUMS.txt
           retention-days: 14
       - uses: actions/upload-artifact@v4
