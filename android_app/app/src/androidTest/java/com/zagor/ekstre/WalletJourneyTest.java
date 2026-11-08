@@ -126,7 +126,7 @@ public class WalletJourneyTest {
    String written="";for(int i=0;i<50;i++){written=readDocument(context,output);if(written.equals(original))break;Thread.sleep(100);}assertEquals("Native export writes complete JSON bytes",original,written);device.pressBack();
    click(a,"nav [data-page=wallet]");account(a,"Yedek sonrası sentetik hesap","bank");assertEquals(originalAccounts+1,new JSONObject(ref.get().load()).getJSONArray("accounts").length());
    click(a,"#settings");js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");UiObject2 restore=device.wait(Until.findObject(By.text("Yedek yükle")),10000);assertNotNull("Restore button is touchable",restore);restore.click();waitPicker();selectDownload("synthetic-wallet-backup.json");
-   UiObject2 confirm=device.wait(Until.findObject(By.text("Onayla")),10000);if(confirm==null)evidence("restore-no-confirm");assertNotNull("Restore asks before replacing wallet",confirm);confirm.click();
+   UiObject2 confirm=device.wait(Until.findObject(By.res("android:id/button1").text(java.util.regex.Pattern.compile("(?iu)onayla"))),10000);if(confirm==null)evidence("restore-no-confirm");assertNotNull("Restore asks before replacing wallet",confirm);confirm.click();
    waitJs(a,"JSON.parse(Android.load()).accounts.length==="+originalAccounts);assertEquals(3,new JSONObject(ref.get().load()).getJSONArray("transactions").length());assertEquals(originalAccounts+1,new JSONObject(ref.get().recovery()).getJSONArray("accounts").length());
    a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");assertEquals("3",js(a,"JSON.parse(Android.load()).transactions.length"));
   }finally{context.getContentResolver().delete(output,null,null);}
