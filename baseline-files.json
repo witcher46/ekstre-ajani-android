@@ -1,0 +1,78 @@
+[
+  {
+    "path": "android_app/.gitignore",
+    "sha": "e7cca3e0c23763c50d706ce239646217b2369c16"
+  },
+  {
+    "path": "android_app/build.gradle",
+    "sha": "74c6c79b10b62a3ce5cea5d06b67939378a676bf"
+  },
+  {
+    "path": "android_app/gradle.properties",
+    "sha": "f91bf3193182a682dc1302268cc210399ab17f09"
+  },
+  {
+    "path": "android_app/README.md",
+    "sha": "095e3f912d041d643dd1be5e8cfff6664170fbdb"
+  },
+  {
+    "path": "android_app/settings.gradle",
+    "sha": "db463336494bf2203c30245374018e70884d5922"
+  },
+  {
+    "path": "android_app/app/build.gradle",
+    "sha": "f04712133ffb47d4d3c22a904a91e82583d68625"
+  },
+  {
+    "path": "android_app/tests/core.test.mjs",
+    "sha": "e4adfd698abad0d899a903778436863b7812f813"
+  },
+  {
+    "path": "android_app/tests/ui.cjs",
+    "sha": "9e84b6cf738aafb4c4ae6ea465064576e317fcb0"
+  },
+  {
+    "path": "android_app/app/src/main/AndroidManifest.xml",
+    "sha": "df95db449cbc1cbb655acd4783ab4ca3ff56c349"
+  },
+  {
+    "path": "android_app/app/src/main/assets/app.mjs",
+    "sha": "6eb3bb8cad5d7d5e8505d8eca808474c311e5fef"
+  },
+  {
+    "path": "android_app/app/src/main/assets/core.mjs",
+    "sha": "9cb376cd9cf5bd2478340baba5f2c3bc55a2a43c"
+  },
+  {
+    "path": "android_app/app/src/main/assets/csv.mjs",
+    "sha": "2e86cb26f6641e6f08e50bbbed36cc949085cf3e"
+  },
+  {
+    "path": "android_app/app/src/main/assets/index.html",
+    "sha": "9e64d1bcf1361d281ccb708a2a6426e26f732710"
+  },
+  {
+    "path": "android_app/app/src/main/assets/parser.mjs",
+    "sha": "e2dd0d8764089bcda1a456f333d94d078b8c4001"
+  },
+  {
+    "path": "android_app/app/src/main/assets/style.css",
+    "sha": "ad0f4ed41f200a80c70d37b02627590a92d68778"
+  },
+  {
+    "path": "android_app/app/src/main/res/drawable/icon.xml",
+    "sha": "7b89b95bf7243698b00f92db7181e52fa9d28e5d"
+  },
+  {
+    "path": "android_app/app/src/main/java/com/zagor/ekstre/MainActivity.java",
+    "sha": "d0a51d9bc96f8f355e97a081c7eee95bb4097b70"
+  },
+  {
+    "path": "android_app/app/src/androidTest/java/com/zagor/ekstre/OfflineTest.java",
+    "sha": "b0e1f014ebed008744b775fe5c47aba2b0d7aa01"
+  },
+  {
+    "path": ".github/workflows/android-preview.yml",
+    "sha": "d7392b69e78d86ea04e8e12164c8e6772809c227"
+  }
+]
