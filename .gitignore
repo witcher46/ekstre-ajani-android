@@ -1,0 +1,17 @@
+.gradle/
+**/build/
+local.properties
+*.keystore
+*.jks
+*.apk
+*.aab
+*.db
+*.sqlite*
+*.pdf
+*.csv
+*.p12
+*.pem
+.env*
+
+# Local statement and wallet data
+/test-output/
