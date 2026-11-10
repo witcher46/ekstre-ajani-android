@@ -183,3 +183,23 @@ test('a pending PDF and CSV payment on opposite sides of cut preserve verified d
   assert.equal(C.cardStatus(s,'card').current,10000);
   assert.equal(C.cardStatus(s,'card').statementRemaining,10000);
 });
+
+test('accepted backups with very large totals retain every cent across reports and balances', () => {
+  const s=base();
+  s.transactions=Array.from({length:10001},(_,i)=>expense({
+    id:'synthetic-'+i, period:'2026-01', amount:i===10000?1:999999999999,
+  }));
+  const restored=C.readBackup(C.backupText(s));
+  const expected=9999999999990001n;
+  assert.equal(C.summary(restored,'2026-01').net,expected);
+  assert.equal(C.cardStatus(restored,'card').current,expected);
+  const figures=W.overview(restored,'2026-01');
+  assert.equal(figures.netExpense,expected);
+  assert.deepEqual(figures.categories,[['Diğer',expected]]);
+  assert.equal(figures.netWorth,-9999999999890001n);
+});
+
+test('amount formatting preserves the last cent for large values and the sign below one lira', () => {
+  assert.equal(C.formatMoney(9999999999990001n),'₺99.999.999.999.900,01');
+  assert.equal(C.formatMoney(-1),'-₺0,01');
+});

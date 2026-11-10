@@ -117,8 +117,8 @@ export function accountView(ctx,accountId) {
 
 function categoryPanel(ctx,title,values,empty) {
   const rows = values || [];
-  const maximum = Math.max(1,...rows.map(([,value]) => Math.abs(value)));
-  return `<section class="panel"><h2>${ctx.esc(title)}</h2>${rows.map(([category,value]) => `<div class="chart-label"><span>${ctx.esc(category)}</span><b>${amount(ctx,value)}</b></div><progress class="bar" max="${ctx.esc(maximum)}" value="${ctx.esc(Math.abs(value))}" aria-label="${ctx.esc(category)}"></progress>`).join('') || noRows(empty)}</section>`;
+  const maximum = rows.reduce((max,[,value]) => C.absCents(value)>max?C.absCents(value):max,1);
+  return `<section class="panel"><h2>${ctx.esc(title)}</h2>${rows.map(([category,value]) => `<div class="chart-label"><span>${ctx.esc(category)}</span><b>${amount(ctx,value)}</b></div><progress class="bar" max="${ctx.esc(maximum)}" value="${ctx.esc(C.absCents(value))}" aria-label="${ctx.esc(category)}"></progress>`).join('') || noRows(empty)}</section>`;
 }
 
 export function reportsView(ctx) {

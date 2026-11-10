@@ -15,6 +15,32 @@ export function money(input){
  const amount=Number(digits+fraction.padEnd(2,'0'));
  return sign==='-'&&amount!==0?-amount:amount;
 }
+// Keep ordinary totals as numbers and widen only when the exact sum needs it.
+export function addCents(a,b){
+ if(typeof a==='number'&&typeof b==='number'){
+  const sum=a+b;
+  if(Number.isSafeInteger(sum))return sum;
+ }
+ const sum=BigInt(a)+BigInt(b),n=Number(sum);
+ return Number.isSafeInteger(n)?n:sum;
+}
+export const positiveCents=n=>n>0?n:0;
+export const absCents=n=>n<0?-n:n;
+export const compareCents=(a,b)=>a<b?-1:a>b?1:0;
+const lira=new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'});
+function moneyParts(amount){
+ const value=BigInt(absCents(amount));
+ return {whole:value/100n,fraction:String(value%100n).padStart(2,'0')};
+}
+export function decimalMoney(amount){
+ const {whole,fraction}=moneyParts(amount);
+ return `${amount<0?'-':''}${whole}.${fraction}`;
+}
+export function formatMoney(amount){
+ const {whole,fraction}=moneyParts(amount);
+ const signed=amount<0?(whole===0n?-0:-whole):whole;
+ return lira.formatToParts(signed).map(part=>part.type==='fraction'?fraction:part.value).join('');
+}
 export const validDate=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s))&&new Date(s).toISOString().slice(0,10)===s;
 export const empty=()=>({format:'ekstre-android',version:1,accounts:[],transactions:[],statements:[],budgets:{},subscriptions:[],categories:[...categories]});
 const text=(s,n=200)=>typeof s==='string'&&s.length<=n;
@@ -186,11 +212,11 @@ export function cardStatus(s,account,{asOf=today()}={}){
  const rows=s.transactions.filter(effective),anchored=latest&&latest.debt!==null;
  const dateOf=cardDates(s);
  let current=currentAnchor?currentAnchor.debt:a.opening;
- for(const t of rows)if((!t.installmentPlan||dateOf(t)<=asOf)&&(!currentAnchor||dateOf(t)>currentAnchor.cut))current+=ledgerEffect(t,a);
- const paidAfterCut=anchored?rows.filter(t=>dateOf(t)>latest.cut&&cardAccount(t)===a.id&&effectKind(t)==='cardPayment').reduce((n,t)=>n+t.amount,0):0;
- return {current,statementDebt:latest?.debt??null,statementRemaining:anchored?Math.max(0,latest.debt-paidAfterCut):null,paidAfterCut,latest:latest||null,currentAnchor:currentAnchor||null,pending:s.transactions.filter(t=>t.matchStatus==='pending'&&cardAccount(t)===a.id).length};
+ for(const t of rows)if((!t.installmentPlan||dateOf(t)<=asOf)&&(!currentAnchor||dateOf(t)>currentAnchor.cut))current=addCents(current,ledgerEffect(t,a));
+ const paidAfterCut=anchored?rows.filter(t=>dateOf(t)>latest.cut&&cardAccount(t)===a.id&&effectKind(t)==='cardPayment').reduce((n,t)=>addCents(n,t.amount),0):0;
+ return {current,statementDebt:latest?.debt??null,statementRemaining:anchored?positiveCents(addCents(latest.debt,-paidAfterCut)):null,paidAfterCut,latest:latest||null,currentAnchor:currentAnchor||null,pending:s.transactions.filter(t=>t.matchStatus==='pending'&&cardAccount(t)===a.id).length};
 }
-export function balance(s,a){return a.type==='card'?cardStatus(s,a).current:s.transactions.filter(t=>effective(t)||(t.matchStatus==='pending'&&t.kind==='payment'&&!t.linkedTo)).reduce((n,t)=>n+ledgerEffect(t,a),a.opening);}
+export function balance(s,a){return a.type==='card'?cardStatus(s,a).current:s.transactions.filter(t=>effective(t)||(t.matchStatus==='pending'&&t.kind==='payment'&&!t.linkedTo)).reduce((n,t)=>addCents(n,ledgerEffect(t,a)),a.opening);}
 export function isCardTransaction(s,t){return s.accounts.find(a=>a.id===cardAccount(t))?.type==='card';}
 export function reportPeriod(s,t){const group=[t,...s.transactions.filter(r=>r.linkedTo===t.id)],pdf=group.find(r=>sourceOf(r)==='pdf'),csv=group.find(r=>sourceOf(r)==='csv');return pdf?.period??csv?.period??t.period;}
 export function calendarPeriods(s){
@@ -207,8 +233,8 @@ export function rowsForPeriod(s,period,mode='calendar'){
 }
 export function summary(s,period,mode='calendar'){
  const rows=rowsForPeriod(s,period,mode),cats=new Map();let spent=0,refunds=0,income=0;
- for(const t of rows){if(t.kind==='income')income+=t.amount;if(!['expense','refund'].includes(t.kind))continue;const n=t.kind==='refund'?-t.amount:t.amount;cats.set(t.category,(cats.get(t.category)||0)+n);if(n>=0)spent+=n;else refunds-=n;}
- return {spent,refunds,income,net:spent-refunds,categories:[...cats].sort((a,b)=>b[1]-a[1])};
+ for(const t of rows){if(t.kind==='income')income=addCents(income,t.amount);if(!['expense','refund'].includes(t.kind))continue;const n=t.kind==='refund'?-t.amount:t.amount;cats.set(t.category,addCents(cats.get(t.category)||0,n));if(n>=0)spent=addCents(spent,n);else refunds=addCents(refunds,-n);}
+ return {spent,refunds,income,net:addCents(spent,-refunds),categories:[...cats].sort((a,b)=>compareCents(b[1],a[1]))};
 }
 export function nextMonth(date,anchorDay=Number(date.slice(8,10))){const d=new Date(date+'T12:00:00Z');d.setUTCDate(1);d.setUTCMonth(d.getUTCMonth()+1);d.setUTCDate(Math.min(anchorDay,new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0)).getUTCDate()));return d.toISOString().slice(0,10);}
 export function paySubscription(s,rid,options={}){

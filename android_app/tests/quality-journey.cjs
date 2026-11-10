@@ -40,6 +40,11 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
     await page.waitForFunction(() => document.activeElement.matches('button[data-edit]'));
 
     await page.keyboard.press('Enter');
+    await page.evaluate(() => {
+      // Reopen before a queued native close event can run.
+      window.handleBack();
+      document.activeElement.click();
+    });
     await page.locator('[name=category]').selectOption('Giyim');
     await page.getByLabel('Bu satıcı için kategori önerisini hatırla').check();
     const originalMerchant = await page.locator('[name=desc]').inputValue();
@@ -106,6 +111,19 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
     });
     await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('geçersiz'));
     assert.deepEqual(await stored(), before);
+    await page.evaluate(cardId => {
+      const wallet = JSON.parse(localStorage.getItem('ekstre-android-v1'));
+      wallet.transactions = Array.from({length:10001},(_,i) => ({
+        id:'synthetic-large-'+i, account:cardId, date:'2026-01-01', period:'2026-01',
+        kind:'expense', desc:'Sentetik alışveriş', category:'Diğer', amount:i===10000?1:999999999999,
+      }));
+      localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet));
+    },card.id);
+    await page.reload();
+    await page.locator('#period').fill('2026-01');
+    assert.equal(await page.locator('[data-stat=netExpense]').innerText(),'₺99.999.999.999.900,01');
+    await page.locator('[data-page=reports]').click();
+    await page.getByRole('heading',{name:'Kategori dağılımı'}).waitFor();
     assert.deepEqual(errors, []);
     console.log('Category, installment, accessibility and failed restore journeys passed');
   } finally {

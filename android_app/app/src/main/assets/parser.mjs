@@ -1,4 +1,4 @@
-import {merchantKey,money,validDate} from './core.mjs';
+import {addCents,merchantKey,money,validDate} from './core.mjs';
 // Keep this normalization unchanged: 0.1.1 import keys depend on its exact output.
 export function clean(s){return String(s).replace(/\u00a0/g,' ').replace(/PE(?:\(cid:\d+\)){1,3}N/gi,'PESIN').replace(/\(cid:\d+\)deme/gi,'Odeme').replace(/\(cid:\d+\)ndirim/gi,'Indirim').replace(/\(cid:\d+\)/g,'').replace(/[çğıöşüÇĞİÖŞÜ]/g,c=>({'ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u','Ç':'C','Ğ':'G','İ':'I','Ö':'O','Ş':'S','Ü':'U'})[c]);}
 const months=['ocak','subat','mart','nisan','mayis','haziran','temmuz','agustos','eylul','ekim','kasim','aralik'];
@@ -83,11 +83,14 @@ export function parseStatement(text){
  }
  if(!rows.length)throw Error('İşlem satırları okunamadı. Metin içeren banka PDF’i seç.');
  const previous=headerAmount(t,previousLabels,pattern),statement=headerAmount(t,debtLabels,pattern),due=findDate(t,dueLabel),totals={expenses:0,payments:0,refunds:0},missing=[],reasons=[];
- for(const r of rows)totals[r.kind==='expense'?'expenses':r.kind==='cardPayment'?'payments':'refunds']+=r.amount;
+ for(const r of rows){
+  const field=r.kind==='expense'?'expenses':r.kind==='cardPayment'?'payments':'refunds';
+  totals[field]=addCents(totals[field],r.amount);
+ }
  for(const [field,header,label] of [['previousDebt',previous,'Önceki dönem borcu'],['statementDebt',statement,'Dönem borcu']]){
   if(header.value===null){missing.push(field);reasons.push(label+' '+(header.present?'okunamadı.':'başlığı bulunamadı.'));}
  }
- const expectedDebt=previous.value===null?null:previous.value+totals.expenses-totals.payments-totals.refunds,difference=expectedDebt===null||statement.value===null?null:statement.value-expectedDebt,status=missing.length?'unverified':difference===0?'verified':'mismatch';
+ const expectedDebt=previous.value===null?null:addCents(addCents(addCents(previous.value,totals.expenses),-totals.payments),-totals.refunds),difference=expectedDebt===null||statement.value===null?null:addCents(statement.value,-expectedDebt),status=missing.length?'unverified':difference===0?'verified':'mismatch';
  if(status==='mismatch')reasons.push('İşlemler ekstre borcuyla uyuşmuyor. Kayıt yapılamaz.');
  if(!due)reasons.push('Son ödeme tarihi '+(new RegExp(dueLabel,'i').test(t)?'okunamadı.':'başlığı bulunamadı.'));
  const reconciliation={status,previousDebt:previous.value,statementDebt:statement.value,expectedDebt,difference,missing,totals,reasons};
