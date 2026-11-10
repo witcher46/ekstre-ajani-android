@@ -1,13 +1,31 @@
-import {validDate} from './core.mjs';
+import {merchantKey,money,validDate} from './core.mjs';
 // Keep this normalization unchanged: 0.1.1 import keys depend on its exact output.
 export function clean(s){return String(s).replace(/\u00a0/g,' ').replace(/PE(?:\(cid:\d+\)){1,3}N/gi,'PESIN').replace(/\(cid:\d+\)deme/gi,'Odeme').replace(/\(cid:\d+\)ndirim/gi,'Indirim').replace(/\(cid:\d+\)/g,'').replace(/[çğıöşüÇĞİÖŞÜ]/g,c=>({'ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u','Ç':'C','Ğ':'G','İ':'I','Ö':'O','Ş':'S','Ü':'U'})[c]);}
 const months=['ocak','subat','mart','nisan','mayis','haziran','temmuz','agustos','eylul','ekim','kasim','aralik'];
 const trMoney='[+-]?(?:\\d{1,3}(?:\\.\\d{3})+|\\d+),\\d{2}', enMoney='[+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)\\.\\d{2}';
-function amount(s,numeric){return Math.round(Number(s.replaceAll(numeric?',':'.','').replace(',','.'))*100);}
 function date(d,m,y){m=String(m);if(!/^\d+$/.test(m)){m=({austos:'agustos',eyll:'eylul',ubat:'subat',mays:'mayis'})[m.toLowerCase()]||m.toLowerCase();m=months.indexOf(m)+1;}const s=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;return validDate(s)?s:null;}
 const named='(\\d{1,2})\\s+([A-Za-z]+)\\s+(\\d{4})',numeric='(\\d{1,2})[/.](\\d{1,2})[/.](\\d{4})';
 function findDate(t,label){for(const pat of [numeric,named]){const m=t.match(new RegExp(label+'\\s*:?\\s*'+pat,'i'));if(m){const d=date(...m.slice(1));if(d)return d;}}return null;}
-export function categorize(desc){const rules=[['Faiz / Ücret','FAIZ|KART UCRETI'],['Fatura / İnternet','TTNET|TT NET|TURKCELL|VODAFONE|TELEKOM|FATURA'],['Abonelik','NETFLIX|SPOTIFY|YOUTUBE|DISNEY'],['Oyun / Dijital','STEAM|EPIC GAMES|GOOGLE PLAY'],['Akaryakıt','OPET|SHELL|PETROL|AKARYAKIT'],['Dışarıda yeme','CAFE|KAHVE|RESTORAN|YEMEK|BURGER|DONER'],['Market / Gıda','MARKET|MIGROS|BIM|A101|CARREFOUR|GIDA'],['Online alışveriş','TRENDYOL|HEPSI|AMAZON|N11'],['Ulaşım','TAKSI|UBER|OTOBUS|METRO'],['Sağlık','ECZANE|HASTANE'],['Giyim','KOTON|ZARA|DEFACTO'],['Ev / Kira','KIRA|AIDAT|IKEA'],['Eğitim','KITAP|OKUL|KURS']];return rules.find(([,r])=>new RegExp(r).test(clean(desc).toUpperCase()))?.[0]||'Diğer';}
+const categoryRules=[
+ ['Faiz / Ücret','FAIZ|KART UCRETI'],
+ ['Fatura / İnternet','TTNET|TT NET|TURKCELL|VODAFONE|TELEKOM|FATURA'],
+ ['Abonelik','NETFLIX|SPOTIFY|YOUTUBE|DISNEY'],
+ ['Oyun / Dijital','STEAM|EPIC GAMES|GOOGLE PLAY'],
+ ['Akaryakıt','OPET|SHELL|PETROL|AKARYAKIT'],
+ ['Dışarıda yeme','CAFE|KAHVE|RESTORAN|YEMEK|BURGER|DONER'],
+ ['Market / Gıda','MARKET|MIGROS|BIM|A101|CARREFOUR|CARREFOURSA|GIDA'],
+ ['Online alışveriş','TRENDYOL|HEPSI|HEPSIBURADA|AMAZON|N11'],
+ ['Ulaşım','TAKSI|UBER|OTOBUS|METRO'],
+ ['Sağlık','ECZANE|HASTANE'],
+ ['Giyim','KOTON|ZARA|DEFACTO'],
+ ['Ev / Kira','KIRA|AIDAT|IKEA'],
+ ['Eğitim','KITAP|OKUL|KURS'],
+].map(([category,words])=>[category,new RegExp('(?:^| )(?:'+words+')(?: |$)')]);
+export function categorize(desc){
+ const name=merchantKey(clean(desc));
+ const matches=categoryRules.filter(([,pattern])=>pattern.test(name));
+ return matches.length===1?matches[0][0]:'Diğer';
+}
 function displayDescription(s){
  return s.replace(/\u00a0/g,' ')
   .replace(/\bPE(?:\(cid:\d+\)){1,3}N\b/gi,'PEŞİN')
@@ -30,11 +48,11 @@ const previousLabels='O?nceki\\s+D[o]?nem\\s+Hesap\\s+O?zeti\\s+Borcu(?:nuz)?|O?
 const debtLabels='(?:(?:Bu|Toplam)\\s+)?D[o]?nem\\s+Borcu(?:nuz)?|Hesap\\s+O?zeti\\s+Borcu(?:nuz)?|Ekstre\\s+Borcu(?:nuz)?';
 const cutLabel='(?:Hesap Kesim Tarihi|Hesap O?zeti Tarihi|Ekstre Kesim Tarihi)';
 const dueLabel='Son\\s+O?deme Tarihi';
-function headerAmount(t,labels,pattern,isQ){
+function headerAmount(t,labels,pattern){
  const label=t.match(new RegExp('(?:^|\\n)\\s*(?:'+labels+')\\b(?:\\s*(?:\\(TL\\)|TL|₺))?\\s*:?\\s*','i'));
  if(!label)return {value:null,present:false};
  const token=t.slice(label.index+label[0].length).match(new RegExp('^('+pattern+')(?![\\d.,])'));
- return {value:token?amount(token[1],isQ):null,present:true};
+ return {value:token?money(token[1]):null,present:true};
 }
 export function parseStatement(text){
  if(typeof text!=='string'||text.length>3e6)throw Error('PDF metni çok büyük.');const t=clean(text),top=t.slice(0,2200).toUpperCase();const bank=top.includes('QNB')?'QNB':/YAPI KREDI|YAPI VE KREDI|WORLDCARD|WORLDPUAN/.test(top)?'Yapı Kredi':null;
@@ -59,12 +77,12 @@ export function parseStatement(text){
   let desc=displayDescription(sourceDesc);
   if(inst)desc=desc.replace(inst,'').replace(/\.?\s*Taksit/i,'').trim();
   desc=redactDescription(desc.replace(/\b\d+\.\s*(?=İndirim)/gi,'').replace(new RegExp('\\s+'+enMoney+'\\s+al(?:is)?v\\s+ind\\b','gi'),' İndirim'));
-  const n=amount(token[0],isQ),semantic=clean(desc).toUpperCase(),isPayment=/^ODEME\b|^TESEKKU?R\s+EDERIZ\b/.test(semantic),kind=isPayment?'cardPayment':n<0||token[0].startsWith('+')||/\b(?:INDIRIM|IADE|IPTAL)\b|\bAL(?:IS)?V\s+IND\b/.test(semantic)?'refund':'expense';
+  const n=money(token[0]),semantic=clean(desc).toUpperCase(),isPayment=/^ODEME\b|^TESEKKU?R\s+EDERIZ\b/.test(semantic),kind=isPayment?'cardPayment':n<0||token[0].startsWith('+')||/\b(?:INDIRIM|IADE|IPTAL)\b|\bAL(?:IS)?V\s+IND\b/.test(semantic)?'refund':'expense';
   const key=JSON.stringify([bank,period,d,legacyDescription(oldDesc,inst),n,inst]),count=(occurrences.get(key)||0)+1;occurrences.set(key,count);
   rows.push({date:d,period,desc,sourceDesc,amount:Math.abs(n),kind,category:isPayment?'Kart ödemesi':categorize(desc),installment:inst,importKey:key+'|'+count});
  }
  if(!rows.length)throw Error('İşlem satırları okunamadı. Metin içeren banka PDF’i seç.');
- const previous=headerAmount(t,previousLabels,pattern,isQ),statement=headerAmount(t,debtLabels,pattern,isQ),due=findDate(t,dueLabel),totals={expenses:0,payments:0,refunds:0},missing=[],reasons=[];
+ const previous=headerAmount(t,previousLabels,pattern),statement=headerAmount(t,debtLabels,pattern),due=findDate(t,dueLabel),totals={expenses:0,payments:0,refunds:0},missing=[],reasons=[];
  for(const r of rows)totals[r.kind==='expense'?'expenses':r.kind==='cardPayment'?'payments':'refunds']+=r.amount;
  for(const [field,header,label] of [['previousDebt',previous,'Önceki dönem borcu'],['statementDebt',statement,'Dönem borcu']]){
   if(header.value===null){missing.push(field);reasons.push(label+' '+(header.present?'okunamadı.':'başlığı bulunamadı.'));}

@@ -26,6 +26,8 @@ jobs:
           node android_app/tests/ui.cjs
           node android_app/tests/audit.cjs
           node android_app/tests/journey.cjs
+          node android_app/tests/wallet-v2-journey.cjs
+          node android_app/tests/quality-journey.cjs
       - uses: actions/setup-java@v6
         with:
           distribution: temurin

@@ -59,13 +59,14 @@ export function accountOverview(s,accountId,period){
 function sourceGroups(s){
  const groups=new Map();for(const t of s.transactions)if(t.linkedTo){if(!groups.has(t.linkedTo))groups.set(t.linkedTo,[]);groups.get(t.linkedTo).push(t);}
  const aliases=id=>groups.get(id)||[];
- return {aliases,dateOf:t=>C.sourceOf(t)==='pdf'?t.date:aliases(t.id).find(r=>C.sourceOf(r)==='pdf')?.date??t.date};
+ return {aliases,dateOf:C.cardDates(s)};
 }
 
 export function cardDetail(s,accountId){
  const status=C.cardStatus(s,accountId),sources=sourceGroups(s),movements=s.transactions.filter(t=>C.effective(t)&&cardId(t)===accountId).map(t=>({...t,cardDate:sources.dateOf(t),sources:sources.aliases(t.id).map(r=>({...r}))})).sort((a,b)=>b.cardDate.localeCompare(a.cardDate));
- const afterCut=status.latest?movements.filter(t=>t.cardDate>status.latest.cut):[];
- return {...status,debt:Math.max(0,status.current),credit:Math.max(0,-status.current),postCutExpenses:total(afterCut.filter(t=>t.kind==='expense')),postCutRefunds:total(afterCut.filter(t=>t.kind==='refund')),unassignedPayments:movements.filter(t=>t.kind==='cardPayment'&&C.sourceOf(t)!=='manual'),movements,installments:installmentOverview(s,accountId,sources)};
+ const today=C.today();
+ const afterCut=status.latest?movements.filter(t=>t.cardDate>status.latest.cut&&(!t.installmentPlan||t.cardDate<=today)):[];
+ return {...status,debt:Math.max(0,status.current),credit:Math.max(0,-status.current),postCutExpenses:total(afterCut.filter(t=>t.kind==='expense')),postCutRefunds:total(afterCut.filter(t=>t.kind==='refund')),unassignedPayments:movements.filter(t=>t.kind==='cardPayment'&&C.sourceOf(t)!=='manual'),movements,installments:installmentOverview(s,accountId)};
 }
 
 export function addIncomePlan(s,plan){
@@ -92,14 +93,21 @@ export function attachPaymentSource(s,transactionId,bankId,{paidOn}={}){
  const manual=next.transactions.at(-1),group=[next.transactions.find(t=>t.id===transactionId),...next.transactions.filter(t=>t.linkedTo===transactionId)];
  delete manual.matchStatus;
  for(const alias of group){alias.linkedTo=manual.id;alias.matchStatus='linked';delete alias.matchCandidates;delete alias.matchReason;}
+ C.repointCandidates(next,group.map(t=>t.id),manual.id);
  return C.validate(next);
 }
 
-export function installmentOverview(s,accountId,sources=sourceGroups(s)){
- const groups=new Map(),rows=s.transactions.filter(t=>C.effective(t)&&cardId(t)===accountId&&t.kind==='expense'&&t.installment);
+export function installmentOverview(s,accountId,{asOf=C.today()}={}){
+ const groups=new Map(),plans=new Map(),monthOf=C.calendarPeriods(s),dateOf=C.cardDates(s);
+ const rows=s.transactions.filter(t=>cardId(t)===accountId&&t.kind==='expense'&&t.installment&&(t.installmentPlan||C.effective(t)));
  for(const t of rows){
+  if(t.installmentPlan){
+   if(!plans.has(t.installmentPlan))plans.set(t.installmentPlan,[]);
+   plans.get(t.installmentPlan).push(t);
+   continue;
+  }
   const [current,count]=t.installment.split('/').map(Number);if(current<1||count<current)continue;
-  const date=sources.dateOf(t),month=Number(date.slice(0,4))*12+Number(date.slice(5,7))-current;
+  const period=monthOf(t),month=Number(period.slice(0,4))*12+Number(period.slice(5,7))-current;
   const name=String(t.sourceDesc??t.desc).replace(/\b\d{1,3}\/\d{1,3}\b/g,'').replace(/\s+/g,' ').trim().toLocaleUpperCase('tr');
   const key=JSON.stringify([name,t.amount,count,month]);if(!groups.has(key))groups.set(key,[]);groups.get(key).push({t,current,total:count});
  }
@@ -111,5 +119,17 @@ export function installmentOverview(s,accountId,sources=sourceGroups(s)){
    items.push({id:latest.t.id,desc:latest.t.desc,amount:latest.t.amount,current:latest.current,total:latest.total,remaining,postedExpense:total(part.map(r=>r.t)),estimatedFutureLiability:remaining*latest.t.amount,estimated:true,ambiguous,transactionIds:part.map(r=>r.t.id)});
   }
  }
- return {postedExpense:total(rows),estimatedFutureLiability:items.reduce((n,r)=>n+r.estimatedFutureLiability,0),estimated:true,ambiguous:items.some(r=>r.ambiguous),items};
+ const estimatedFutureLiability=items.reduce((n,r)=>n+r.estimatedFutureLiability,0);
+ let plannedFutureLiability=0;
+ for(const [id,plan] of plans){
+  plan.sort((a,b)=>a.date.localeCompare(b.date));
+  const posted=plan.filter(t=>dateOf(t)<=asOf&&C.effective(t)),future=plan.filter(t=>dateOf(t)>asOf);
+  const latest=posted.at(-1)??plan[0],remaining=total(future);
+  plannedFutureLiability+=remaining;
+  items.push({id,desc:latest.desc,amount:latest.amount,current:posted.length,total:plan.length,
+   remaining:future.length,postedExpense:total(posted),plannedFutureLiability:remaining,estimated:false,
+   transactionIds:plan.map(t=>t.id)});
+ }
+ const postedExpense=total(rows.filter(t=>!t.installmentPlan||(dateOf(t)<=asOf&&C.effective(t))));
+ return {postedExpense,estimatedFutureLiability,plannedFutureLiability,estimated:true,ambiguous:items.some(r=>r.ambiguous),items};
 }
