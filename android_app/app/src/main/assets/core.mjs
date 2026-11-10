@@ -272,7 +272,8 @@ export function resolveCandidate(s,tid,decision,targetId){
   alias.linkedTo=canonical.id;
   alias.matchStatus='linked';
   delete alias.matchCandidates;delete alias.matchReason;
-  delete canonical.matchStatus;delete canonical.matchCandidates;delete canonical.matchReason;
+  if(canonical.matchStatus==='pending')delete canonical.matchStatus;
+  delete canonical.matchCandidates;delete canonical.matchReason;
   repointCandidates(next,[alias.id],canonical.id);
  }else if(decision==='distinct'){row.matchStatus='distinct';delete row.linkedTo;}else throw Error('Aynı veya ayrı işlem kararını seç.');delete row.matchCandidates;delete row.matchReason;return validate(next);
 }

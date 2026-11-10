@@ -203,3 +203,18 @@ test('amount formatting preserves the last cent for large values and the sign be
   assert.equal(C.formatMoney(9999999999990001n),'₺99.999.999.999.900,01');
   assert.equal(C.formatMoney(-1),'-₺0,01');
 });
+
+test('linking a third source does not erase a distinct payment decision on reload', () => {
+  const pdf=parseStatement('QNB\nHesap Kesim Tarihi: 05/01/2026\n03/01/2026 ODEME 100.00');
+  const bank=expense({id:'distinct-bank',account:'bank',target:'card',kind:'payment',date:'2026-01-03'});
+  const review=C.addTransaction(C.importStatement(base(),pdf,'card'),bank);
+  const distinct=C.resolveCandidate(review,bank.id,'distinct');
+  const imported=C.importCsv(distinct,[{
+    date:'2026-01-03',period:'2026-01',desc:'ODEME',cents:10000,kind:'odeme',category:'Kart ödemesi',
+  }],'card');
+  const csv=imported.transactions.find(t=>t.source==='csv');
+  const linked=C.resolveCandidate(imported,csv.id,'link',bank.id);
+  const restored=C.reviewLegacy(C.readBackup(C.backupText(linked)));
+  assert.equal(C.cardStatus(restored,'card').current,-20000);
+  assert.equal(W.overview(restored,'2026-01').cardPayments,20000);
+});
