@@ -45,12 +45,19 @@ jobs:
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build and lint
         run: gradle -p android_app assembleDebug lintDebug --no-daemon
+      - name: Enable emulator hardware acceleration
+        run: |
+          test -c /dev/kvm
+          sudo chown "$(id -u)" /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
       - name: Run instrumentation tests on Android 35
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           profile: pixel_2
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 300
           emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim
           working-directory: android_app
           script: gradle connectedDebugAndroidTest --no-daemon
