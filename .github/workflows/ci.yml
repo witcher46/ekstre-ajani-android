@@ -29,10 +29,14 @@ jobs:
           node android_app/tests/wallet-v2-journey.cjs
           node android_app/tests/quality-journey.cjs
   android:
+    env:
+      BUILD_TRIAL_APK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/android-finance-quality' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.BUILD_TRIAL_APK == 'true' && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -44,7 +48,34 @@ jobs:
       - name: Install Android SDK components
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build and lint
-        run: gradle -p android_app assembleDebug lintDebug --no-daemon
+        run: |
+          if [[ "$BUILD_TRIAL_APK" == true ]]; then
+            gradle -p android_app assembleTrial lintTrial -PtrialDeviceTest --no-daemon
+          else
+            gradle -p android_app assembleDebug lintDebug --no-daemon
+          fi
+      - name: Verify trial APK package, version, signature and SHA-256
+        if: env.BUILD_TRIAL_APK == 'true'
+        run: |
+          sdk="$ANDROID_HOME/build-tools/35.0.0"
+          output="$RUNNER_TEMP/trial-apk"
+          mkdir -p "$output"
+          apk="$output/ekstre-ajani-cuzdan-0.2.1-deneme.apk"
+          cp android_app/app/build/outputs/apk/trial/app-trial.apk "$apk"
+          "$sdk/aapt" dump badging "$apk" > "$output/APK-INFO.txt"
+          grep -F "package: name='com.zagor.ekstre.preview.wallet.trial' versionCode='4' versionName='0.2.1-deneme'" "$output/APK-INFO.txt"
+          "$sdk/apksigner" verify --verbose --print-certs "$apk" | tee "$output/APK-SIGNATURE.txt"
+          git rev-parse HEAD > "$output/SOURCE-COMMIT.txt"
+          (cd "$output" && sha256sum "$(basename "$apk")") | tee "$output/SHA256SUMS.txt"
+      - name: Build archived 0.2.0 source for the isolated emulator
+        if: env.BUILD_TRIAL_APK == 'true'
+        run: |
+          baseline=0f3404d0043a80e218a0c9467f0d68a5045472a7
+          git fetch --depth=1 --no-tags origin "$baseline"
+          previous="$RUNNER_TEMP/previous-wallet"
+          mkdir -p "$previous"
+          git archive "$baseline" android_app | tar -x -C "$previous"
+          gradle -p "$previous/android_app" assembleDebug --no-daemon
       - name: Enable emulator hardware acceleration
         run: |
           test -c /dev/kvm
@@ -60,4 +91,12 @@ jobs:
           emulator-boot-timeout: 300
           emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim
           working-directory: android_app
-          script: gradle connectedDebugAndroidTest --no-daemon
+          script: bash tests/run-android-ci.sh
+      - name: Upload verified trial APK
+        if: env.BUILD_TRIAL_APK == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ekstre-ajani-android-0.2.1-deneme
+          path: ${{ runner.temp }}/trial-apk/
+          if-no-files-found: error
+          retention-days: 30
