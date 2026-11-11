@@ -153,6 +153,24 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
     await page.locator('#submit').click();
     assert.ok(!(await stored()).merchantCategoryRules.some(r=>r.merchant==='MIGROS 5432 ANKARA'));
 
+    await page.getByRole('button',{name:'Abonelik kategorisini düzenle'}).click();
+    await page.getByRole('button',{name:'Kategoriyi sil'}).click();
+    await page.locator('#submit').click();
+    await page.locator('nav [data-page=plan]').click();
+    await page.locator('[data-action=subscription]').click();
+    await page.getByLabel('Abonelik adı').fill('Sentetik kategori kontrolü');
+    await page.locator('[name=amount]').fill('50,00');
+    await page.locator('[name=next]').fill('2026-10-15');
+    await page.locator('#submit').click();
+    const subscription=(await stored()).subscriptions.at(-1);
+    assert.equal(subscription.category,'Diğer');
+    await page.locator('[data-pay]').click();
+    await page.locator('[name=paidOn]').fill('2026-10-15');
+    await page.locator('#submit').click();
+    assert.equal((await stored()).transactions.find(t=>t.subscriptionId===subscription.id).category,'Diğer');
+
+    await page.locator('#settings').click();
+
     await page.getByRole('button',{name:'+ Satıcı kuralı'}).click();
     await page.getByLabel('Satıcı adı').fill('Sentetik BIMEKS');
     await page.locator('[name=category]').selectOption('Ulaşım');

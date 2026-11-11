@@ -145,6 +145,10 @@ export function removeMerchantRule(s,ruleId){
  next.merchantCategoryRules=(next.merchantCategoryRules||[]).filter(r=>r.id!==ruleId);
  return validate(next);
 }
+export function activeExpenseCategory(s,preferred){
+ if(s.categories.includes(preferred))return preferred;
+ return s.categories.includes('Diğer')?'Diğer':'';
+}
 function expenseCategoryName(s,newName,existing){
  const name=String(newName??'').trim();
  if(!name||name.length>200)throw Error('Geçerli bir kategori adı gir.');
@@ -323,7 +327,7 @@ export function paySubscription(s,rid,options={}){
  const r=s.subscriptions.find(r=>r.id===rid);if(!r)throw Error('Abonelik bulunamadı.');const due=options.expectedDue||r.next,paidOn=options.paidOn||today();
  if(due!==r.next||s.transactions.some(t=>t.subscriptionId===rid&&t.subscriptionDue===due))throw Error('Bu vade zaten işlendi. Abonelik ekranını yenile.');
  if(!validDate(paidOn))throw Error('Gerçek ödeme tarihini seç.');
- const next=addTransaction(s,{account:r.account,date:paidOn,desc:r.name,amount:r.amount,kind:'expense',category:r.category||'Abonelik',note:'Abonelik ödemesi',subscriptionId:rid,subscriptionDue:due});
+ const next=addTransaction(s,{account:r.account,date:paidOn,desc:r.name,amount:r.amount,kind:'expense',category:activeExpenseCategory(s,r.category??'Abonelik'),note:'Abonelik ödemesi',subscriptionId:rid,subscriptionDue:due});
  const sub=next.subscriptions.find(x=>x.id===rid);sub.billingDay=r.billingDay||Number(due.slice(8,10));sub.next=nextMonth(due,sub.billingDay);sub.lastPaidOn=paidOn;return next;
 }
 function repairReferences(s){const ids=new Set(s.transactions.map(t=>t.id));for(const t of s.transactions){if(t.linkedTo&&!ids.has(t.linkedTo)){t.previousLinkedTo=t.linkedTo;delete t.linkedTo;t.matchStatus='pending';t.matchReason='sourceChanged';t.matchCandidates=[];}if(t.matchStatus==='pending'){t.matchCandidates=(t.matchCandidates||[]).filter(x=>ids.has(x)&&x!==t.id);if(!t.matchCandidates.length)t.matchReason='sourceChanged';}}return s;}
@@ -401,7 +405,10 @@ export function importStatement(s,p,account){
  const invalidated=new Set();
  for(const old of previous){if(!p.rows.some(r=>r.importKey===old.importKey&&sameEconomic({...r,account},old))){invalidated.add(old.id);const canonical=old.linkedTo?next.transactions.find(t=>t.id===old.linkedTo):null;if(canonical){canonical.matchStatus='pending';canonical.matchReason='sourceChanged';canonical.matchCandidates=[];}for(const alias of next.transactions.filter(t=>t.linkedTo===old.id)){alias.previousLinkedTo=old.id;delete alias.linkedTo;alias.matchStatus='pending';alias.matchReason='sourceChanged';alias.matchCandidates=[];}}}
  const candidates=[...next.transactions];
- for(const r of p.rows){const old=previous.find(t=>t.importKey===r.importKey),row={...r,id:old?.id||id(),account,statement:key,source:'pdf',merchantName:r.desc,sourceDesc:r.sourceDesc??r.desc,desc:old&&old.desc!==old.sourceDesc?old.desc:r.desc,category:old?.category??r.category,note:old?.note??'',reviewed:old?.reviewed||false};
+ for(const r of p.rows){
+  const old=previous.find(t=>t.importKey===r.importKey);
+  const category=old?.category??(['expense','refund'].includes(r.kind)?activeExpenseCategory(s,r.category):r.category);
+  const row={...r,id:old?.id||id(),account,statement:key,source:'pdf',merchantName:r.desc,sourceDesc:r.sourceDesc??r.desc,desc:old&&old.desc!==old.sourceDesc?old.desc:r.desc,category,note:old?.note??'',reviewed:old?.reviewed||false};
   if(old&&!invalidated.has(old.id)){for(const k of ['matchStatus','matchCandidates','matchReason','linkedTo','previousLinkedTo'])if(old[k]!==undefined)row[k]=old[k];}else markCandidate(row,candidates);next.transactions.push(row);
  }
  next.statements=next.statements.filter(x=>x.id!==key);next.statements.push({id:key,account,bank:p.bank,period:p.period,cut:p.cut,due:p.due,debt:p.debt,imported:today(),reconciliationStatus:p.reconciliation?.status==='verified'?'verified':'unverified',importedMovementCount:p.rows.length});return validate(repairReferences(preferPdfAcrossCut(next)));

@@ -258,7 +258,9 @@ export function importView(ctx,pending) {
   const {state,esc} = ctx;
   let preview = '';
   if (pending) {
-    const rows = pending.rows || [];
+    const rows = (pending.rows || []).map(row=>['expense','refund'].includes(row.kind)
+      ? {...row,category:C.activeExpenseCategory(state,row.category)}
+      : row);
     const blocked = pending.reconciliation?.status === 'mismatch';
     const cards = state.accounts.filter(a => a.type === 'card');
     const selectedCard = cards.find(a=>a.id===ctx.importDraft.account) || cards[0];

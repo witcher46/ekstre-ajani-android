@@ -190,10 +190,46 @@ public class WalletJourneyTest {
    a.onActivity(activity->activity.onActivityResult(103,Activity.RESULT_OK,new Intent().setData(output)));
    String written="";for(int i=0;i<50;i++){written=readDocument(context,output);if(written.equals(original))break;Thread.sleep(100);}assertEquals("Native export writes complete JSON bytes",original,written);device.pressBack();
    click(a,"nav [data-page=wallet]");account(a,"Yedek sonrası sentetik hesap","bank");assertEquals(originalAccounts+1,new JSONObject(ref.get().load()).getJSONArray("accounts").length());
-   click(a,"#settings");js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");UiObject2 restore=device.wait(Until.findObject(By.text("Yedek yükle")),10000);assertNotNull("Restore button is touchable",restore);restore.click();waitPicker();selectDownload("synthetic-wallet-backup.json");
-   UiObject2 confirm=device.wait(Until.findObject(By.res("android:id/button1").text(java.util.regex.Pattern.compile("(?iu)onayla"))),10000);if(confirm==null)evidence("restore-no-confirm");assertNotNull("Restore asks before replacing wallet",confirm);confirm.click();
+   restoreDownload(a,"synthetic-wallet-backup.json");
    waitJs(a,"JSON.parse(Android.load()).accounts.length==="+originalAccounts);assertEquals(3,new JSONObject(ref.get().load()).getJSONArray("transactions").length());assertEquals(originalAccounts+1,new JSONObject(ref.get().recovery()).getJSONArray("accounts").length());
    a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");assertEquals("3",js(a,"JSON.parse(Android.load()).transactions.length"));
   }finally{context.getContentResolver().delete(output,null,null);}
  }
+ private void restoreDownload(ActivityScenario<MainActivity> a,String name)throws Exception{
+  click(a,"#settings");
+  js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");
+  UiObject2 restore=device.wait(Until.findObject(By.text("Yedek yükle")),10000);
+  assertNotNull("Restore button is touchable",restore);
+  restore.click();waitPicker();selectDownload(name);
+  UiObject2 confirm=device.wait(Until.findObject(By.res("android:id/button1").text(java.util.regex.Pattern.compile("(?iu)onayla"))),10000);
+  if(confirm==null)evidence("restore-no-confirm");
+  assertNotNull("Restore asks before replacing wallet",confirm);
+  confirm.click();
+ }
+ @Test public void restorePreviousTrialBackup()throws Exception{
+  String path=InstrumentationRegistry.getArguments().getString("previousTrialBackup");
+  assumeTrue("Requires the synthetic snapshot from the installed 0.3.0 trial",path!=null);
+  String raw=device.executeShellCommand("cat "+path);
+  JSONObject expected=new JSONObject(raw);
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String name="synthetic-from-0.3.0.json";
+  Uri file=document(name,"application/json",raw.getBytes(StandardCharsets.UTF_8));
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('#settings')");
+   restoreDownload(a,name);
+   waitJs(a,"JSON.parse(Android.load())?.accounts?.some(a=>a.id==='synthetic-card') === true");
+   a.recreate();
+   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+   AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();
+   a.onActivity(activity->bridge.set(activity.new Bridge()));
+   JSONObject restored=new JSONObject(bridge.get().load());
+   for(String key:new String[]{"accounts","transactions","statements","budgets","categories","merchantCategoryRules","incomePlans"}){
+    assertEquals("Preserved "+key,expected.get(key).toString(),restored.get(key).toString());
+   }
+   js(a,"document.getElementById('period').value='2026-10';document.getElementById('period').dispatchEvent(new Event('change'))");
+   assertEquals("true",js(a,"document.querySelector('[data-stat=netExpense]').textContent.includes('100,00')"));
+   assertEquals("true",js(a,"document.querySelector('[data-stat=cardDebt]').textContent.includes('80,00')"));
+  }finally{context.getContentResolver().delete(file,null,null);}
+ }
+
 }

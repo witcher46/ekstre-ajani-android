@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import * as C from '../app/src/main/assets/core.mjs';
-import {categorize} from '../app/src/main/assets/parser.mjs';
+import {categorize,parseStatement} from '../app/src/main/assets/parser.mjs';
 
 test('built-in categories use whole words and leave competing matches for review', () => {
   assert.equal(categorize('BİM / Ankara'), 'Market / Gıda');
@@ -123,4 +123,43 @@ test('the overall budget name cannot be assigned to a new expense category', () 
   const legacy={...state,categories:[...state.categories,'Toplam']};
   assert.deepEqual(C.readBackup(C.backupText(legacy)),legacy);
   assert.deepEqual(C.renameExpenseCategory(legacy,'Toplam','Eski etiket').budgets,state.budgets);
+});
+
+
+test('new PDF rows fall back from removed categories while reimport preserves saved labels', () => {
+  const state = {...C.empty(),accounts:[{id:'card',name:'Sentetik kart',type:'card',opening:0}]};
+  const parse = period => parseStatement([
+    'QNB', 'Hesap Kesim Tarihi: 05/'+period+'/2026',
+    'Onceki Donem Hesap Ozeti Borcu: 0.00', 'Donem Borcu: 60.00',
+    '01/'+period+'/2026 MIGROS 100.00',
+    '02/'+period+'/2026 MIGROS IADE -20.00',
+    '03/'+period+'/2026 ODEME 20.00',
+  ].join('\n'));
+  const original = C.importStatement(state,parse('10'),'card');
+  assert.deepEqual(original.transactions.map(t=>t.category),['Market / Gıda','Market / Gıda','Kart ödemesi']);
+  const removed = C.removeExpenseCategory(original,'Market / Gıda');
+  const next = C.importStatement(removed,parse('11'),'card');
+  assert.deepEqual(next.transactions.filter(t=>t.period==='2026-11').map(t=>t.category),['Diğer','Diğer','Kart ödemesi']);
+  assert.equal(C.summary(next,'2026-11').net,8000);
+  const reimported=C.importStatement(next,parse('10'),'card');
+  assert.deepEqual(reimported.transactions.filter(t=>t.period==='2026-10').map(t=>[t.id,t.category]),original.transactions.map(t=>[t.id,t.category]));
+  const noFallback=C.removeExpenseCategory(removed,'Diğer');
+  assert.deepEqual(C.importStatement(noFallback,parse('11'),'card').transactions.filter(t=>t.period==='2026-11').map(t=>t.category),['','','Kart ödemesi']);
+});
+
+test('new subscription payments use an active category and preserve the historical plan', () => {
+  const state={...C.empty(),accounts:[{id:'bank',name:'Sentetik banka',type:'bank',opening:10000}],
+    subscriptions:[
+      {id:'old',account:'bank',name:'Sentetik abonelik',next:'2026-10-01',amount:2000,category:'Abonelik'},
+      {id:'legacy',account:'bank',name:'Eski abonelik',next:'2026-10-02',amount:3000},
+    ]};
+  const paid=C.paySubscription(state,'old',{paidOn:'2026-10-01'});
+  const removed=C.removeExpenseCategory(paid,'Abonelik');
+  const next=C.paySubscription(removed,'old',{paidOn:'2026-11-01'});
+  assert.deepEqual(next.transactions.map(t=>[t.category,t.amount]),[['Abonelik',2000],['Diğer',2000]]);
+  assert.equal(next.subscriptions[0].category,'Abonelik');
+  assert.equal(C.balance(next,next.accounts[0]),6000);
+  const legacy=C.paySubscription(C.removeExpenseCategory(removed,'Diğer'),'legacy',{paidOn:'2026-10-02'});
+  assert.equal(legacy.transactions.at(-1).category,'');
+  assert.deepEqual(C.readBackup(C.backupText(legacy)),legacy);
 });
