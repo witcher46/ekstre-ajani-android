@@ -3,7 +3,7 @@ on:
   push:
     branches: [main, feature/mobile-wallet-finance-v2, android/ux-finance-revision]
   pull_request:
-    branches: [main, fix/android-finance-quality]
+    branches: [main, fix/android-finance-quality, feature/android-statement-ux]
 permissions:
   contents: read
   actions: read
@@ -42,7 +42,7 @@ jobs:
           retention-days: 30
   android:
     env:
-      BUILD_TRIAL_APK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.number == 2 && github.head_ref == 'feature/android-statement-ux' }}
+      BUILD_TRIAL_APK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.number == 3 && github.head_ref == 'fix/android-0.3.1-stability' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -72,30 +72,30 @@ jobs:
           sdk="$ANDROID_HOME/build-tools/35.0.0"
           output="$RUNNER_TEMP/trial-apk"
           mkdir -p "$output"
-          apk="$output/ekstre-ajani-cuzdan-0.3.0-deneme.apk"
+          apk="$output/ekstre-ajani-cuzdan-0.3.1-deneme.apk"
           cp android_app/app/build/outputs/apk/trial/app-trial.apk "$apk"
           "$sdk/aapt" dump badging "$apk" > "$output/APK-INFO.txt"
-          grep -F "package: name='com.zagor.ekstre.preview.wallet.trial.v3' versionCode='5' versionName='0.3.0-deneme'" "$output/APK-INFO.txt"
+          grep -F "package: name='com.zagor.ekstre.preview.wallet.trial.v31' versionCode='6' versionName='0.3.1-deneme'" "$output/APK-INFO.txt"
           "$sdk/apksigner" verify --verbose --print-certs "$apk" | tee "$output/APK-SIGNATURE.txt"
           git rev-parse HEAD > "$output/SOURCE-COMMIT.txt"
           (cd "$output" && sha256sum "$(basename "$apk")") | tee "$output/SHA256SUMS.txt"
-      - name: Download the verified 0.2.1 trial for comparison
+      - name: Download the verified 0.3.0 trial for comparison
         if: env.BUILD_TRIAL_APK == 'true'
         uses: actions/download-artifact@v8
         with:
-          artifact-ids: '13815256543'
-          run-id: '42927396286'
+          artifact-ids: '13898584603'
+          run-id: '43117973561'
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/previous-wallet
       - name: Compare trial package and signing certificates
         if: env.BUILD_TRIAL_APK == 'true'
         run: |
           sdk="$ANDROID_HOME/build-tools/35.0.0"
-          previous="$RUNNER_TEMP/previous-wallet/ekstre-ajani-cuzdan-0.2.1-deneme.apk"
-          echo "e13d4c525a1b128b65b7325421c685b9c2eaa591a790af0ef168461670321787  $previous" | sha256sum -c -
+          previous="$RUNNER_TEMP/previous-wallet/ekstre-ajani-cuzdan-0.3.0-deneme.apk"
+          echo "72fc99fb689ad78b9b857ab43c5cab2d01ff540516a0c2082ae48a54e0beaeef  $previous" | sha256sum -c -
           {
-            "$sdk/aapt" dump badging "$previous" | grep -F "package: name='com.zagor.ekstre.preview.wallet.trial' versionCode='4' versionName='0.2.1-deneme'"
-            "$sdk/apksigner" verify --print-certs "$previous" | grep -F 'certificate SHA-256 digest: 71785f03302652359f3e503a6d3f48ff2effc08030936c22b689a5f88010aaf6'
+            "$sdk/aapt" dump badging "$previous" | grep -F "package: name='com.zagor.ekstre.preview.wallet.trial.v3' versionCode='5' versionName='0.3.0-deneme'"
+            "$sdk/apksigner" verify --print-certs "$previous" | grep -F 'certificate SHA-256 digest: 1a23e6d14d95fca3042bdcd56bb4b93b87ffd2bfd3728d755013d24306394575'
           } | tee "$RUNNER_TEMP/trial-apk/PREVIOUS-APK.txt"
           previous_cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/trial-apk/PREVIOUS-APK.txt")
           current_cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/trial-apk/APK-SIGNATURE.txt")
@@ -125,7 +125,7 @@ jobs:
         if: env.BUILD_TRIAL_APK == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: ekstre-ajani-android-0.3.0-deneme
+          name: ekstre-ajani-android-0.3.1-deneme
           path: ${{ runner.temp }}/trial-apk/
           if-no-files-found: error
           retention-days: 30

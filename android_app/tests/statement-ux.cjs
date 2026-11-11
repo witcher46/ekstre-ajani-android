@@ -159,11 +159,15 @@ async function run() {
     const saved=history.getByRole('article').filter({hasText:'2026-11'});
     await saved.waitFor();
     assert.match(await saved.innerText(),/QNB[\s\S]*2026-11[\s\S]*Yedek kredi kartı/);
-    for(const item of ['4 hareket','Tam doğrulandı','1.500,00','500,00','100,00','1.000,00','Aktarım']){
+    for(const item of ['4 hareket','Doğrulandı','1.500,00','500,00','100,00','1.000,00','Aktarım']){
       assert.ok((await saved.innerText()).includes(item),item);
     }
     const legacy=history.getByRole('article').filter({hasText:'2026-10'});
-    assert.match(await legacy.innerText(),/İnceleme gerekiyor/);
+    assert.match(await legacy.innerText(),/Eski aktarım — doğrulama bilgisi yok/);
+    await legacy.getByRole('button',{name:'Detayı aç'}).click();
+    await page.getByRole('heading',{name:'QNB · 2026-10'}).waitFor();
+    await page.getByText('Eski aktarım — doğrulama bilgisi yok',{exact:true}).waitFor();
+    await page.evaluate(()=>window.handleBack());
     assert.match(await legacy.innerText(),/20,00/);
     checks+=await checkLayout(page,'.statement-history');
     await page.setViewportSize({width:390,height:844});
@@ -176,7 +180,7 @@ async function run() {
     assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Detayı aç');
     await page.reload();
     await page.locator('nav [data-page=import]').click();
-    assert.match(await history.getByRole('article').filter({hasText:'2026-11'}).innerText(),/Tam doğrulandı/);
+    assert.match(await history.getByRole('article').filter({hasText:'2026-11'}).innerText(),/Doğrulandı/);
 
     await page.evaluate(text=>window.onPdfText(text),statement.replace('Borcu: 1000.00','Borcu: 1001.00'));
     await preview.getByText('Mutabakat farkı var',{exact:false}).first().waitFor();
@@ -201,6 +205,28 @@ async function run() {
     await page.evaluate(()=>window.handleBack());
     assert.equal(await acknowledgement.isChecked(),true);
     assert.equal(await suggestion.isChecked(),true);
+    await page.locator('#settings').click();
+    await page.getByRole('button',{name:'Diğer kategorisini düzenle'}).click();
+    await page.getByRole('button',{name:'Kategoriyi sil'}).click();
+    await page.getByLabel('Başka kategoriye taşı').check();
+    await page.getByLabel('Hedef gider kategorisi').selectOption('Ulaşım');
+    await page.locator('#submit').click();
+    await page.evaluate(()=>window.handleBack());
+    const changedSuggestion=preview.getByLabel(/SENTETIK MARKET · Öneriyi seç: Ulaşım/i);
+    await changedSuggestion.waitFor();
+    assert.equal(await acknowledgement.isChecked(),true);
+    assert.equal(await changedSuggestion.isChecked(),false);
+    await page.evaluate(() => {
+      const key='ekstre-android-v1';
+      const wallet=JSON.parse(localStorage.getItem(key));
+      const record=wallet.statements.find(s=>s.period==='2026-11');
+      record.reconciliationStatus='mismatch';
+      localStorage.setItem(key,JSON.stringify(wallet));
+    });
+    await page.reload();
+    await page.locator('nav [data-page=import]').click();
+    await saved.getByRole('button',{name:'Detayı aç'}).click();
+    await page.getByText('Belgedeki ekstre toplamları uyuşmuyor.',{exact:true}).waitFor();
     assert.deepEqual(errors,[]);
     console.log('Statement and expense chart journeys passed; '+checks+' responsive checks');
   } finally {
