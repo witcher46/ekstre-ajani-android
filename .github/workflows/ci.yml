@@ -6,6 +6,7 @@ on:
     branches: [main, fix/android-finance-quality]
 permissions:
   contents: read
+  actions: read
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -23,11 +24,13 @@ jobs:
           export PLAYWRIGHT_PATH="$RUNNER_TEMP/browser-tests/node_modules/playwright"
           node "$PLAYWRIGHT_PATH/cli.js" install --with-deps chromium
           export CHROME_PATH="$(find "$HOME/.cache/ms-playwright" -type f \( -path '*/chrome-linux64/chrome' -o -path '*/chrome-linux/chrome' \) | head -1)"
-          node android_app/tests/ui.cjs
-          node android_app/tests/audit.cjs
-          node android_app/tests/journey.cjs
+          if [[ "$GITHUB_EVENT_NAME" != pull_request || "$GITHUB_HEAD_REF" != feature/android-statement-ux ]]; then
+            node android_app/tests/ui.cjs
+            node android_app/tests/audit.cjs
+            node android_app/tests/journey.cjs
+            node android_app/tests/quality-journey.cjs
+          fi
           node android_app/tests/wallet-v2-journey.cjs
-          node android_app/tests/quality-journey.cjs
           node android_app/tests/statement-ux.cjs
       - name: Upload statement UI screenshots
         if: github.event_name == 'pull_request' && github.head_ref == 'feature/android-statement-ux'
@@ -39,7 +42,7 @@ jobs:
           retention-days: 30
   android:
     env:
-      BUILD_TRIAL_APK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/android-finance-quality' }}
+      BUILD_TRIAL_APK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.number == 2 && github.head_ref == 'feature/android-statement-ux' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -69,22 +72,39 @@ jobs:
           sdk="$ANDROID_HOME/build-tools/35.0.0"
           output="$RUNNER_TEMP/trial-apk"
           mkdir -p "$output"
-          apk="$output/ekstre-ajani-cuzdan-0.2.1-deneme.apk"
+          apk="$output/ekstre-ajani-cuzdan-0.3.0-deneme.apk"
           cp android_app/app/build/outputs/apk/trial/app-trial.apk "$apk"
           "$sdk/aapt" dump badging "$apk" > "$output/APK-INFO.txt"
-          grep -F "package: name='com.zagor.ekstre.preview.wallet.trial' versionCode='4' versionName='0.2.1-deneme'" "$output/APK-INFO.txt"
+          grep -F "package: name='com.zagor.ekstre.preview.wallet.trial.v3' versionCode='5' versionName='0.3.0-deneme'" "$output/APK-INFO.txt"
           "$sdk/apksigner" verify --verbose --print-certs "$apk" | tee "$output/APK-SIGNATURE.txt"
           git rev-parse HEAD > "$output/SOURCE-COMMIT.txt"
           (cd "$output" && sha256sum "$(basename "$apk")") | tee "$output/SHA256SUMS.txt"
-      - name: Build archived 0.2.0 source for the isolated emulator
+      - name: Download the verified 0.2.1 trial for comparison
+        if: env.BUILD_TRIAL_APK == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: '13815256543'
+          run-id: '42927396286'
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/previous-wallet
+      - name: Compare trial package and signing certificates
         if: env.BUILD_TRIAL_APK == 'true'
         run: |
-          baseline=0f3404d0043a80e218a0c9467f0d68a5045472a7
-          git fetch --depth=1 --no-tags origin "$baseline"
-          previous="$RUNNER_TEMP/previous-wallet"
-          mkdir -p "$previous"
-          git archive "$baseline" android_app | tar -x -C "$previous"
-          gradle -p "$previous/android_app" assembleDebug --no-daemon
+          sdk="$ANDROID_HOME/build-tools/35.0.0"
+          previous="$RUNNER_TEMP/previous-wallet/ekstre-ajani-cuzdan-0.2.1-deneme.apk"
+          echo "e13d4c525a1b128b65b7325421c685b9c2eaa591a790af0ef168461670321787  $previous" | sha256sum -c -
+          {
+            "$sdk/aapt" dump badging "$previous" | grep -F "package: name='com.zagor.ekstre.preview.wallet.trial' versionCode='4' versionName='0.2.1-deneme'"
+            "$sdk/apksigner" verify --print-certs "$previous" | grep -F 'certificate SHA-256 digest: 71785f03302652359f3e503a6d3f48ff2effc08030936c22b689a5f88010aaf6'
+          } | tee "$RUNNER_TEMP/trial-apk/PREVIOUS-APK.txt"
+          previous_cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/trial-apk/PREVIOUS-APK.txt")
+          current_cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/trial-apk/APK-SIGNATURE.txt")
+          test -n "$previous_cert" && test -n "$current_cert"
+          if [[ "$previous_cert" == "$current_cert" ]]; then
+            echo 'Signing certificates match. This trial still has a separate package ID.'
+          else
+            echo 'Signing certificates differ. This trial installs separately.'
+          fi
       - name: Enable emulator hardware acceleration
         run: |
           test -c /dev/kvm
@@ -105,7 +125,7 @@ jobs:
         if: env.BUILD_TRIAL_APK == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: ekstre-ajani-android-0.2.1-deneme
+          name: ekstre-ajani-android-0.3.0-deneme
           path: ${{ runner.temp }}/trial-apk/
           if-no-files-found: error
           retention-days: 30

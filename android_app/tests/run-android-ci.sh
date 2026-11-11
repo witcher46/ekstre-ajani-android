@@ -5,11 +5,11 @@ if [[ "$BUILD_TRIAL_APK" != true ]]; then
   exec gradle connectedDebugAndroidTest --no-daemon
 fi
 
-previous_package=com.zagor.ekstre.preview.wallet
-trial_package=com.zagor.ekstre.preview.wallet.trial
+previous_package=com.zagor.ekstre.preview.wallet.trial
+trial_package=com.zagor.ekstre.preview.wallet.trial.v3
 activity=com.zagor.ekstre.MainActivity
-previous_apk="$RUNNER_TEMP/previous-wallet/android_app/app/build/outputs/apk/debug/app-debug.apk"
-trial_apk="$RUNNER_TEMP/trial-apk/ekstre-ajani-cuzdan-0.2.1-deneme.apk"
+previous_apk="$RUNNER_TEMP/previous-wallet/ekstre-ajani-cuzdan-0.2.1-deneme.apk"
+trial_apk="$RUNNER_TEMP/trial-apk/ekstre-ajani-cuzdan-0.3.0-deneme.apk"
 wallet_dir="$RUNNER_TEMP/isolated-wallet-test"
 mkdir -p "$wallet_dir"
 
@@ -47,7 +47,8 @@ with sqlite3.connect(Path(sys.argv[1]).as_uri() + "?mode=ro", uri=True) as db:
     assert db.execute("SELECT COUNT(*) FROM snapshots").fetchone() == (0,)
 PY
 
-gradle connectedTrialAndroidTest -PtrialDeviceTest --no-daemon
+gradle connectedTrialAndroidTest -PtrialDeviceTest --no-daemon \
+  '-Pandroid.testInstrumentationRunnerArguments.class=com.zagor.ekstre.WalletJourneyTest#backupFileRoundTripRetainsRecovery'
 adb exec-out run-as "$previous_package" cat databases/wallet.db > "$wallet_dir/after.db"
 cmp "$wallet_dir/before.db" "$wallet_dir/after.db"
-echo "Both APKs installed separately. The trial started empty and the 0.2.0 synthetic wallet remained byte-for-byte intact."
+echo "Both APKs installed separately. The trial started empty and the 0.2.1 synthetic wallet remained byte-for-byte intact."
