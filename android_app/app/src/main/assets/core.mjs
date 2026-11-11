@@ -109,9 +109,13 @@ const branchProvinces=new Set((
  'NEVSEHIR NIGDE ORDU OSMANIYE RIZE SAKARYA SAMSUN SIIRT SINOP SIVAS SANLIURFA SIRNAK TEKIRDAG TOKAT '+
  'TRABZON TUNCELI USAK VAN YALOVA YOZGAT ZONGULDAK'
 ).split(' '));
+const genericMerchantNames=new Set(['POS','POS SATIS','SANAL POS','MARKET','SUPERMARKET','MAGAZA','ISYERI',
+ 'KARTLI ALISVERIS','ALISVERIS','ODEME','SATIS','HARCAMA','SUBE','KREDI KARTI']);
 function branchMerchantName(key){
- const match=/^(.+) (?:SUBE )?[0-9]{3,6} ([A-Z]+)$/.exec(key);
- return match&&branchProvinces.has(match[2])?match[1]:null;
+ const match=/^(.+?) (?:SUBE )?[0-9]{3,6} ([A-Z]+)$/.exec(key);
+ if(!match)return null;
+ const [,name,province]=match;
+ return /\p{L}/u.test(name)&&!genericMerchantNames.has(name)&&branchProvinces.has(province)?name:null;
 }
 export function suggestCategory(s,merchant){
  const exact=merchantRule(s,merchant);
@@ -141,12 +145,22 @@ export function removeMerchantRule(s,ruleId){
  next.merchantCategoryRules=(next.merchantCategoryRules||[]).filter(r=>r.id!==ruleId);
  return validate(next);
 }
-export function renameExpenseCategory(s,category,newName){
- if(!s.categories.includes(category))throw Error('Gider kategorisi bulunamadı.');
+function expenseCategoryName(s,newName,existing){
  const name=String(newName??'').trim();
  if(!name||name.length>200)throw Error('Geçerli bir kategori adı gir.');
- if(name===category)return s;
+ if(name===existing)return name;
+ if(name==='Toplam')throw Error('“Toplam” aylık toplam bütçesi için ayrılmıştır.');
  if(s.categories.includes(name))throw Error('Bu gider kategorisi zaten var.');
+ return name;
+}
+export function addExpenseCategory(s,newName){
+ const name=expenseCategoryName(s,newName);
+ return validate({...s,categories:[...s.categories,name]});
+}
+export function renameExpenseCategory(s,category,newName){
+ if(!s.categories.includes(category))throw Error('Gider kategorisi bulunamadı.');
+ const name=expenseCategoryName(s,newName,category);
+ if(name===category)return s;
  const next=structuredClone(s);
  next.categories=next.categories.map(c=>c===category?name:c);
  for(const row of next.transactions){
@@ -160,7 +174,7 @@ export function renameExpenseCategory(s,category,newName){
   for(const [key,amount] of Object.entries(next.budgets)){
    if(key.slice(8)!==category)continue;
    const target=key.slice(0,8)+name;
-   if(name==='Toplam'||Object.hasOwn(next.budgets,target))throw Error('Yeni kategori adı bir bütçe ile çakışıyor.');
+   if(Object.hasOwn(next.budgets,target))throw Error('Yeni kategori adı bir bütçe ile çakışıyor.');
    next.budgets[target]=amount;
    delete next.budgets[key];
   }

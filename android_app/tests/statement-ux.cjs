@@ -205,6 +205,17 @@ async function run() {
     await page.evaluate(()=>window.handleBack());
     assert.equal(await acknowledgement.isChecked(),true);
     assert.equal(await suggestion.isChecked(),true);
+    await page.locator('#settings').click();
+    await page.getByRole('button',{name:'Diğer kategorisini düzenle'}).click();
+    await page.getByRole('button',{name:'Kategoriyi sil'}).click();
+    await page.getByLabel('Başka kategoriye taşı').check();
+    await page.getByLabel('Hedef gider kategorisi').selectOption('Ulaşım');
+    await page.locator('#submit').click();
+    await page.evaluate(()=>window.handleBack());
+    const changedSuggestion=preview.getByLabel(/SENTETIK MARKET · Öneriyi seç: Ulaşım/i);
+    await changedSuggestion.waitFor();
+    assert.equal(await acknowledgement.isChecked(),true);
+    assert.equal(await changedSuggestion.isChecked(),false);
     await page.evaluate(() => {
       const key='ekstre-android-v1';
       const wallet=JSON.parse(localStorage.getItem(key));

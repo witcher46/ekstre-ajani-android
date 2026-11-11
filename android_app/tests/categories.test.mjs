@@ -99,6 +99,9 @@ test('an approved merchant rule suggests a category across numbered branches in 
   assert.equal(C.suggestCategory(metro,'METRO TURIZM 1234 IZMIR'),null);
   assert.equal(C.suggestCategory(metro,'METRO MARKET 1234 IZMIR'),'Market / Gıda');
   assert.equal(C.suggestCategory(C.saveMerchantRule(C.empty(),'MIGROS','Market / Gıda'),'MIGROS 1234 IZMIR'),'Market / Gıda');
+  const generic = C.saveMerchantRule(C.empty(),'POS 5432 ANKARA','Diğer');
+  assert.equal(C.suggestCategory(generic,'POS 1234 IZMIR'),null);
+  assert.equal(C.suggestCategory(generic,'POS 5432 ANKARA'),'Diğer');
 });
 
 test('conflicting branch rules leave an unfamiliar branch unresolved and preserve exact rules', () => {
@@ -108,4 +111,16 @@ test('conflicting branch rules leave an unfamiliar branch unresolved and preserv
   assert.equal(C.suggestCategory(state,'MIGROS 1234 IZMIR'),'Diğer');
   assert.equal(C.suggestCategory(state,'MIGROS 5432 ANKARA'),'Market / Gıda');
   assert.deepEqual(C.readBackup(C.backupText(state)),state);
+});
+
+
+test('the overall budget name cannot be assigned to a new expense category', () => {
+  const state = {...C.empty(),budgets:{'2026-10|Toplam':10000}};
+  assert.throws(()=>C.renameExpenseCategory(state,'Giyim','Toplam'),/bütçe/i);
+  assert.throws(()=>C.addExpenseCategory(state,' Toplam '),/bütçe/i);
+  assert.deepEqual(C.addExpenseCategory(state,'  Sentetik kategori ').categories,[...state.categories,'Sentetik kategori']);
+  assert.deepEqual(state.budgets,{'2026-10|Toplam':10000});
+  const legacy={...state,categories:[...state.categories,'Toplam']};
+  assert.deepEqual(C.readBackup(C.backupText(legacy)),legacy);
+  assert.deepEqual(C.renameExpenseCategory(legacy,'Toplam','Eski etiket').budgets,state.budgets);
 });
