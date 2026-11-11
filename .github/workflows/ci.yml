@@ -3,7 +3,7 @@ on:
   push:
     branches: [main, feature/mobile-wallet-finance-v2, android/ux-finance-revision]
   pull_request:
-    branches: [main]
+    branches: [main, fix/android-finance-quality]
 permissions:
   contents: read
 jobs:
@@ -28,6 +28,15 @@ jobs:
           node android_app/tests/journey.cjs
           node android_app/tests/wallet-v2-journey.cjs
           node android_app/tests/quality-journey.cjs
+          node android_app/tests/statement-ux.cjs
+      - name: Upload statement UI screenshots
+        if: github.event_name == 'pull_request' && github.head_ref == 'feature/android-statement-ux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-statement-ux-screenshots
+          path: android_app/test-output/statement-ux/*.png
+          if-no-files-found: error
+          retention-days: 30
   android:
     env:
       BUILD_TRIAL_APK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/android-finance-quality' }}

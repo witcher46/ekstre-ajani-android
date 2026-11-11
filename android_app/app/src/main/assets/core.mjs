@@ -317,7 +317,7 @@ export function importStatement(s,p,account){
  for(const r of p.rows){const old=previous.find(t=>t.importKey===r.importKey),row={...r,id:old?.id||id(),account,statement:key,source:'pdf',merchantName:r.desc,sourceDesc:r.sourceDesc??r.desc,desc:old&&old.desc!==old.sourceDesc?old.desc:r.desc,category:old?.category??r.category,note:old?.note??'',reviewed:old?.reviewed||false};
   if(old&&!invalidated.has(old.id)){for(const k of ['matchStatus','matchCandidates','matchReason','linkedTo','previousLinkedTo'])if(old[k]!==undefined)row[k]=old[k];}else markCandidate(row,candidates);next.transactions.push(row);
  }
- next.statements=next.statements.filter(x=>x.id!==key);next.statements.push({id:key,account,bank:p.bank,period:p.period,cut:p.cut,due:p.due,debt:p.debt,imported:today()});return validate(repairReferences(preferPdfAcrossCut(next)));
+ next.statements=next.statements.filter(x=>x.id!==key);next.statements.push({id:key,account,bank:p.bank,period:p.period,cut:p.cut,due:p.due,debt:p.debt,imported:today(),reconciliationStatus:p.reconciliation?.status==='verified'?'verified':'unverified',importedMovementCount:p.rows.length});return validate(repairReferences(preferPdfAcrossCut(next)));
 }
 export function importCsv(s,rows,account){
  const a=s.accounts.find(a=>a.id===account);if(!a||a.type!=='card')throw Error('CSV için bir kredi kartı seç.');const next=structuredClone(s),seen=new Set(),candidates=[...next.transactions];
