@@ -211,20 +211,21 @@ function totalsList(ctx,totals,debt=undefined) {
 }
 
 function statementStatus(statement,pending,movementCount) {
+  if (statement.reconciliationStatus === 'mismatch') return {label:'İnceleme gerekiyor',reason:'Belgedeki ekstre toplamları uyuşmuyor.'};
   if (Number.isSafeInteger(statement.importedMovementCount) && statement.importedMovementCount !== movementCount) {
     return {label:'İnceleme gerekiyor',reason:'Kayıtlı hareketler aktarımdan sonra değişmiş.'};
   }
   if (pending) return {label:'İnceleme gerekiyor',reason:'Bu ekstreyle ilişkili olası eşleşmeler inceleme kutusunda.'};
-  if (statement.reconciliationStatus === 'verified') return {label:'Tam doğrulandı',verified:true};
+  if (statement.reconciliationStatus === 'verified') return {label:'Doğrulandı',tone:'verified'};
   if (statement.reconciliationStatus === 'unverified') return {label:'İnceleme gerekiyor',reason:'Aktarımda belgedeki toplamlar tam doğrulanamadı.'};
-  return {label:'İnceleme gerekiyor',reason:'Bu aktarımın mutabakat sonucu kaydedilmemiş.'};
+  return {label:'Eski aktarım — doğrulama bilgisi yok',tone:'legacy'};
 }
 
 function statementCard(ctx,statement,rows,pending) {
   const {state,esc}=ctx;
   const status=statementStatus(statement,pending,rows.length);
   return `<article class="statement-card">
-    <div class="statement-card-heading"><div><h3>${esc(statement.bank || 'Banka bilinmiyor')} <span>· ${esc(statement.period)}</span></h3><p>${esc(accountName(state,statement.account))}</p></div><span class="statement-status ${status.verified?'verified':''}">${status.label}</span></div>
+    <div class="statement-card-heading"><div><h3>${esc(statement.bank || 'Banka bilinmiyor')} <span>· ${esc(statement.period)}</span></h3><p>${esc(accountName(state,statement.account))}</p></div><span class="statement-status ${status.tone||''}">${status.label}</span></div>
     <p class="statement-meta">${esc(rows.length)} hareket${statement.imported?` · Aktarım ${esc(statement.imported)}`:''}</p>
     ${totalsList(ctx,statementTotals(rows),statement.debt??null)}
     <button type="button" class="statement-detail-button" data-statement-view="${esc(statement.id)}" aria-label="${esc(`Detayı aç · ${statement.bank||'Ekstre'} · ${statement.period} · ${accountName(state,statement.account)}`)}">Detayı aç</button>
@@ -241,7 +242,7 @@ export function statementView(ctx,id) {
   return shell(`<button class="back-link" data-action="back">← Ekstreler</button>
     <h1>${ctx.esc(statement.bank || 'Ekstre')} · ${ctx.esc(statement.period)}</h1>
     <p class="lead">${ctx.esc(accountName(ctx.state,statement.account))}</p>
-    <section class="panel"><h2>Ekstre bilgileri</h2><p class="statement-status ${status.verified?'verified':''}">${status.label}</p>
+    <section class="panel"><h2>Ekstre bilgileri</h2><p class="statement-status ${status.tone||''}">${status.label}</p>
       ${status.reason?`<p>${status.reason}</p>`:''}
       ${totalsList(ctx,statementTotals(rows),statement.debt??null)}
       <dl class="card-details">${detail(ctx,'Hesap kesimi',statement.cut)}${detail(ctx,'Son ödeme tarihi',statement.due)}${detail(ctx,'İçe aktarma tarihi',statement.imported)}</dl>

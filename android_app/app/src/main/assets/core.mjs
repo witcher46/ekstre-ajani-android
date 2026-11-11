@@ -99,7 +99,33 @@ export function merchantRule(s,merchant){
  const key=merchantKey(merchant);
  return s.merchantCategoryRules?.find(r=>merchantKey(r.merchant)===key);
 }
-export const suggestCategory=(s,merchant)=>merchantRule(s,merchant)?.category??null;
+// Recognize a branch suffix only when a store number is followed by a known province.
+const branchProvinces=new Set((
+ 'ADANA ADIYAMAN AFYON AFYONKARAHISAR AGRI AKSARAY AMASYA ANKARA ANTALYA ARDAHAN ARTVIN AYDIN '+
+ 'BALIKESIR BARTIN BATMAN BAYBURT BILECIK BINGOL BITLIS BOLU BURDUR BURSA CANAKKALE CANKIRI CORUM '+
+ 'DENIZLI DIYARBAKIR DUZCE EDIRNE ELAZIG ERZINCAN ERZURUM ESKISEHIR GAZIANTEP GIRESUN GUMUSHANE '+
+ 'HAKKARI HATAY IGDIR ISPARTA ISTANBUL IZMIR KAHRAMANMARAS KARABUK KARAMAN KARS KASTAMONU KAYSERI '+
+ 'KIRIKKALE KIRKLARELI KIRSEHIR KILIS KOCAELI KONYA KUTAHYA MALATYA MANISA MARDIN MERSIN MUGLA MUS '+
+ 'NEVSEHIR NIGDE ORDU OSMANIYE RIZE SAKARYA SAMSUN SIIRT SINOP SIVAS SANLIURFA SIRNAK TEKIRDAG TOKAT '+
+ 'TRABZON TUNCELI USAK VAN YALOVA YOZGAT ZONGULDAK'
+).split(' '));
+function branchMerchantName(key){
+ const match=/^(.+) (?:SUBE )?[0-9]{3,6} ([A-Z]+)$/.exec(key);
+ return match&&branchProvinces.has(match[2])?match[1]:null;
+}
+export function suggestCategory(s,merchant){
+ const exact=merchantRule(s,merchant);
+ if(exact)return exact.category;
+ const name=branchMerchantName(merchantKey(merchant));
+ if(!name)return null;
+ const categories=new Set();
+ for(const rule of s.merchantCategoryRules??[]){
+  const key=merchantKey(rule.merchant);
+  if(key===name||branchMerchantName(key)===name)categories.add(rule.category);
+  if(categories.size>1)return null;
+ }
+ return categories.values().next().value??null;
+}
 export function saveMerchantRule(s,merchant,category,ruleId){
  const next=structuredClone(s);
  next.merchantCategoryRules??=[];
@@ -113,6 +139,48 @@ export function saveMerchantRule(s,merchant,category,ruleId){
 export function removeMerchantRule(s,ruleId){
  const next=structuredClone(s);
  next.merchantCategoryRules=(next.merchantCategoryRules||[]).filter(r=>r.id!==ruleId);
+ return validate(next);
+}
+export function renameExpenseCategory(s,category,newName){
+ if(!s.categories.includes(category))throw Error('Gider kategorisi bulunamadı.');
+ const name=String(newName??'').trim();
+ if(!name||name.length>200)throw Error('Geçerli bir kategori adı gir.');
+ if(name===category)return s;
+ if(s.categories.includes(name))throw Error('Bu gider kategorisi zaten var.');
+ const next=structuredClone(s);
+ next.categories=next.categories.map(c=>c===category?name:c);
+ for(const row of next.transactions){
+  if((row.kind==='expense'||row.kind==='refund')&&row.category===category)row.category=name;
+ }
+ for(const row of [...next.subscriptions,...(next.merchantCategoryRules??[])]){
+  if(row.category===category)row.category=name;
+ }
+ // The reserved monthly total is independent of any expense category label.
+ if(category!=='Toplam'){
+  for(const [key,amount] of Object.entries(next.budgets)){
+   if(key.slice(8)!==category)continue;
+   const target=key.slice(0,8)+name;
+   if(name==='Toplam'||Object.hasOwn(next.budgets,target))throw Error('Yeni kategori adı bir bütçe ile çakışıyor.');
+   next.budgets[target]=amount;
+   delete next.budgets[key];
+  }
+ }
+ return validate(next);
+}
+
+export function removeExpenseCategory(s,category,{moveRulesTo,removeRules=false}={}){
+ if(!s.categories.includes(category))throw Error('Gider kategorisi bulunamadı.');
+ const categories=s.categories.filter(c=>c!==category);
+ if(!categories.length)throw Error('En az bir gider kategorisi kalmalı.');
+ if(moveRulesTo!==undefined&&(!categories.includes(moveRulesTo)||removeRules))throw Error('Başka bir hedef gider kategorisi seç.');
+ const next=structuredClone(s);
+ if(next.merchantCategoryRules?.some(rule=>rule.category===category)){
+  if(removeRules)next.merchantCategoryRules=next.merchantCategoryRules.filter(rule=>rule.category!==category);
+  else if(moveRulesTo){
+   for(const rule of next.merchantCategoryRules)if(rule.category===category)rule.category=moveRulesTo;
+  }else throw Error('Kategoriye bağlı satıcı kurallarını taşı veya kaldır.');
+ }
+ next.categories=categories;
  return validate(next);
 }
 export const sourceOf=t=>t.source||(t.statement?'pdf':t.csvKey?'csv':'manual');
@@ -277,9 +345,14 @@ export function resolveCandidate(s,tid,decision,targetId){
   repointCandidates(next,[alias.id],canonical.id);
  }else if(decision==='distinct'){row.matchStatus='distinct';delete row.linkedTo;}else throw Error('Aynı veya ayrı işlem kararını seç.');delete row.matchCandidates;delete row.matchReason;return validate(next);
 }
+export function transactionRemovalRows(s,tid){
+ const plan=s.transactions.find(t=>t.id===tid)?.installmentPlan;
+ return s.transactions.filter(t=>t.id===tid||(plan&&t.installmentPlan===plan));
+}
 export function removeTransaction(s,tid){
- const next=structuredClone(s),plan=next.transactions.find(t=>t.id===tid)?.installmentPlan;
- next.transactions=next.transactions.filter(t=>t.id!==tid&&(!plan||t.installmentPlan!==plan));
+ const removed=new Set(transactionRemovalRows(s,tid).map(t=>t.id));
+ const next=structuredClone(s);
+ next.transactions=next.transactions.filter(t=>!removed.has(t.id));
  return validate(repairReferences(next));
 }
 function preferPdfAcrossCut(s){

@@ -102,6 +102,7 @@
 .wallet-v2 .statement-card-heading p,.wallet-v2 .preview-heading p{margin:0}
 .wallet-v2 .statement-status{display:inline-block;background:#3c3426;color:#f2d7a6;border:1px solid #685638;border-radius:8px;padding:3px 8px;margin:0;font-size:.85rem;font-weight:600;max-width:100%;overflow-wrap:anywhere}
 .wallet-v2 .statement-status.verified{color:#b9edd6;background:#234036;border-color:#4c7461}
+.wallet-v2 .statement-status.legacy{color:var(--muted);background:#202b33;border-color:#465660}
 .wallet-v2 .statement-meta{font-size:.85rem;margin:10px 0;color:var(--muted)}
 .wallet-v2 .statement-totals{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}
 .wallet-v2 .statement-totals>div{min-width:0;background:#152029;border:1px solid #354540;border-radius:9px;padding:9px 10px}
@@ -132,3 +133,8 @@
 }
 @media(max-width:480px){.wallet-v2 .expense-category-name{flex-basis:100%}}
 @media(max-width:350px){.wallet-v2 .quick-actions{gap:8px}.wallet-v2 .quick-actions button{padding:12px 7px}.wallet-v2 .metric{padding:14px}.wallet-v2 .reconciliation{padding:12px}}
+
+.wallet-v2 .expense-category-setting{align-items:center}
+.wallet-v2 .expense-category-setting>.left{flex-basis:8rem}
+.wallet-v2 .category-rule-choices{min-width:0;margin:0 0 12px;padding:0 12px 8px;border:1px solid var(--line);border-radius:10px;overflow-wrap:anywhere}
+.wallet-v2 .category-rule-choices input[type=radio]{width:1.25rem;min-height:24px;padding:0;vertical-align:middle;accent-color:var(--mint)}
