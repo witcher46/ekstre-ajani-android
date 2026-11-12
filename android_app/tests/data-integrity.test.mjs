@@ -73,6 +73,69 @@ test('overlapping ID-less CSV files retain ambiguous rows for review without mul
   assert.deepEqual(importCsv(s,[second,row]),s);
 });
 
+test('discarding ambiguous CSV rows preserves the review decision on a later replay',()=>{
+  const row=csv(),other=csv({desc:'SENTETIK FARKLI'});
+  let s=importCsv(wallet(),[row,other,row]);
+  s=C.removeTransaction(s,s.transactions.find(t=>t.matchStatus==='pending').id);
+  const restored=C.readBackup(C.backupText(s));
+  assert.equal(C.summary(restored,'2026-10','statement').net,10000);
+  assert.deepEqual(importCsv(restored,[row,row,other]),restored);
+  const initial=csv({transactionId:'known'});
+  const conflict=csv({transactionId:'known',cents:7500});
+  let withConflict=importCsv(wallet(),[initial,conflict]);
+  withConflict=C.removeTransaction(withConflict,withConflict.transactions.find(t=>t.matchStatus==='pending').id);
+  assert.deepEqual(importCsv(withConflict,[initial,conflict]),withConflict);
+});
+
+test('removing a PDF bridge reopens only dependent CSV aliases and preserves the installment amount',()=>{
+  const plan=C.addInstallmentPlan(wallet(),{
+    id:'plan',account:'card',date:'2026-12-15',desc:'Sentetik plan',amount:15000,kind:'expense',category:'Diğer',
+  },3);
+  const statement=parseStatement('QNB\nHesap Kesim Tarihi: 25/12/2026\n10/11/2026 SENTETIK PLAN 50.00 1/3');
+  const withPdf=C.importStatement(plan,statement,'card');
+  const pdf=withPdf.transactions.find(t=>t.source==='pdf');
+  const confirmed=C.resolveCandidate(withPdf,pdf.id,'link','plan');
+  const imported=importCsv(confirmed,[csv({date:'2026-11-10',period:'2026-12',desc:'SENTETIK PLAN'})]);
+  const incoming=imported.transactions.find(t=>t.source==='csv');
+  const linked=C.resolveCandidate(imported,incoming.id,'link','plan');
+  const withoutPdf=C.removeTransaction(linked,pdf.id);
+  const reopened=C.resolveCandidate(linked,pdf.id,'unlink');
+  for(const state of [withoutPdf,reopened]){
+    const csvRow=state.transactions.find(t=>t.id===incoming.id);
+    assert.equal(csvRow.linkedTo,undefined);
+    assert.equal(csvRow.matchStatus,'pending');
+    assert.equal(C.summary(state,'2026-12').net,5000);
+    assert.deepEqual(C.readBackup(C.backupText(state)),state);
+  }
+  const revised=C.importStatement(linked,parseStatement('QNB\nHesap Kesim Tarihi: 25/12/2026\n10/11/2026 SENTETIK PLAN 75.00 1/3'),'card');
+  assert.equal(revised.transactions.find(t=>t.id===incoming.id).matchStatus,'pending');
+  assert.equal(C.summary(revised,'2026-12').net,7500);
+});
+
+test('different PDF and CSV statement periods are not linked as one purchase',()=>{
+  const pdf=parseStatement('QNB\nHesap Kesim Tarihi: 25/12/2026\n10/11/2026 SENTETIK PLAN 50.00 1/3');
+  const s=importCsv(C.importStatement(wallet(),pdf,'card'),[csv({
+    date:'2026-11-10',period:'2027-01',desc:'SENTETIK PLAN',
+  })]);
+  const imported=s.transactions.find(t=>t.source==='csv');
+  assert.equal(imported.matchStatus,undefined);
+  assert.equal(C.summary(s,'2027-01','statement').net,5000);
+  const corrupted=structuredClone(s);
+  Object.assign(corrupted.transactions.find(t=>t.id===imported.id),{
+    linkedTo:corrupted.transactions[0].id,matchStatus:'linked',
+  });
+  delete corrupted.transactions.find(t=>t.id===imported.id).matchCandidates;
+  assert.throws(()=>C.readBackup(JSON.stringify(corrupted)),/ekstre dönem/i);
+});
+
+test('large sets of ambiguous CSV rows retain one review reference each and remain exportable',()=>{
+  const rows=Array.from({length:1300},()=>csv());
+  const s=importCsv(wallet(),rows);
+  assert.equal(s.transactions.length,1300);
+  assert.equal(s.transactions.filter(t=>t.matchStatus==='pending'&&t.matchCandidates.length===1).length,1299);
+  assert.equal(C.readBackup(C.backupText(s)).transactions.length,1300);
+});
+
 test('restore rejects unrelated, wrong-source and wrong-direction links before computing balances',()=>{
   let s=C.addTransaction(wallet(),{id:'bank-out',account:'bank',target:'card',date:'2026-10-01',amount:5000,kind:'payment',category:'Kart ödemesi',desc:'Sentetik banka'});
   s=C.importStatement(s,parseStatement(pdfText('ODEME').replace('Donem Borcu: 50.00','Donem Borcu: -50.00')),'card');

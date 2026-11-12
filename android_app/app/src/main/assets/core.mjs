@@ -91,11 +91,18 @@ export function validate(s){
   }
   if(t.matchStatus!==undefined&&!['pending','linked','distinct'].includes(t.matchStatus))throw Error('Eşleşme durumu geçersiz.');
   if(t.matchStatus==='linked'&&!t.linkedTo)throw Error('Eşleşme hedefi eksik.');
-  if(t.matchStatus==='pending'&&(!Array.isArray(t.matchCandidates)||(!t.matchCandidates.length&&t.matchReason!=='sourceChanged')||t.matchCandidates.some(x=>!txids.has(x)||x===t.id)))throw Error('İnceleme adayı geçersiz.');
+  if(t.matchStatus==='pending'&&(!Array.isArray(t.matchCandidates)||(!t.matchCandidates.length&&t.matchReason!=='sourceChanged'&&!isCsvReview(t))||t.matchCandidates.some(x=>!txids.has(x)||x===t.id)))throw Error('İnceleme adayı geçersiz.');
   if(t.csvSourceId!==undefined&&(!text(t.csvSourceId)||!t.csvSourceId.trim()||sourceOf(t)!=='csv'))throw Error('CSV kaynak işlem kimliği geçersiz.');
   if(t.csvBatchId!==undefined&&(!text(t.csvBatchId)||!t.csvBatchId.trim()||sourceOf(t)!=='csv'||t.csvSourceId!==undefined))throw Error('CSV aktarım kimliği geçersiz.');
  }
  validateLinkGroups(s,links);
+ if(s.csvDismissals!==undefined){
+  if(!Array.isArray(s.csvDismissals)||s.csvDismissals.length>50000)throw Error('CSV inceleme kayıtları geçersiz.');
+  const cardIds=new Set(s.accounts.filter(a=>a.type==='card').map(a=>a.id));
+  for(const receipt of s.csvDismissals){
+   if(!cardIds.has(readCsvDismissal(receipt).account))throw Error('CSV inceleme kaydının kartı bulunamadı.');
+  }
+ }
  for(const [plan,rows] of plans){
   rows.sort((a,b)=>a.date.localeCompare(b.date));
   const first=rows[0],day=Number(first.date.slice(8,10));
@@ -227,6 +234,21 @@ function sameEconomic(a,b){
  }
  return a.date===b.date||(effectKind(a)==='cardPayment'&&Math.abs(Date.parse(a.date)-Date.parse(b.date))<=3*86400000);
 }
+function incompatibleStatementPeriods(a,b){
+ const x=sourceOf(a),y=sourceOf(b);
+ return effectKind(a)!=='cardPayment'&&a.period!==b.period&&
+  ((x==='pdf'&&y==='csv')||(x==='csv'&&y==='pdf'));
+}
+function connectedLinkRows(target,aliases){
+ const connected=[target],remaining=[...aliases];
+ if(target.kind==='payment')return [...connected,...remaining];
+ while(remaining.length){
+  const index=remaining.findIndex(row=>connected.some(other=>sameEconomic(row,other)));
+  if(index<0)break;
+  connected.push(...remaining.splice(index,1));
+ }
+ return connected;
+}
 function validateLinkGroups(s,links){
  if(!links.size)return;
  const statements=new Map(s.statements.map(st=>[st.id,st]));
@@ -261,14 +283,13 @@ function validateLinkGroups(s,links){
    if(row.installment)installment=row.installment;
    sources.add(source);
   }
-  // A bank-side payment can have a different actual date from its document rows.
-  if(target.kind!=='payment'){
-   const matched=[target],remaining=[...aliases];
-   while(remaining.length){
-    const index=remaining.findIndex(row=>matched.some(other=>sameEconomic(row,other)));
-    if(index<0)throw Error('Yedekte tarih veya taksit dönemi uyuşmayan işlem bağlantısı var.');
-    matched.push(...remaining.splice(index,1));
-   }
+  const csv=group.find(row=>sourceOf(row)==='csv'),pdf=group.find(row=>sourceOf(row)==='pdf');
+  // Previously confirmed legacy links did not require the two export periods to match.
+  if(pdf&&csv?.csvKey.startsWith('["csv-v2",')&&incompatibleStatementPeriods(csv,pdf)){
+   throw Error('Yedekte PDF ve CSV ekstre dönemleri uyuşmuyor.');
+  }
+  if(connectedLinkRows(target,aliases).length!==group.length){
+   throw Error('Yedekte tarih veya taksit dönemi uyuşmayan işlem bağlantısı var.');
   }
  }
 }
@@ -287,6 +308,21 @@ function validateCsvLinkPeriod(row){
   throw Error('Yedekte CSV işlem bağlantısının dönemi uyuşmuyor.');
  }
 }
+function readCsvDismissal(receipt){
+ const invalid=()=>Error('CSV inceleme kaydı geçersiz.');
+ if(!Array.isArray(receipt)||receipt.length!==2||!text(receipt[0],5000))throw invalid();
+ let key;
+ try{key=JSON.parse(receipt[0]);}catch{throw invalid();}
+ if(!Array.isArray(key)||key.length!==8||key[0]!=='csv-v2')throw invalid();
+ const [,account,period,kind,date,amount,sourceDesc,sourceId]=key;
+ const batch=receipt[1];
+ if(!text(account)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)||!['expense','refund','cardPayment'].includes(kind)||
+    !validDate(date)||!cents(amount)||amount<0||!text(sourceDesc,2000)||
+    (sourceId===null?(!text(batch)||!batch.trim()):(batch!==null||!text(sourceId)||!sourceId.trim()))){
+  throw invalid();
+ }
+ return {account,period,kind,date,amount,sourceDesc,csvSourceId:sourceId,csvBatchId:batch};
+}
 function csvBatchSignature(rows){
  return JSON.stringify(rows.map(csvSignature).sort());
 }
@@ -295,8 +331,14 @@ function appendToGroup(groups,key,row){
  groups.get(key).push(row);
 }
 function matchingRows(rows,t){
- const viaAliases=new Set(rows.filter(r=>r.linkedTo&&sourceOf(r)!==sourceOf(t)&&sameEconomic(r,t)).map(r=>r.linkedTo));
- return rows.filter(r=>r.id!==t.id&&effective(r)&&sourceOf(r)!==sourceOf(t)&&(sameEconomic(r,t)||viaAliases.has(r.id)));
+ const viaAliases=new Set(),incompatible=new Set();
+ for(const row of rows){
+  if(row.id===t.id||sourceOf(row)===sourceOf(t))continue;
+  if(incompatibleStatementPeriods(row,t))incompatible.add(row.linkedTo||row.id);
+  if(row.linkedTo&&sameEconomic(row,t))viaAliases.add(row.linkedTo);
+ }
+ return rows.filter(r=>r.id!==t.id&&effective(r)&&sourceOf(r)!==sourceOf(t)&&
+  !incompatible.has(r.id)&&(sameEconomic(r,t)||viaAliases.has(r.id)));
 }
 function markCandidate(t,rows){if(t.matchStatus==='distinct'||t.linkedTo)return;const candidates=matchingRows(rows,t);if(candidates.length){t.matchStatus='pending';t.matchCandidates=candidates.map(r=>r.id);}}
 function validateKind(s,t){
@@ -407,7 +449,34 @@ export function paySubscription(s,rid,options={}){
  const next=addTransaction(s,{account:r.account,date:paidOn,desc:r.name,amount:r.amount,kind:'expense',category:activeExpenseCategory(s,r.category??'Abonelik'),note:'Abonelik ödemesi',subscriptionId:rid,subscriptionDue:due});
  const sub=next.subscriptions.find(x=>x.id===rid);sub.billingDay=r.billingDay||Number(due.slice(8,10));sub.next=nextMonth(due,sub.billingDay);sub.lastPaidOn=paidOn;return next;
 }
-function repairReferences(s){const ids=new Set(s.transactions.map(t=>t.id));for(const t of s.transactions){if(t.linkedTo&&!ids.has(t.linkedTo)){t.previousLinkedTo=t.linkedTo;delete t.linkedTo;t.matchStatus='pending';t.matchReason='sourceChanged';t.matchCandidates=[];}if(t.matchStatus==='pending'){t.matchCandidates=(t.matchCandidates||[]).filter(x=>ids.has(x)&&x!==t.id);if(!t.matchCandidates.length)t.matchReason='sourceChanged';}}return s;}
+function reopenSource(row){
+ row.previousLinkedTo=row.linkedTo;
+ delete row.linkedTo;
+ row.matchStatus='pending';
+ row.matchReason='sourceChanged';
+ row.matchCandidates=[];
+}
+function repairReferences(s){
+ const byId=new Map(s.transactions.map(row=>[row.id,row])),links=new Map();
+ for(const row of s.transactions){
+  if(row.linkedTo){
+   const target=byId.get(row.linkedTo);
+   if(target)appendToGroup(links,target,row);
+   else reopenSource(row);
+  }
+  if(row.matchStatus==='pending'){
+   row.matchCandidates=(row.matchCandidates||[]).filter(id=>byId.has(id)&&id!==row.id);
+   if(!row.matchCandidates.length&&!isCsvReview(row))row.matchReason='sourceChanged';
+  }
+ }
+ for(const [target,aliases] of links){
+  const connected=new Set(connectedLinkRows(target,aliases));
+  // If a removed source was the only link, leave the dependent row in review.
+  for(const row of aliases)if(!connected.has(row))reopenSource(row);
+ }
+ return s;
+}
+function isCsvReview(row){return row.matchStatus==='pending'&&['csvRepeatedRow','csvSourceConflict'].includes(row.matchReason);}
 export function repointCandidates(s,oldIds,canonicalId){
  const replaced=new Set(oldIds);
  for(const row of s.transactions){
@@ -418,16 +487,21 @@ export function repointCandidates(s,oldIds,canonicalId){
 }
 export function resolveCandidate(s,tid,decision,targetId){
  const next=structuredClone(s),row=next.transactions.find(t=>t.id===tid);if(!row)throw Error('İncelenecek aday bulunamadı.');
- if(decision==='unlink'&&row.linkedTo){const target=row.linkedTo;row.previousLinkedTo=target;delete row.linkedTo;row.matchStatus='pending';row.matchCandidates=[target];return validate(preferPdfAcrossCut(next));}
+ if(decision==='unlink'&&row.linkedTo){const target=row.linkedTo;row.previousLinkedTo=target;delete row.linkedTo;row.matchStatus='pending';row.matchCandidates=[target];return validate(repairReferences(preferPdfAcrossCut(next)));}
  if(row.matchStatus!=='pending')throw Error('İncelenecek aday bulunamadı.');
  if(decision==='link'){
   const target=next.transactions.find(t=>t.id===targetId);
   const aliases=next.transactions.filter(t=>t.linkedTo===targetId);
+  const members=[row,...(target?[target]:[]),...aliases,...next.transactions.filter(t=>t.linkedTo===row.id)];
+  const pdf=members.find(t=>sourceOf(t)==='pdf'),csv=members.find(t=>sourceOf(t)==='csv');
+  if(pdf&&csv&&incompatibleStatementPeriods(pdf,csv)){
+   throw Error('Farklı PDF ve CSV ekstre dönemleri tek işleme bağlanamaz.');
+  }
   const previouslyConfirmed=target&&effectKind(row)==='cardPayment'&&sameTerms(row,target)&&(row.previousLinkedTo===target.id||target.previousLinkedTo===row.id);
   if(!target||!effective(target)||!row.matchCandidates?.includes(targetId)||
      (![target,...aliases].some(t=>sameEconomic(row,t))&&!previouslyConfirmed))throw Error('Geçerli ve aynı tutarlı eşleşme seç.');
-  const periods=new Set([row,target,...next.transactions.filter(t=>t.linkedTo===row.id||t.linkedTo===target.id)].filter(t=>sourceOf(t)==='pdf').map(t=>t.period));if(periods.size>1)throw Error('Farklı ekstre dönemleri tek işleme bağlanamaz. Belgeleri kontrol et.');
-  const sources=[row,target,...next.transactions.filter(t=>t.linkedTo===row.id||t.linkedTo===target.id)].map(sourceOf);
+  const periods=new Set(members.filter(t=>sourceOf(t)==='pdf').map(t=>t.period));if(periods.size>1)throw Error('Farklı ekstre dönemleri tek işleme bağlanamaz. Belgeleri kontrol et.');
+  const sources=members.map(sourceOf);
   if(new Set(sources).size!==sources.length)throw Error('Bu işleme aynı kaynaktan bir satır zaten bağlı. Ekstredeki ayrı hareketi kontrol et.');
   const canonical=sourceOf(row)==='manual'&&sourceOf(target)!=='manual'?row:target,alias=canonical===row?target:row;
   if(!canonical.installment&&alias.installment)canonical.installment=alias.installment;
@@ -447,6 +521,11 @@ export function transactionRemovalRows(s,tid){
 export function removeTransaction(s,tid){
  const removed=new Set(transactionRemovalRows(s,tid).map(t=>t.id));
  const next=structuredClone(s);
+ const removedRow=next.transactions.find(row=>row.id===tid);
+ if(removedRow&&(removedRow.csvSourceId||removedRow.csvBatchId)&&isCsvReview(removedRow)){
+  next.csvDismissals??=[];
+  next.csvDismissals.push([csvKeyFor(removedRow),removedRow.csvBatchId??null]);
+ }
  next.transactions=next.transactions.filter(t=>!removed.has(t.id));
  return validate(repairReferences(next));
 }
@@ -499,15 +578,28 @@ export function importCsv(s,rows,account){
  const a=s.accounts.find(a=>a.id===account);
  if(!a||a.type!=='card')throw Error('CSV için bir kredi kartı seç.');
  const next=structuredClone(s),candidates=[...next.transactions];
- const storedBatches=new Map(),incomingBatches=new Map(),seenSignatures=new Map(),seenIds=new Map();
+ const storedBatches=new Map(),incomingBatches=new Map();
+ const seenSignatures=new Map(),anonymousSignatures=new Map(),seenIds=new Map(),seenSourceKeys=new Set();
+ const sourceIdKey=row=>JSON.stringify([row.period,row.csvSourceId]);
  const remember=row=>{
-  appendToGroup(seenSignatures,csvSignature(row),row);
-  if(row.csvSourceId)appendToGroup(seenIds,JSON.stringify([row.period,row.csvSourceId]),row);
+  const signature=csvSignature(row);
+  if(!seenSignatures.has(signature))seenSignatures.set(signature,row);
+  if(row.csvSourceId){
+   const identity=sourceIdKey(row);
+   if(!seenIds.has(identity))seenIds.set(identity,row);
+   seenSourceKeys.add(csvKeyFor(row));
+  }else if(!anonymousSignatures.has(signature))anonymousSignatures.set(signature,row);
  };
  for(const row of candidates){
   if(row.account!==account||sourceOf(row)!=='csv')continue;
   remember(row);
   if(!row.csvSourceId)appendToGroup(storedBatches,JSON.stringify([row.period,row.csvBatchId??null]),row);
+ }
+ for(const receipt of s.csvDismissals??[]){
+  const row=readCsvDismissal(receipt);
+  if(row.account!==account)continue;
+  if(row.csvSourceId)seenSourceKeys.add(receipt[0]);
+  else appendToGroup(storedBatches,JSON.stringify([row.period,row.csvBatchId]),row);
  }
  const incoming=rows.map(r=>{
   const row={id:id(),account,date:r.date,period:r.period,desc:r.desc,merchantName:r.desc,sourceDesc:r.desc,
@@ -526,15 +618,14 @@ export function importCsv(s,rows,account){
  }
  for(const row of incoming){
   if(!row.csvSourceId&&!row.csvBatchId)continue;
-  const signature=csvSignature(row),sameRows=seenSignatures.get(signature)??[];
-  const sameIds=row.csvSourceId?(seenIds.get(JSON.stringify([row.period,row.csvSourceId]))??[]):[];
-  if(sameIds.some(previous=>csvSignature(previous)===signature))continue;
-  const ambiguous=sameIds.length?sameIds:sameRows.filter(previous=>!row.csvSourceId||!previous.csvSourceId);
+  const signature=csvSignature(row),sameId=row.csvSourceId?seenIds.get(sourceIdKey(row)):undefined;
   row.csvKey=csvKeyFor(row);
-  if(ambiguous.length){
+  if(row.csvSourceId&&seenSourceKeys.has(row.csvKey))continue;
+  const ambiguous=sameId||(row.csvSourceId?anonymousSignatures:seenSignatures).get(signature);
+  if(ambiguous){
    row.matchStatus='pending';
-   row.matchReason=sameIds.length?'csvSourceConflict':'csvRepeatedRow';
-   row.matchCandidates=ambiguous.map(previous=>previous.id);
+   row.matchReason=sameId?'csvSourceConflict':'csvRepeatedRow';
+   row.matchCandidates=[ambiguous.id];
   }else markCandidate(row,candidates);
   next.transactions.push(row);
   remember(row);
