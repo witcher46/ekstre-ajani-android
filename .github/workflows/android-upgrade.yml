@@ -2,7 +2,7 @@ name: Android distribution regression
 on:
   workflow_call:
   pull_request:
-    branches: [main, fix/android-0.3.1-stability]
+    branches: [main, fix/android-0.3.1-stability, build/android-permanent-signing]
   push:
     branches: [main]
 

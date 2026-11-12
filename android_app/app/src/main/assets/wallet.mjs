@@ -12,7 +12,7 @@ export function normalizeWallet(s){
  const next=structuredClone(s);
  if(next.incomePlans===undefined)next.incomePlans=[];
  if(next.incomeCategories===undefined)next.incomeCategories=[...incomeCategories];
- return C.validate(next);
+ return C.sanitizePdfSources(C.validate(next));
 }
 
 function paymentRows(s){

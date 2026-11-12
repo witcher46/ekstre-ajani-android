@@ -59,16 +59,18 @@ export function parseStatementCsv(text) {
   }
   if (!rows.length) throw new Error('Dosyada kart işlemi bulunamadı.');
   const positions = columns.map(key => header.indexOf(key));
+  const idPosition = header.indexOf('transaction_id');
   return rows.map((row, index) => {
     const [period, date, desc, amount, category, kind, bank, card] = positions.map(i => row[i]);
     const cents = Number(amount);
+    const transactionId = idPosition<0 ? '' : (row[idPosition]??'').trim();
     if (row.length !== header.length || !/^\d{4}-(0[1-9]|1[0-2])$/.test(period)
         || !validDate(date) || !desc?.trim() || !/^-?\d+$/.test(amount)
         || !Number.isSafeInteger(cents) || Math.abs(cents) > 1_000_000_000_000
-        || !kinds.includes(kind) || (kind === 'indirim' ? cents > 0 : cents < 0)) {
+        || transactionId.length>200 || !kinds.includes(kind) || (kind === 'indirim' ? cents > 0 : cents < 0)) {
       throw new Error(`${index + 1}. işlem okunamadı. Liste kaydedilmedi.`);
     }
-    return { period, date, desc, cents, category: category.trim() || 'Diğer', kind, bank, card };
+    return { period, date, desc, cents, category: category.trim() || 'Diğer', kind, bank, card, ...(transactionId ? {transactionId} : {}) };
   });
 }
 

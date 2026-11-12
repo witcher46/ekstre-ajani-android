@@ -1,4 +1,5 @@
 import {addCents,merchantKey,money,validDate} from './core.mjs';
+import {maskPaymentIdentifiers} from './privacy.mjs';
 // Keep this normalization unchanged: 0.1.1 import keys depend on its exact output.
 export function clean(s){return String(s).replace(/\u00a0/g,' ').replace(/PE(?:\(cid:\d+\)){1,3}N/gi,'PESIN').replace(/\(cid:\d+\)deme/gi,'Odeme').replace(/\(cid:\d+\)ndirim/gi,'Indirim').replace(/\(cid:\d+\)/g,'').replace(/[çğıöşüÇĞİÖŞÜ]/g,c=>({'ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u','Ç':'C','Ğ':'G','İ':'I','Ö':'O','Ş':'S','Ü':'U'})[c]);}
 const months=['ocak','subat','mart','nisan','mayis','haziran','temmuz','agustos','eylul','ekim','kasim','aralik'];
@@ -37,10 +38,11 @@ function displayDescription(s){
   .replace(/\bTesekk[üu]?r\s+Ederiz\b/gi,'Teşekkür Ederiz')
   .replace(/\(cid:\d+\)/g,'').replace(/\s+/g,' ').trim();
 }
-function redactDescription(s){return s.replace(/^\d{8}\s+/,'').replace(/(?<!\d)(?:\d[ -]?){13,19}(?!\d)/g,'[kart]').slice(0,500)||'İşlem';}
+// Keep the pre-existing redaction in the import key for legacy replays.
+function legacyRedactDescription(s){return s.replace(/^\d{8}\s+/,'').replace(/(?<!\d)(?:\d[ -]?){13,19}(?!\d)/g,'[kart]').slice(0,500)||'İşlem';}
 function legacyDescription(s,inst){
  if(inst)s=s.replace(inst,'').replace(/\.?\s*Taksit/i,'').trim();
- return redactDescription(s.replace(/\b\d+\.\s*(?=Indirim)/gi,'').replace(new RegExp('\\s+'+enMoney+'\\s+al\\w*v\\s+ind\\b','gi'),' Indirim'));
+ return legacyRedactDescription(s.replace(/\b\d+\.\s*(?=Indirim)/gi,'').replace(new RegExp('\\s+'+enMoney+'\\s+al\\w*v\\s+ind\\b','gi'),' Indirim'));
 }
 const rowPatterns=[numeric,named].map(p=>new RegExp('^'+p+'(?:\\s+(.*))?$'));
 const rowMatch=line=>rowPatterns.map(p=>line.match(p)).find(Boolean);
@@ -71,12 +73,12 @@ export function parseStatement(text){
   }
   const tokens=[...body.matchAll(new RegExp(moneyPattern,'g'))],rawTokens=[...rawBody.matchAll(new RegExp(moneyPattern,'g'))];
   if(!tokens.length||!rawTokens.length)throw Error('Tarihli bir işlem satırının tutarı okunamadı; kısmi kayıt yapılmadı.');
-  const token=isQ?tokens.at(-1):tokens[0],rawToken=isQ?rawTokens.at(-1):rawTokens[0],sourceDesc=rawBody.slice(0,rawToken.index).trim(),oldDesc=body.slice(0,token.index).trim(),tail=body.slice(token.index+token[0].length);
+  const token=isQ?tokens.at(-1):tokens[0],rawToken=isQ?rawTokens.at(-1):rawTokens[0],sourceDesc=maskPaymentIdentifiers(rawBody.slice(0,rawToken.index).trim()),oldDesc=body.slice(0,token.index).trim(),tail=body.slice(token.index+token[0].length);
   let inst=(isQ?tail.match(/^\s*(\d{1,3}\/\d{1,3})(?:\s|$)/):(oldDesc+' '+tail).match(/\b(\d{1,3}\/\d{1,3})\b/))?.[1]||'';
   if(inst){const [a,b]=inst.split('/').map(Number);if(!(a>=1&&a<=b&&b<=120))inst='';}
   let desc=displayDescription(sourceDesc);
   if(inst)desc=desc.replace(inst,'').replace(/\.?\s*Taksit/i,'').trim();
-  desc=redactDescription(desc.replace(/\b\d+\.\s*(?=İndirim)/gi,'').replace(new RegExp('\\s+'+enMoney+'\\s+al(?:is)?v\\s+ind\\b','gi'),' İndirim'));
+  desc=maskPaymentIdentifiers(desc.replace(/\b\d+\.\s*(?=İndirim)/gi,'').replace(new RegExp('\\s+'+enMoney+'\\s+al(?:is)?v\\s+ind\\b','gi'),' İndirim')).replace(/^\d{8}\s+/,'').slice(0,500)||'İşlem';
   const n=money(token[0]),semantic=clean(desc).toUpperCase(),isPayment=/^ODEME\b|^TESEKKU?R\s+EDERIZ\b/.test(semantic),kind=isPayment?'cardPayment':n<0||token[0].startsWith('+')||/\b(?:INDIRIM|IADE|IPTAL)\b|\bAL(?:IS)?V\s+IND\b/.test(semantic)?'refund':'expense';
   const key=JSON.stringify([bank,period,d,legacyDescription(oldDesc,inst),n,inst]),count=(occurrences.get(key)||0)+1;occurrences.set(key,count);
   rows.push({date:d,period,desc,sourceDesc,amount:Math.abs(n),kind,category:isPayment?'Kart ödemesi':categorize(desc),installment:inst,importKey:key+'|'+count});
