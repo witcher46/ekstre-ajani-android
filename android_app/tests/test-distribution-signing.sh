@@ -32,6 +32,8 @@ expect_failure() {
   test ! -e "$work/rejected"
 }
 
+expect_failure 'Source commit differs from the checked-out source.' \
+  bash "$sign" "$apk" "$work/rejected" "$(printf '%040d' 0)"
 expect_failure 'Signing credentials are missing.' \
   env -u ANDROID_KEYSTORE_BASE64 bash "$sign" "$apk" "$work/rejected" "$source_commit"
 expect_failure 'versionCode must exceed the last distributed code.' \

@@ -77,7 +77,7 @@ jobs:
           name: unsigned-android-${{ github.sha }}
           path: ${{ runner.temp }}/unsigned-distribution
       - name: Prepare Android signing tools
-        run: sdkmanager 'build-tools;35.0.0'
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;35.0.0"'
       - name: Verify the unsigned artifact
         working-directory: ${{ runner.temp }}/unsigned-distribution
         run: sha256sum -c SHA256SUMS.txt

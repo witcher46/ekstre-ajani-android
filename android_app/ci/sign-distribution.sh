@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set +x
 set -euo pipefail
 umask 077
 
@@ -9,6 +10,7 @@ apk=$1
 output=$2
 commit=$3
 [[ $commit =~ ^[a-f0-9]{40}$ ]] || fail 'Invalid source commit.'
+[[ $(git rev-parse HEAD) == "$commit" ]] || fail 'Source commit differs from the checked-out source.'
 [[ -f $apk && ! -e $output ]] || fail 'APK input or output path is invalid.'
 [[ -n ${ANDROID_KEYSTORE_BASE64:-} && -n ${ANDROID_KEYSTORE_PASSWORD:-} ]] || fail 'Signing credentials are missing.'
 fingerprint=${ANDROID_DISTRIBUTION_CERT_SHA256:-}
