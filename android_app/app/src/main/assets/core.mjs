@@ -1,4 +1,4 @@
-import {maskPdfSource} from './privacy.mjs';
+import {maskPdfRows} from './privacy.mjs';
 
 export const merchantKey=value=>String(value??'').normalize('NFKD').replace(/\p{M}/gu,'').replace(/ı/g,'i').toUpperCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 export const categories=['Market / Gıda','Dışarıda yeme','Akaryakıt','Fatura / İnternet','Abonelik','Oyun / Dijital','Online alışveriş','Ulaşım','Sağlık','Giyim','Ev / Kira','Eğitim','Faiz / Ücret','Diğer'];
@@ -555,13 +555,13 @@ export function reviewLegacy(s){
  return repairReferences(preferPdfAcrossCut(next));
 }
 export function sanitizePdfSources(s){
- const transactions=s.transactions.map(row=>sourceOf(row)==='pdf'?maskPdfSource(row):row);
+ const transactions=maskPdfRows(s.transactions,row=>sourceOf(row)==='pdf');
  return transactions.some((row,index)=>row!==s.transactions[index])?{...s,transactions}:s;
 }
 export function importStatement(s,p,account){
  if(p.reconciliation?.status==='mismatch')throw Error('Ekstre toplamları uyuşmuyor; aktarım kaydedilmedi.');
  const a=s.accounts.find(x=>x.id===account);if(!a||a.type!=='card')throw Error('Bir kredi kartı seç.');const next=structuredClone(sanitizePdfSources(s)),key=account+'|'+p.period;
- const incoming=p.rows.map(maskPdfSource);
+ const incoming=maskPdfRows(p.rows);
  const previous=next.transactions.filter(t=>t.statement===key);next.transactions=next.transactions.filter(t=>t.statement!==key);
  const invalidated=new Set();
  for(const old of previous){if(!incoming.some(r=>r.importKey===old.importKey&&sameEconomic({...r,account},old))){invalidated.add(old.id);const canonical=old.linkedTo?next.transactions.find(t=>t.id===old.linkedTo):null;if(canonical){canonical.matchStatus='pending';canonical.matchReason='sourceChanged';canonical.matchCandidates=[];}for(const alias of next.transactions.filter(t=>t.linkedTo===old.id)){alias.previousLinkedTo=old.id;delete alias.linkedTo;alias.matchStatus='pending';alias.matchReason='sourceChanged';alias.matchCandidates=[];}}}

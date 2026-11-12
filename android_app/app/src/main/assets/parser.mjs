@@ -1,5 +1,5 @@
 import {addCents,merchantKey,money,validDate} from './core.mjs';
-import {maskPaymentIdentifiers} from './privacy.mjs';
+import {maskPaymentIdentifiers,maskPdfRows} from './privacy.mjs';
 // Keep this normalization unchanged: 0.1.1 import keys depend on its exact output.
 export function clean(s){return String(s).replace(/\u00a0/g,' ').replace(/PE(?:\(cid:\d+\)){1,3}N/gi,'PESIN').replace(/\(cid:\d+\)deme/gi,'Odeme').replace(/\(cid:\d+\)ndirim/gi,'Indirim').replace(/\(cid:\d+\)/g,'').replace(/[çğıöşüÇĞİÖŞÜ]/g,c=>({'ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u','Ç':'C','Ğ':'G','İ':'I','Ö':'O','Ş':'S','Ü':'U'})[c]);}
 const months=['ocak','subat','mart','nisan','mayis','haziran','temmuz','agustos','eylul','ekim','kasim','aralik'];
@@ -96,5 +96,5 @@ export function parseStatement(text){
  if(status==='mismatch')reasons.push('İşlemler ekstre borcuyla uyuşmuyor. Kayıt yapılamaz.');
  if(!due)reasons.push('Son ödeme tarihi '+(new RegExp(dueLabel,'i').test(t)?'okunamadı.':'başlığı bulunamadı.'));
  const reconciliation={status,previousDebt:previous.value,statementDebt:statement.value,expectedDebt,difference,missing,totals,reasons};
- return {bank,period,cut,due,debt:statement.value,rows,reconciliation,warning:status==='unverified'?'Ekstre toplamı tam doğrulanamadı. '+reasons.join(' '):status==='mismatch'?reasons[0]:''};
+ return {bank,period,cut,due,debt:statement.value,rows:maskPdfRows(rows),reconciliation,warning:status==='unverified'?'Ekstre toplamı tam doğrulanamadı. '+reasons.join(' '):status==='mismatch'?reasons[0]:''};
 }

@@ -215,3 +215,30 @@ test('legacy PDF backup masking preserves row identity, amounts and user edits o
     [{id:t.id,importKey:t.importKey,desc:t.desc,category:t.category,note:t.note,reviewed:true,amount:5000}]);
   assert.deepEqual(C.summary(repeated,'2026-10'),C.summary(first,'2026-10'));
 });
+
+
+test('PDF key masking keeps distinct spaced-card rows stable even with the same visible suffix',()=>{
+  const left=pan.replaceAll(' ',' - ');
+  const right=['4000','0000','0006','1111'].join(' - ');
+  const line=number=>'01/10/2026 SENTETIK KART '+number+' 50.00';
+  const text=[pdfText('SENTETIK KART '+left).replace('Donem Borcu: 50.00','Donem Borcu: 100.00'),line(right)].join('\n');
+  const parsed=parseStatement(text);
+  assert.ok(!JSON.stringify(parsed).includes(left));
+  assert.ok(!JSON.stringify(parsed).includes(right));
+  assert.equal(new Set(parsed.rows.map(r=>r.importKey)).size,2);
+  const first=C.importStatement(wallet(),parsed,'card');
+  const legacy=structuredClone(first);
+  for(const [index,number] of [left,right].entries()){
+    const row=legacy.transactions[index];
+    row.importKey=JSON.stringify(['QNB','2026-10','2026-10-01','SENTETIK KART '+number,5000,''])+'|1';
+    row.sourceDesc='SENTETIK KART '+number;
+    row.desc='Sentetik düzenleme '+index;
+  }
+  legacy.transactions.reverse();
+  const migrated=C.readBackup(JSON.stringify(legacy));
+  const repeated=C.importStatement(migrated,parsed,'card');
+  assert.deepEqual(repeated.transactions.map(t=>[t.id,t.desc]),first.transactions.map((t,i)=>[t.id,'Sentetik düzenleme '+i]));
+  assert.equal(C.summary(repeated,'2026-10').net,10000);
+  assert.ok(!C.backupText(repeated).includes(left));
+  assert.ok(!C.backupText(repeated).includes(right));
+});
