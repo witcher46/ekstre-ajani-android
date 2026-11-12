@@ -1,3 +1,5 @@
+import {maskPdfRows} from './privacy.mjs';
+
 export const merchantKey=value=>String(value??'').normalize('NFKD').replace(/\p{M}/gu,'').replace(/ı/g,'i').toUpperCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 export const categories=['Market / Gıda','Dışarıda yeme','Akaryakıt','Fatura / İnternet','Abonelik','Oyun / Dijital','Online alışveriş','Ulaşım','Sağlık','Giyim','Ev / Kira','Eğitim','Faiz / Ücret','Diğer'];
 export const id=()=>crypto.randomUUID();
@@ -71,6 +73,7 @@ export function validate(s){
   const planIds=new Set();for(const p of s.incomePlans){if(!text(p.id)||!p.id||planIds.has(p.id)||!text(p.name)||!p.name.trim()||!s.accounts.some(a=>a.id===p.account&&a.type!=='card')||!cents(p.amount)||p.amount<=0||!validDate(p.next)||(p.category!==undefined&&!text(p.category))||(p.billingDay!==undefined&&(!Number.isInteger(p.billingDay)||p.billingDay<1||p.billingDay>31)))throw Error('Gelir planı geçersiz.');planIds.add(p.id);}
  }
  const plans=new Map();
+ const links=new Map(),byId=new Map(s.transactions.map(t=>[t.id,t]));
  for(const t of s.transactions){
   validateKind(s,t);
   if(t.installmentPlan!==undefined){
@@ -78,10 +81,27 @@ export function validate(s){
    if(!plans.has(t.installmentPlan))plans.set(t.installmentPlan,[]);
    plans.get(t.installmentPlan).push(t);
   }
-  if(t.linkedTo){const target=s.transactions.find(r=>r.id===t.linkedTo);if(!target||target.id===t.id||target.linkedTo)throw Error('Eşleşme bağlantısı geçersiz.');}
-  if(t.matchStatus&&!['pending','linked','distinct'].includes(t.matchStatus))throw Error('Eşleşme durumu geçersiz.');
+  if(t.linkedTo!==undefined){
+   const target=byId.get(t.linkedTo);
+   if(!text(t.linkedTo)||!t.linkedTo||!target||target===t||target.linkedTo||
+      (t.matchStatus!==undefined&&t.matchStatus!=='linked')||t.matchCandidates!==undefined){
+    throw Error('Yedekte geçersiz işlem bağlantısı var.');
+   }
+   appendToGroup(links,target,t);
+  }
+  if(t.matchStatus!==undefined&&!['pending','linked','distinct'].includes(t.matchStatus))throw Error('Eşleşme durumu geçersiz.');
   if(t.matchStatus==='linked'&&!t.linkedTo)throw Error('Eşleşme hedefi eksik.');
-  if(t.matchStatus==='pending'&&(!Array.isArray(t.matchCandidates)||(!t.matchCandidates.length&&t.matchReason!=='sourceChanged')||t.matchCandidates.some(x=>!txids.has(x)||x===t.id)))throw Error('İnceleme adayı geçersiz.');
+  if(t.matchStatus==='pending'&&(!Array.isArray(t.matchCandidates)||(!t.matchCandidates.length&&t.matchReason!=='sourceChanged'&&!isCsvReview(t))||t.matchCandidates.some(x=>!txids.has(x)||x===t.id)))throw Error('İnceleme adayı geçersiz.');
+  if(t.csvSourceId!==undefined&&(!text(t.csvSourceId)||!t.csvSourceId.trim()||sourceOf(t)!=='csv'))throw Error('CSV kaynak işlem kimliği geçersiz.');
+  if(t.csvBatchId!==undefined&&(!text(t.csvBatchId)||!t.csvBatchId.trim()||sourceOf(t)!=='csv'||t.csvSourceId!==undefined))throw Error('CSV aktarım kimliği geçersiz.');
+ }
+ validateLinkGroups(s,links);
+ if(s.csvDismissals!==undefined){
+  if(!Array.isArray(s.csvDismissals)||s.csvDismissals.length>50000)throw Error('CSV inceleme kayıtları geçersiz.');
+  const cardIds=new Set(s.accounts.filter(a=>a.type==='card').map(a=>a.id));
+  for(const receipt of s.csvDismissals){
+   if(!cardIds.has(readCsvDismissal(receipt).account))throw Error('CSV inceleme kaydının kartı bulunamadı.');
+  }
  }
  for(const [plan,rows] of plans){
   rows.sort((a,b)=>a.date.localeCompare(b.date));
@@ -214,12 +234,112 @@ function sameEconomic(a,b){
  }
  return a.date===b.date||(effectKind(a)==='cardPayment'&&Math.abs(Date.parse(a.date)-Date.parse(b.date))<=3*86400000);
 }
+function incompatibleStatementPeriods(a,b){
+ const x=sourceOf(a),y=sourceOf(b);
+ return effectKind(a)!=='cardPayment'&&a.period!==b.period&&
+  ((x==='pdf'&&y==='csv')||(x==='csv'&&y==='pdf'));
+}
+function connectedLinkRows(target,aliases){
+ const connected=[target],remaining=[...aliases];
+ if(target.kind==='payment')return [...connected,...remaining];
+ while(remaining.length){
+  const index=remaining.findIndex(row=>connected.some(other=>sameEconomic(row,other)));
+  if(index<0)break;
+  connected.push(...remaining.splice(index,1));
+ }
+ return connected;
+}
+function validateLinkGroups(s,links){
+ if(!links.size)return;
+ const statements=new Map(s.statements.map(st=>[st.id,st]));
+ const cardIds=new Set(s.accounts.filter(a=>a.type==='card').map(a=>a.id));
+ for(const [target,aliases] of links){
+  const group=[target,...aliases],kind=effectKind(target);
+  const sources=new Set();
+  let installment=null;
+  for(const row of group){
+   const source=sourceOf(row);
+   const sourceIdentity={
+    manual:!row.statement&&!row.csvKey,
+    // A valid legacy PDF payment may not carry a statement reference.
+    pdf:!row.csvKey&&(row.statement===undefined||typeof row.statement==='string'&&!!row.statement),
+    csv:typeof row.csvKey==='string'&&!!row.csvKey&&!row.statement,
+   };
+   const validSource=Object.hasOwn(sourceIdentity,source)&&sourceIdentity[source]&&!sources.has(source);
+   const validDirection=row.kind==='payment'
+    ?row===target&&source==='manual'
+    :!row.target&&(row.kind!=='cardPayment'||source!=='manual');
+   if(!validSource||!validDirection||!['expense','refund','cardPayment'].includes(kind)||
+      !cardIds.has(cardAccount(row))||!sameTerms(row,target)||
+      (row.installment&&installment&&row.installment!==installment)){
+    throw Error('Yedekte hesap, tür, tutar veya kaynağı uyuşmayan işlem bağlantısı var.');
+   }
+   if(row.statement){
+    const st=statements.get(row.statement);
+    if(source!=='pdf'||!st||st.account!==row.account||st.period!==row.period){
+     throw Error('Yedekte işlem bağlantısının ekstre dönemi uyuşmuyor.');
+    }
+   }
+   if(source==='csv')validateCsvLinkPeriod(row);
+   if(row.installment)installment=row.installment;
+   sources.add(source);
+  }
+  const csv=group.find(row=>sourceOf(row)==='csv'),pdf=group.find(row=>sourceOf(row)==='pdf');
+  // Previously confirmed legacy links did not require the two export periods to match.
+  if(pdf&&csv?.csvKey.startsWith('["csv-v2",')&&incompatibleStatementPeriods(csv,pdf)){
+   throw Error('Yedekte PDF ve CSV ekstre dönemleri uyuşmuyor.');
+  }
+  if(connectedLinkRows(target,aliases).length!==group.length){
+   throw Error('Yedekte tarih veya taksit dönemi uyuşmayan işlem bağlantısı var.');
+  }
+ }
+}
 const normalized=s=>String(s??'').replace(/ı/g,'i').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
 function originalDescription(t){if(t.sourceDesc!==undefined)return t.sourceDesc;if(t.csvKey){try{const key=JSON.parse(t.csvKey);if(key[1]&&typeof key[1]==='object'&&typeof key[1].desc==='string')return key[1].desc;}catch{}}return t.desc;}
-const signature=t=>JSON.stringify([cardAccount(t),effectKind(t),t.date,t.amount,normalized(originalDescription(t)),t.installment||'']);
+const csvFields=t=>[t.account,t.period,t.kind,t.date,t.amount,normalized(originalDescription(t))];
+const csvSignature=t=>JSON.stringify(csvFields(t));
+const csvKeyFor=row=>JSON.stringify(['csv-v2',...csvFields(row),row.csvSourceId??null]);
+function validateCsvLinkPeriod(row){
+ let key;
+ try{key=JSON.parse(row.csvKey);}catch{return;}
+ if(!Array.isArray(key))return;
+ if(key[0]==='csv-v2'){
+  if(row.csvKey!==csvKeyFor(row))throw Error('Yedekte CSV işlem bağlantısının kaynağı veya dönemi uyuşmuyor.');
+ }else if(key[1]?.period&&key[1].period!==row.period){
+  throw Error('Yedekte CSV işlem bağlantısının dönemi uyuşmuyor.');
+ }
+}
+function readCsvDismissal(receipt){
+ const invalid=()=>Error('CSV inceleme kaydı geçersiz.');
+ if(!Array.isArray(receipt)||receipt.length!==2||!text(receipt[0],5000))throw invalid();
+ let key;
+ try{key=JSON.parse(receipt[0]);}catch{throw invalid();}
+ if(!Array.isArray(key)||key.length!==8||key[0]!=='csv-v2')throw invalid();
+ const [,account,period,kind,date,amount,sourceDesc,sourceId]=key;
+ const batch=receipt[1];
+ if(!text(account)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)||!['expense','refund','cardPayment'].includes(kind)||
+    !validDate(date)||!cents(amount)||amount<0||!text(sourceDesc,2000)||
+    (sourceId===null?(!text(batch)||!batch.trim()):(batch!==null||!text(sourceId)||!sourceId.trim()))){
+  throw invalid();
+ }
+ return {account,period,kind,date,amount,sourceDesc,csvSourceId:sourceId,csvBatchId:batch};
+}
+function csvBatchSignature(rows){
+ return JSON.stringify(rows.map(csvSignature).sort());
+}
+function appendToGroup(groups,key,row){
+ if(!groups.has(key))groups.set(key,[]);
+ groups.get(key).push(row);
+}
 function matchingRows(rows,t){
- const viaAliases=new Set(rows.filter(r=>r.linkedTo&&sourceOf(r)!==sourceOf(t)&&sameEconomic(r,t)).map(r=>r.linkedTo));
- return rows.filter(r=>r.id!==t.id&&effective(r)&&sourceOf(r)!==sourceOf(t)&&(sameEconomic(r,t)||viaAliases.has(r.id)));
+ const viaAliases=new Set(),incompatible=new Set();
+ for(const row of rows){
+  if(row.id===t.id||sourceOf(row)===sourceOf(t))continue;
+  if(incompatibleStatementPeriods(row,t))incompatible.add(row.linkedTo||row.id);
+  if(row.linkedTo&&sameEconomic(row,t))viaAliases.add(row.linkedTo);
+ }
+ return rows.filter(r=>r.id!==t.id&&effective(r)&&sourceOf(r)!==sourceOf(t)&&
+  !incompatible.has(r.id)&&(sameEconomic(r,t)||viaAliases.has(r.id)));
 }
 function markCandidate(t,rows){if(t.matchStatus==='distinct'||t.linkedTo)return;const candidates=matchingRows(rows,t);if(candidates.length){t.matchStatus='pending';t.matchCandidates=candidates.map(r=>r.id);}}
 function validateKind(s,t){
@@ -330,7 +450,34 @@ export function paySubscription(s,rid,options={}){
  const next=addTransaction(s,{account:r.account,date:paidOn,desc:r.name,amount:r.amount,kind:'expense',category:activeExpenseCategory(s,r.category??'Abonelik'),note:'Abonelik ödemesi',subscriptionId:rid,subscriptionDue:due});
  const sub=next.subscriptions.find(x=>x.id===rid);sub.billingDay=r.billingDay||Number(due.slice(8,10));sub.next=nextMonth(due,sub.billingDay);sub.lastPaidOn=paidOn;return next;
 }
-function repairReferences(s){const ids=new Set(s.transactions.map(t=>t.id));for(const t of s.transactions){if(t.linkedTo&&!ids.has(t.linkedTo)){t.previousLinkedTo=t.linkedTo;delete t.linkedTo;t.matchStatus='pending';t.matchReason='sourceChanged';t.matchCandidates=[];}if(t.matchStatus==='pending'){t.matchCandidates=(t.matchCandidates||[]).filter(x=>ids.has(x)&&x!==t.id);if(!t.matchCandidates.length)t.matchReason='sourceChanged';}}return s;}
+function reopenSource(row){
+ row.previousLinkedTo=row.linkedTo;
+ delete row.linkedTo;
+ row.matchStatus='pending';
+ row.matchReason='sourceChanged';
+ row.matchCandidates=[];
+}
+function repairReferences(s){
+ const byId=new Map(s.transactions.map(row=>[row.id,row])),links=new Map();
+ for(const row of s.transactions){
+  if(row.linkedTo){
+   const target=byId.get(row.linkedTo);
+   if(target)appendToGroup(links,target,row);
+   else reopenSource(row);
+  }
+  if(row.matchStatus==='pending'){
+   row.matchCandidates=(row.matchCandidates||[]).filter(id=>byId.has(id)&&id!==row.id);
+   if(!row.matchCandidates.length&&!isCsvReview(row))row.matchReason='sourceChanged';
+  }
+ }
+ for(const [target,aliases] of links){
+  const connected=new Set(connectedLinkRows(target,aliases));
+  // If a removed source was the only link, leave the dependent row in review.
+  for(const row of aliases)if(!connected.has(row))reopenSource(row);
+ }
+ return s;
+}
+function isCsvReview(row){return row.matchStatus==='pending'&&['csvRepeatedRow','csvSourceConflict'].includes(row.matchReason);}
 export function repointCandidates(s,oldIds,canonicalId){
  const replaced=new Set(oldIds);
  for(const row of s.transactions){
@@ -341,16 +488,21 @@ export function repointCandidates(s,oldIds,canonicalId){
 }
 export function resolveCandidate(s,tid,decision,targetId){
  const next=structuredClone(s),row=next.transactions.find(t=>t.id===tid);if(!row)throw Error('İncelenecek aday bulunamadı.');
- if(decision==='unlink'&&row.linkedTo){const target=row.linkedTo;row.previousLinkedTo=target;delete row.linkedTo;row.matchStatus='pending';row.matchCandidates=[target];return validate(preferPdfAcrossCut(next));}
+ if(decision==='unlink'&&row.linkedTo){const target=row.linkedTo;row.previousLinkedTo=target;delete row.linkedTo;row.matchStatus='pending';row.matchCandidates=[target];return validate(repairReferences(preferPdfAcrossCut(next)));}
  if(row.matchStatus!=='pending')throw Error('İncelenecek aday bulunamadı.');
  if(decision==='link'){
   const target=next.transactions.find(t=>t.id===targetId);
   const aliases=next.transactions.filter(t=>t.linkedTo===targetId);
+  const members=[row,...(target?[target]:[]),...aliases,...next.transactions.filter(t=>t.linkedTo===row.id)];
+  const pdf=members.find(t=>sourceOf(t)==='pdf'),csv=members.find(t=>sourceOf(t)==='csv');
+  if(pdf&&csv&&incompatibleStatementPeriods(pdf,csv)){
+   throw Error('Farklı PDF ve CSV ekstre dönemleri tek işleme bağlanamaz.');
+  }
   const previouslyConfirmed=target&&effectKind(row)==='cardPayment'&&sameTerms(row,target)&&(row.previousLinkedTo===target.id||target.previousLinkedTo===row.id);
   if(!target||!effective(target)||!row.matchCandidates?.includes(targetId)||
      (![target,...aliases].some(t=>sameEconomic(row,t))&&!previouslyConfirmed))throw Error('Geçerli ve aynı tutarlı eşleşme seç.');
-  const periods=new Set([row,target,...next.transactions.filter(t=>t.linkedTo===row.id||t.linkedTo===target.id)].filter(t=>sourceOf(t)==='pdf').map(t=>t.period));if(periods.size>1)throw Error('Farklı ekstre dönemleri tek işleme bağlanamaz. Belgeleri kontrol et.');
-  const sources=[row,target,...next.transactions.filter(t=>t.linkedTo===row.id||t.linkedTo===target.id)].map(sourceOf);
+  const periods=new Set(members.filter(t=>sourceOf(t)==='pdf').map(t=>t.period));if(periods.size>1)throw Error('Farklı ekstre dönemleri tek işleme bağlanamaz. Belgeleri kontrol et.');
+  const sources=members.map(sourceOf);
   if(new Set(sources).size!==sources.length)throw Error('Bu işleme aynı kaynaktan bir satır zaten bağlı. Ekstredeki ayrı hareketi kontrol et.');
   const canonical=sourceOf(row)==='manual'&&sourceOf(target)!=='manual'?row:target,alias=canonical===row?target:row;
   if(!canonical.installment&&alias.installment)canonical.installment=alias.installment;
@@ -370,6 +522,11 @@ export function transactionRemovalRows(s,tid){
 export function removeTransaction(s,tid){
  const removed=new Set(transactionRemovalRows(s,tid).map(t=>t.id));
  const next=structuredClone(s);
+ const removedRow=next.transactions.find(row=>row.id===tid);
+ if(removedRow&&(removedRow.csvSourceId||removedRow.csvBatchId)&&isCsvReview(removedRow)){
+  next.csvDismissals??=[];
+  next.csvDismissals.push([csvKeyFor(removedRow),removedRow.csvBatchId??null]);
+ }
  next.transactions=next.transactions.filter(t=>!removed.has(t.id));
  return validate(repairReferences(next));
 }
@@ -398,14 +555,19 @@ export function reviewLegacy(s){
  }
  return repairReferences(preferPdfAcrossCut(next));
 }
+export function sanitizePdfSources(s){
+ const transactions=maskPdfRows(s.transactions,row=>sourceOf(row)==='pdf');
+ return transactions.some((row,index)=>row!==s.transactions[index])?{...s,transactions}:s;
+}
 export function importStatement(s,p,account){
  if(p.reconciliation?.status==='mismatch')throw Error('Ekstre toplamları uyuşmuyor; aktarım kaydedilmedi.');
- const a=s.accounts.find(x=>x.id===account);if(!a||a.type!=='card')throw Error('Bir kredi kartı seç.');const next=structuredClone(s),key=account+'|'+p.period;
+ const a=s.accounts.find(x=>x.id===account);if(!a||a.type!=='card')throw Error('Bir kredi kartı seç.');const next=structuredClone(sanitizePdfSources(s)),key=account+'|'+p.period;
+ const incoming=maskPdfRows(p.rows);
  const previous=next.transactions.filter(t=>t.statement===key);next.transactions=next.transactions.filter(t=>t.statement!==key);
  const invalidated=new Set();
- for(const old of previous){if(!p.rows.some(r=>r.importKey===old.importKey&&sameEconomic({...r,account},old))){invalidated.add(old.id);const canonical=old.linkedTo?next.transactions.find(t=>t.id===old.linkedTo):null;if(canonical){canonical.matchStatus='pending';canonical.matchReason='sourceChanged';canonical.matchCandidates=[];}for(const alias of next.transactions.filter(t=>t.linkedTo===old.id)){alias.previousLinkedTo=old.id;delete alias.linkedTo;alias.matchStatus='pending';alias.matchReason='sourceChanged';alias.matchCandidates=[];}}}
+ for(const old of previous){if(!incoming.some(r=>r.importKey===old.importKey&&sameEconomic({...r,account},old))){invalidated.add(old.id);const canonical=old.linkedTo?next.transactions.find(t=>t.id===old.linkedTo):null;if(canonical){canonical.matchStatus='pending';canonical.matchReason='sourceChanged';canonical.matchCandidates=[];}for(const alias of next.transactions.filter(t=>t.linkedTo===old.id)){alias.previousLinkedTo=old.id;delete alias.linkedTo;alias.matchStatus='pending';alias.matchReason='sourceChanged';alias.matchCandidates=[];}}}
  const candidates=[...next.transactions];
- for(const r of p.rows){
+ for(const r of incoming){
   const old=previous.find(t=>t.importKey===r.importKey);
   const category=old?.category??(['expense','refund'].includes(r.kind)?activeExpenseCategory(s,r.category):r.category);
   const row={...r,id:old?.id||id(),account,statement:key,source:'pdf',merchantName:r.desc,sourceDesc:r.sourceDesc??r.desc,desc:old&&old.desc!==old.sourceDesc?old.desc:r.desc,category,note:old?.note??'',reviewed:old?.reviewed||false};
@@ -414,15 +576,66 @@ export function importStatement(s,p,account){
  next.statements=next.statements.filter(x=>x.id!==key);next.statements.push({id:key,account,bank:p.bank,period:p.period,cut:p.cut,due:p.due,debt:p.debt,imported:today(),reconciliationStatus:p.reconciliation?.status==='verified'?'verified':'unverified',importedMovementCount:p.rows.length});return validate(repairReferences(preferPdfAcrossCut(next)));
 }
 export function importCsv(s,rows,account){
- const a=s.accounts.find(a=>a.id===account);if(!a||a.type!=='card')throw Error('CSV için bir kredi kartı seç.');const next=structuredClone(s),seen=new Set(),candidates=[...next.transactions];
- for(const r of rows){const row={id:id(),account,date:r.date,period:r.period,desc:r.desc,merchantName:r.desc,sourceDesc:r.desc,amount:Math.abs(r.cents),kind:r.kind==='odeme'?'cardPayment':r.kind==='indirim'?'refund':'expense',category:r.category,note:'',source:'csv'};
-  const old=next.transactions.find(t=>sourceOf(t)==='csv'&&!seen.has(t.id)&&signature(t)===signature(row));if(old){seen.add(old.id);continue;}
-  row.csvKey=signature(row);markCandidate(row,candidates);next.transactions.push(row);seen.add(row.id);
- }return validate(next);
+ const a=s.accounts.find(a=>a.id===account);
+ if(!a||a.type!=='card')throw Error('CSV için bir kredi kartı seç.');
+ const next=structuredClone(s),candidates=[...next.transactions];
+ const storedBatches=new Map(),incomingBatches=new Map();
+ const seenSignatures=new Map(),anonymousSignatures=new Map(),seenIds=new Map(),seenSourceKeys=new Set();
+ const sourceIdKey=row=>JSON.stringify([row.period,row.csvSourceId]);
+ const remember=row=>{
+  const signature=csvSignature(row);
+  if(!seenSignatures.has(signature))seenSignatures.set(signature,row);
+  if(row.csvSourceId){
+   const identity=sourceIdKey(row);
+   if(!seenIds.has(identity))seenIds.set(identity,row);
+   seenSourceKeys.add(csvKeyFor(row));
+  }else if(!anonymousSignatures.has(signature))anonymousSignatures.set(signature,row);
+ };
+ for(const row of candidates){
+  if(row.account!==account||sourceOf(row)!=='csv')continue;
+  remember(row);
+  if(!row.csvSourceId)appendToGroup(storedBatches,JSON.stringify([row.period,row.csvBatchId??null]),row);
+ }
+ for(const receipt of s.csvDismissals??[]){
+  const row=readCsvDismissal(receipt);
+  if(row.account!==account)continue;
+  if(row.csvSourceId)seenSourceKeys.add(receipt[0]);
+  else appendToGroup(storedBatches,JSON.stringify([row.period,row.csvBatchId]),row);
+ }
+ const incoming=rows.map(r=>{
+  const row={id:id(),account,date:r.date,period:r.period,desc:r.desc,merchantName:r.desc,sourceDesc:r.desc,
+   amount:Math.abs(r.cents),kind:r.kind==='odeme'?'cardPayment':r.kind==='indirim'?'refund':'expense',category:r.category,note:'',source:'csv'};
+  if(r.transactionId!==undefined){
+   if(!text(r.transactionId)||!r.transactionId.trim())throw Error('CSV kaynak işlem kimliği geçersiz.');
+   row.csvSourceId=r.transactionId.trim();
+  }else appendToGroup(incomingBatches,row.period,row);
+  return row;
+ });
+ const storedSignatures=new Set([...storedBatches.values()].map(csvBatchSignature));
+ for(const batch of incomingBatches.values()){
+  if(storedSignatures.has(csvBatchSignature(batch)))continue;
+  const batchId=id();
+  for(const row of batch)row.csvBatchId=batchId;
+ }
+ for(const row of incoming){
+  if(!row.csvSourceId&&!row.csvBatchId)continue;
+  const signature=csvSignature(row),sameId=row.csvSourceId?seenIds.get(sourceIdKey(row)):undefined;
+  row.csvKey=csvKeyFor(row);
+  if(row.csvSourceId&&seenSourceKeys.has(row.csvKey))continue;
+  const ambiguous=sameId||(row.csvSourceId?anonymousSignatures:seenSignatures).get(signature);
+  if(ambiguous){
+   row.matchStatus='pending';
+   row.matchReason=sameId?'csvSourceConflict':'csvRepeatedRow';
+   row.matchCandidates=[ambiguous.id];
+  }else markCandidate(row,candidates);
+  next.transactions.push(row);
+  remember(row);
+ }
+ return validate(next);
 }
 export const BACKUP_LIMIT=32000000;
-export function backupText(s){validate(s);const raw=JSON.stringify(s);if(new TextEncoder().encode(raw).length>BACKUP_LIMIT)throw Error('Cüzdan yedeği 32 MB sınırını aşıyor. Mevcut kayıtlar korunuyor.');return raw;}
-export function readBackup(raw){if(new TextEncoder().encode(raw).length>BACKUP_LIMIT)throw Error('Yedek en fazla 32 MB olabilir.');return validate(JSON.parse(raw));}
+export function backupText(s){validate(s);const raw=JSON.stringify(sanitizePdfSources(s));if(new TextEncoder().encode(raw).length>BACKUP_LIMIT)throw Error('Cüzdan yedeği 32 MB sınırını aşıyor. Mevcut kayıtlar korunuyor.');return raw;}
+export function readBackup(raw){if(new TextEncoder().encode(raw).length>BACKUP_LIMIT)throw Error('Yedek en fazla 32 MB olabilir.');return sanitizePdfSources(validate(JSON.parse(raw)));}
 export function upcomingPayments(s,asOf=today()){
  const items=s.subscriptions.map(r=>({id:r.id,type:'subscription',name:r.name,date:r.next,amount:r.amount,estimated:false}));
  for(const account of s.accounts.filter(a=>a.type==='card')){const r=cardStatus(s,account);if(r.latest?.due&&r.statementRemaining!==0)items.push({id:r.latest.id,type:'statement',name:account.name+' · ekstre',date:r.latest.due,amount:r.statementRemaining,estimated:true});}

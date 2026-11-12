@@ -199,6 +199,32 @@ public class WalletJourneyTest {
    a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");assertEquals("3",js(a,"JSON.parse(Android.load()).transactions.length"));
   }finally{context.getContentResolver().delete(output,null,null);}
  }
+
+ @Test public void invalidBackupLinkDoesNotReplaceNativeWallet()throws Exception{
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=demo]')");
+   click(a,"[data-action=demo]");
+   AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();
+   a.onActivity(activity->bridge.set(activity.new Bridge()));
+   String original=bridge.get().load(),recovery=bridge.get().recovery();
+   JSONObject corrupted=new JSONObject(original);
+   JSONArray rows=corrupted.getJSONArray("transactions");
+   rows.getJSONObject(1).put("source","csv").put("matchStatus","linked").put("linkedTo",rows.getJSONObject(0).getString("id"));
+   String name="synthetic-invalid-link.json";
+   Uri file=document(name,"application/json",corrupted.toString().getBytes(StandardCharsets.UTF_8));
+   try{
+    click(a,"#settings");
+    js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");
+    UiObject2 restore=device.wait(Until.findObject(By.text("Yedek yükle")),10000);
+    assertNotNull("Restore button is touchable",restore);
+    restore.click();waitPicker();selectDownload(name);
+    waitJs(a,"document.querySelector('#toast').textContent.includes('işlem bağlantısı')");
+    assertEquals(original,bridge.get().load());
+    assertEquals(recovery,bridge.get().recovery());
+   }finally{context.getContentResolver().delete(file,null,null);}
+  }
+ }
  private void restoreDownload(ActivityScenario<MainActivity> a,String name)throws Exception{
   click(a,"#settings");
   js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");

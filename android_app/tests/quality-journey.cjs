@@ -189,6 +189,42 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
     });
     await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('geçersiz'));
     assert.deepEqual(await stored(), before);
+
+    const corrupted=structuredClone(before);
+    const imported=corrupted.transactions.find(t=>t.source==='pdf');
+    const unrelated=corrupted.transactions.find(t=>(!t.source||t.source==='manual')&&t.amount!==imported.amount);
+    imported.linkedTo=unrelated.id;
+    imported.matchStatus='linked';
+    const beforeRecovery=await page.evaluate(()=>localStorage.getItem('ekstre-android-v1-recovery'));
+    const beforeConfirmations=confirmations.length;
+    await page.locator('#backup-file').setInputFiles({
+      name:'sentetik-bozuk-baglanti.json',mimeType:'application/json',
+      buffer:Buffer.from(JSON.stringify(corrupted)),
+    });
+    await page.waitForFunction(()=>/bağlantı|eşleşme/i.test(document.querySelector('#toast').textContent));
+    assert.deepEqual(await stored(),before);
+    assert.equal(await page.evaluate(()=>localStorage.getItem('ekstre-android-v1-recovery')),beforeRecovery);
+    assert.equal(confirmations.length,beforeConfirmations);
+
+    const csvHeader='bank,kart,period,date,desc,amount_cents,category,tur';
+    const csvRow='QNB,Sentetik,2026-10,2026-10-04,SENTETIK CSV AYNI,5000,Diğer,harcama';
+    await page.locator('#csv-file').setInputFiles({
+      name:'sentetik-csv-tekrar.csv',mimeType:'text/csv',
+      buffer:Buffer.from([csvHeader,csvRow,csvRow].join('\n')),
+    });
+    await page.locator('[name=card-0]').selectOption(card.id);
+    await page.locator('#submit').click();
+    const csvRows=(await stored()).transactions.filter(t=>t.source==='csv');
+    assert.equal(csvRows.length,2);
+    assert.equal(csvRows.filter(t=>t.matchStatus==='pending').length,1);
+    await page.locator('#settings').click();
+    await page.getByRole('button',{name:'İnceleme ve kaynak bağlantıları'}).click();
+    const csvReview=page.locator('section').filter({hasText:'CSV satırı daha önceki bir kayda benziyor'});
+    await csvReview.waitFor();
+    assert.equal(await csvReview.getByRole('button',{name:'Aynı işlem',exact:true}).count(),0);
+    await csvReview.getByRole('button',{name:'Ayrı gerçek işlem'}).click();
+    assert.equal((await stored()).transactions.filter(t=>t.source==='csv'&&t.matchStatus==='distinct').length,1);
+
     await page.evaluate(cardId => {
       const wallet = JSON.parse(localStorage.getItem('ekstre-android-v1'));
       wallet.transactions = Array.from({length:10001},(_,i) => ({
