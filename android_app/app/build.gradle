@@ -1,24 +1,78 @@
 plugins { id 'com.android.application' }
+
+def distribution = new Properties()
+rootProject.file('distribution.properties').withInputStream { distribution.load(it) }
+def distributionCode = distribution.getProperty('versionCode').toInteger()
+def distributionName = distribution.getProperty('versionName')
+if (distributionCode < 7 || distributionCode > 2100000000 ||
+    !(distributionName ==~ /[0-9]+\.[0-9]+\.[0-9]+/)) {
+ throw new GradleException('Invalid Android distribution version.')
+}
+def upgradeDeviceTest = providers.gradleProperty('upgradeDeviceTest').isPresent()
+def bootstrapUpgrade = providers.gradleProperty('bootstrapUpgrade').isPresent()
+
 android {
  namespace 'com.zagor.ekstre'
  compileSdk 35
- defaultConfig { applicationId 'com.zagor.ekstre.preview'; minSdk 26; targetSdk 35; versionCode 6; versionName '0.3.1-deneme'; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
- defaultConfig.manifestPlaceholders = [appLabel: 'Ekstre Ajanı Cüzdan']
- testBuildType = providers.gradleProperty('trialDeviceTest').isPresent() ? 'trial' : 'debug'
+ defaultConfig {
+  applicationId 'com.zagor.ekstre'
+  minSdk 26
+  targetSdk 35
+  versionCode distributionCode
+  versionName distributionName
+  testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+  manifestPlaceholders = [appLabel: 'Ekstre Ajanı Cüzdan']
+ }
+ testBuildType = upgradeDeviceTest ? 'upgradeTest' :
+     (providers.gradleProperty('trialDeviceTest').isPresent() ? 'trial' : 'debug')
  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
  buildTypes {
   debug {
    debuggable true
-   applicationIdSuffix '.wallet'
+   applicationIdSuffix '.preview.wallet'
   }
   trial {
    initWith debug
-   applicationIdSuffix '.wallet.trial.v31'
+   applicationIdSuffix '.preview.wallet.trial.v31'
    manifestPlaceholders = [appLabel: 'Ekstre Ajanı Cüzdan 0.3.1 Deneme']
    matchingFallbacks = ['debug']
   }
+  beta {
+   initWith release
+   applicationIdSuffix '.preview.beta'
+   manifestPlaceholders = [appLabel: 'Ekstre Ajanı Cüzdan Beta']
+   matchingFallbacks = ['release']
+  }
+  upgradeTest {
+   initWith release
+   debuggable true
+   signingConfig signingConfigs.debug
+   matchingFallbacks = ['release']
+  }
  }
  packaging { resources.excludes += ['META-INF/DEPENDENCIES','META-INF/LICENSE','META-INF/LICENSE.txt','META-INF/NOTICE','META-INF/NOTICE.txt'] }
+}
+androidComponents {
+ onVariants(selector().all()) { variant ->
+  variant.outputs.each { output ->
+   switch (variant.buildType) {
+    case 'debug':
+    case 'trial':
+     output.versionCode.set(6)
+     output.versionName.set('0.3.1-deneme')
+     break
+    case 'beta':
+     output.versionName.set(distributionName + '-beta')
+     break
+    case 'upgradeTest':
+     if (bootstrapUpgrade) {
+      output.versionCode.set(distributionCode - 1)
+      output.versionName.set('upgrade-bootstrap')
+     }
+     break
+   }
+  }
+ }
 }
 dependencies {
  implementation 'androidx.webkit:webkit:1.12.1'
