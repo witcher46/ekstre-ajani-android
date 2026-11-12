@@ -167,6 +167,20 @@ test('restore rejects a linked CSV row whose period disagrees with its recorded 
   assert.deepEqual(C.readBackup(C.backupText(linked)),linked);
 });
 
+test('legacy PDF payment links without a statement reference still restore',()=>{
+  const state=wallet();
+  state.transactions=[
+    {id:'legacy-bank',source:'manual',account:'bank',target:'card',date:'2026-10-03',
+     period:'2026-11',kind:'payment',desc:'Sentetik banka',category:'Kart ödemesi',amount:5000},
+    {id:'legacy-pdf',source:'pdf',account:'card',date:'2026-10-03',period:'2026-11',
+     kind:'cardPayment',desc:'Sentetik PDF',category:'Kart ödemesi',amount:5000,linkedTo:'legacy-bank'},
+  ];
+  const restored=W.normalizeWallet(C.reviewLegacy(C.readBackup(JSON.stringify(state))));
+  assert.deepEqual(restored,state);
+  assert.equal(C.balance(restored,restored.accounts[1]),95000);
+  assert.equal(C.cardStatus(restored,'card').current,-5000);
+});
+
 test('valid manually attached payment with a different bank date survives current JSON round-trip',()=>{
   const pdf=parseStatement('QNB\nHesap Kesim Tarihi: 05/10/2026\n03/10/2026 ODEME 50.00');
   const s=C.importStatement(wallet(),pdf,'card');

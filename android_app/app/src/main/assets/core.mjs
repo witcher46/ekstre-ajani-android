@@ -261,7 +261,8 @@ function validateLinkGroups(s,links){
    const source=sourceOf(row);
    const sourceIdentity={
     manual:!row.statement&&!row.csvKey,
-    pdf:typeof row.statement==='string'&&!!row.statement&&!row.csvKey,
+    // A valid legacy PDF payment may not carry a statement reference.
+    pdf:!row.csvKey&&(row.statement===undefined||typeof row.statement==='string'&&!!row.statement),
     csv:typeof row.csvKey==='string'&&!!row.csvKey&&!row.statement,
    };
    const validSource=Object.hasOwn(sourceIdentity,source)&&sourceIdentity[source]&&!sources.has(source);
