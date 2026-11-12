@@ -56,7 +56,11 @@ public class WalletJourneyTest {
   if(file==null){UiObject2 roots=device.wait(Until.findObject(By.desc("Show roots")),5000);assertNotNull("File picker roots are accessible",roots);roots.click();UiObject2 downloads=device.wait(Until.findObject(By.text("Downloads")),5000);assertNotNull("Downloads is available",downloads);downloads.click();file=device.wait(Until.findObject(By.text(name)),8000);}
   if(file==null)evidence("download-not-found");assertNotNull("Synthetic file is visible in Android picker: "+name,file);file.click();
  }
- @Before public void emptyTestApp(){InstrumentationRegistry.getInstrumentation().getTargetContext().deleteDatabase("wallet.db");}
+ @Before public void emptyTestApp(){
+  if(!Boolean.parseBoolean(InstrumentationRegistry.getArguments().getString("preserveWallet"))){
+   InstrumentationRegistry.getInstrumentation().getTargetContext().deleteDatabase("wallet.db");
+  }
+ }
  @Test public void previousApkIsPreservedAndCaptured()throws Exception{
   String previous="com.zagor.ekstre.preview.revision";
   assumeTrue("This test requires the separately installed historical APK",
@@ -219,17 +223,32 @@ public class WalletJourneyTest {
    restoreDownload(a,name);
    waitJs(a,"JSON.parse(Android.load())?.accounts?.some(a=>a.id==='synthetic-card') === true");
    a.recreate();
-   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
-   AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();
-   a.onActivity(activity->bridge.set(activity.new Bridge()));
-   JSONObject restored=new JSONObject(bridge.get().load());
-   for(String key:new String[]{"accounts","transactions","statements","budgets","categories","merchantCategoryRules","incomePlans"}){
-    assertEquals("Preserved "+key,expected.get(key).toString(),restored.get(key).toString());
-   }
-   js(a,"document.getElementById('period').value='2026-10';document.getElementById('period').dispatchEvent(new Event('change'))");
-   assertEquals("true",js(a,"document.querySelector('[data-stat=netExpense]').textContent.includes('100,00')"));
-   assertEquals("true",js(a,"document.querySelector('[data-stat=cardDebt]').textContent.includes('80,00')"));
+   assertMigratedWallet(a,expected);
   }finally{context.getContentResolver().delete(file,null,null);}
+ }
+
+ @Test public void upgradedWalletSurvivesRestart()throws Exception{
+  String path=InstrumentationRegistry.getArguments().getString("previousTrialBackup");
+  assumeTrue("Requires an in-place upgrade on the disposable emulator",
+   path!=null&&Boolean.parseBoolean(InstrumentationRegistry.getArguments().getString("preserveWallet")));
+  JSONObject expected=new JSONObject(device.executeShellCommand("cat "+path));
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   assertMigratedWallet(a,expected);
+   a.recreate();
+   assertMigratedWallet(a,expected);
+  }
+ }
+ private void assertMigratedWallet(ActivityScenario<MainActivity> a,JSONObject expected)throws Exception{
+  waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+  AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();
+  a.onActivity(activity->bridge.set(activity.new Bridge()));
+  JSONObject restored=new JSONObject(bridge.get().load());
+  for(String key:new String[]{"accounts","transactions","statements","budgets","categories","merchantCategoryRules","incomePlans"}){
+   assertEquals("Preserved "+key,expected.get(key).toString(),restored.get(key).toString());
+  }
+  js(a,"document.getElementById('period').value='2026-10';document.getElementById('period').dispatchEvent(new Event('change'))");
+  assertEquals("true",js(a,"document.querySelector('[data-stat=netExpense]').textContent.includes('100,00')"));
+  assertEquals("true",js(a,"document.querySelector('[data-stat=cardDebt]').textContent.includes('80,00')"));
  }
 
 }

@@ -1,0 +1,103 @@
+name: Android signed distribution
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_commit:
+        description: Full SHA of the reviewed commit on main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-distribution
+  cancel-in-progress: false
+
+jobs:
+  unsigned:
+    if: github.repository == 'witcher46/ekstre-ajani-android' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Verify the reviewed commit
+        env:
+          REVIEWED_COMMIT: ${{ inputs.reviewed_commit }}
+        run: test "$REVIEWED_COMMIT" = "$GITHUB_SHA"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          gradle-version: '8.11.1'
+          cache-disabled: true
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Verify finance and build the unsigned APK
+        run: |
+          node --test android_app/tests/*.test.mjs
+          gradle -p android_app assembleRelease lintRelease --no-daemon
+          output="$RUNNER_TEMP/unsigned-distribution"
+          mkdir "$output"
+          cp android_app/app/build/outputs/apk/release/app-release-unsigned.apk "$output/unsigned.apk"
+          (cd "$output" && sha256sum unsigned.apk > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: unsigned-android-${{ github.sha }}
+          path: ${{ runner.temp }}/unsigned-distribution/
+          if-no-files-found: error
+          retention-days: 1
+
+  regression:
+    if: github.repository == 'witcher46/ekstre-ajani-android' && github.ref == 'refs/heads/main' && inputs.reviewed_commit == github.sha
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/android-upgrade.yml
+
+  sign:
+    needs: [unsigned, regression]
+    if: github.repository == 'witcher46/ekstre-ajani-android' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: android-distribution-signing
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: unsigned-android-${{ github.sha }}
+          path: ${{ runner.temp }}/unsigned-distribution
+      - name: Prepare Android signing tools
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;35.0.0"'
+      - name: Verify the unsigned artifact
+        working-directory: ${{ runner.temp }}/unsigned-distribution
+        run: sha256sum -c SHA256SUMS.txt
+      - name: Sign and verify the APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_DISTRIBUTION_CERT_SHA256: ${{ vars.ANDROID_DISTRIBUTION_CERT_SHA256 }}
+          ANDROID_LAST_DISTRIBUTED_VERSION_CODE: ${{ vars.ANDROID_LAST_DISTRIBUTED_VERSION_CODE }}
+        run: |
+          bash android_app/ci/sign-distribution.sh \
+            "$RUNNER_TEMP/unsigned-distribution/unsigned.apk" "$RUNNER_TEMP/signed-distribution" "$GITHUB_SHA"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ekstre-ajani-android-signed-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/signed-distribution/ekstre-ajani-android.apk
+            ${{ runner.temp }}/signed-distribution/APK-INFO.txt
+            ${{ runner.temp }}/signed-distribution/APK-SIGNATURE.txt
+            ${{ runner.temp }}/signed-distribution/SHA256SUMS.txt
+            ${{ runner.temp }}/signed-distribution/SOURCE-COMMIT.txt
+          if-no-files-found: error
+          retention-days: 30
