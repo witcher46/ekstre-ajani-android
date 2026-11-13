@@ -277,6 +277,8 @@ public class WalletJourneyTest {
   waitJs(a,"document.querySelector('#toast').textContent.includes('Ekstre kaydedildi')");
  }
  private void openBackupPicker(ActivityScenario<MainActivity> a)throws Exception{
+  // The static settings button exists before app.mjs registers its click handler.
+  waitJs(a,"!!document.querySelector('#settings[data-page=settings]')");
   click(a,"#settings");
   waitJs(a,"!!document.querySelector('[data-action=restore]')");
   js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center',behavior:'instant'})");
