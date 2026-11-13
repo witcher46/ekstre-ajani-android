@@ -18,13 +18,17 @@ function plausibleCardNumber(value){
 }
 
 export function maskPaymentIdentifiers(value,keepLastFour=false){
+ return replacePaymentIdentifiers(value,digits=>keepLastFour?'[kart:'+digits.slice(-4)+']':'[kart]');
+}
+
+export function replacePaymentIdentifiers(value,replacement){
  for(const pattern of [compactCard,groupedCard,cardLike]){
   value=value.replace(pattern,(match,offset)=>{
    if(!plausibleCardNumber(match))return match;
    const prefix=value.slice(Math.max(0,offset-48),offset).normalize('NFKD')
     .replace(/\p{M}/gu,'').replace(/ı/g,'i').toUpperCase();
    if(referenceLabel.test(prefix))return match;
-   return keepLastFour?'[kart:'+match.replace(/\D/g,'').slice(-4)+']':'[kart]';
+   return replacement(match.replace(/\D/g,''));
   });
  }
  return value;
@@ -47,7 +51,11 @@ export function maskPdfSource(row){
 function importKeyParts(value){
  return typeof value==='string'?/^(.*)\|([1-9]\d*)$/s.exec(value):null;
 }
+export function pdfIdentityKeyId(value){
+ return /^pdf-hmac-v1:([a-f0-9-]{36}):[a-f0-9]{64}\|[1-9]\d*$/.exec(value??'')?.[1];
+}
 function maskImportKey(value){
+ if(pdfIdentityKeyId(value))return value;
  const parts=importKeyParts(value);
  if(!parts)return maskPaymentIdentifiers(value,true);
  try{

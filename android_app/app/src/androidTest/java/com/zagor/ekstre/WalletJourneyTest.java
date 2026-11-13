@@ -211,19 +211,74 @@ public class WalletJourneyTest {
    JSONObject corrupted=new JSONObject(original);
    JSONArray rows=corrupted.getJSONArray("transactions");
    rows.getJSONObject(1).put("source","csv").put("matchStatus","linked").put("linkedTo",rows.getJSONObject(0).getString("id"));
-   String name="synthetic-invalid-link.json";
-   Uri file=document(name,"application/json",corrupted.toString().getBytes(StandardCharsets.UTF_8));
-   try{
-    click(a,"#settings");
-    js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");
-    UiObject2 restore=device.wait(Until.findObject(By.text("Yedek yükle")),10000);
-    assertNotNull("Restore button is touchable",restore);
-    restore.click();waitPicker();selectDownload(name);
-    waitJs(a,"document.querySelector('#toast').textContent.includes('işlem bağlantısı')");
-    assertEquals(original,bridge.get().load());
-    assertEquals(recovery,bridge.get().recovery());
-   }finally{context.getContentResolver().delete(file,null,null);}
+   assertRejectedRestore(a,context,bridge.get(),"synthetic-invalid-link.json",corrupted,"işlem bağlantısı");
+
+   JSONObject distant=new JSONObject(original);
+   JSONArray distantRows=distant.getJSONArray("transactions");
+   String card=distantRows.getJSONObject(0).getString("account");
+   String bank=distant.getJSONArray("accounts").getJSONObject(0).getString("id");
+   distantRows.put(new JSONObject()
+    .put("id","synthetic-bank-payment").put("account",bank).put("target",card)
+    .put("date","2026-11-30").put("period","2026-11").put("kind","payment").put("source","manual")
+    .put("amount",5000).put("desc","Sentetik banka ödemesi").put("category","Kart ödemesi"));
+   for(String source:new String[]{"pdf","csv"}){
+    boolean pdf=source.equals("pdf");
+    JSONObject payment=new JSONObject()
+     .put("id","synthetic-"+source+"-payment").put("account",card)
+     .put("date",pdf?"2026-10-01":"2026-11-30").put("period",pdf?"2026-10":"2026-11")
+     .put("kind","cardPayment").put("source",source).put("amount",5000)
+     .put("desc","Sentetik ekstre ödemesi").put("category","Kart ödemesi")
+     .put("linkedTo","synthetic-bank-payment").put("matchStatus","linked");
+    if(!pdf)payment.put("csvKey","synthetic-legacy-csv");
+    distantRows.put(payment);
+   }
+   assertRejectedRestore(a,context,bridge.get(),"synthetic-distant-link.json",distant,"PDF ve CSV ödemelerinin tarihleri");
+   assertEquals(original,bridge.get().load());
+   assertEquals(recovery,bridge.get().recovery());
   }
+ }
+ private void assertRejectedRestore(ActivityScenario<MainActivity> a,Context context,MainActivity.Bridge bridge,
+                                    String name,JSONObject corrupted,String error)throws Exception{
+  String original=bridge.load(),recovery=bridge.recovery();
+  Uri file=document(name,"application/json",corrupted.toString().getBytes(StandardCharsets.UTF_8));
+  try{
+   click(a,"#settings");
+   js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");
+   UiObject2 restore=device.wait(Until.findObject(By.text("Yedek yükle")),10000);
+   assertNotNull("Restore button is touchable",restore);
+   restore.click();waitPicker();selectDownload(name);
+   waitJs(a,"document.querySelector('#toast').textContent.includes("+JSONObject.quote(error)+")");
+   assertEquals(original,bridge.load());
+   assertEquals(recovery,bridge.recovery());
+  }finally{context.getContentResolver().delete(file,null,null);}
+ }
+ @Test public void privatePdfIdentitySurvivesWebViewRecreation()throws Exception{
+  String first=String.join(" - ","4111","1111","1111","1111");
+  String second=String.join(" - ","4000","0000","0006","1111");
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=demo]')");
+   click(a,"[data-action=demo]");
+   importPrivatePdf(a,first,second);
+   String rows="JSON.parse(Android.load()).transactions.filter(row=>row.source==='pdf')";
+   assertEquals("2",js(a,rows+".length"));
+   String firstId=js(a,rows+"[0].id"),secondId=js(a,rows+"[1].id");
+   assertEquals("true",js(a,rows+".every(row=>row.importKey.startsWith('pdf-hmac-v1:'))"));
+   a.recreate();
+   waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");
+   importPrivatePdf(a,second,first);
+   assertEquals(secondId,js(a,rows+"[0].id"));
+   assertEquals(firstId,js(a,rows+"[1].id"));
+   assertEquals("false",js(a,"Android.load().includes("+JSONObject.quote(first)+")||Android.load().includes("+JSONObject.quote(second)+")"));
+  }
+ }
+ private void importPrivatePdf(ActivityScenario<MainActivity> a,String first,String second)throws Exception{
+  String text="QNB\nHesap Kesim Tarihi: 05/10/2026\n01/10/2026 SENTETIK KART "+first+" 50.00\n01/10/2026 SENTETIK KART "+second+" 50.00";
+  js(a,"window.onPdfText("+JSONObject.quote(text)+")");
+  waitJs(a,"!!document.querySelector('#import-account')");
+  js(a,"(()=>{const select=document.querySelector('#import-account');select.value=JSON.parse(Android.load()).accounts.find(a=>a.type==='card').id;select.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  click(a,"#acknowledge-import");
+  click(a,"[data-action=confirmImport]");
+  waitJs(a,"document.querySelector('#toast').textContent.includes('Ekstre kaydedildi')");
  }
  private void restoreDownload(ActivityScenario<MainActivity> a,String name)throws Exception{
   click(a,"#settings");

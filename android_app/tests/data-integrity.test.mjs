@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as C from '../app/src/main/assets/core.mjs';
 import * as W from '../app/src/main/assets/wallet.mjs';
 import {parseStatementCsv} from '../app/src/main/assets/csv.mjs';
-import {parseStatement} from '../app/src/main/assets/parser.mjs';
+import {parseStatement,parseStatementWithIdentity} from '../app/src/main/assets/parser.mjs';
 
 const wallet=()=>W.normalizeWallet({...C.empty(),accounts:[
   {id:'card',type:'card',name:'Sentetik kart',opening:0},
@@ -21,6 +21,7 @@ const pdfText=desc=>[
 ].join('\n');
 const pan=['4111','1111','1111','1111'].join(' ');
 const ref=['4012','8888','8888','1881'].join('');
+const identityKey=async()=>({id:crypto.randomUUID(),secret:await crypto.subtle.generateKey({name:'HMAC',hash:'SHA-256'},false,['sign'])});
 
 test('separate CSV imports retain equal rows in distinct statement periods and replay each idempotently',()=>{
   const oct=csv(),nov=csv({period:'2026-11'});
@@ -42,7 +43,9 @@ test('CSV source IDs distinguish equal real transactions and detect conflicting 
   s=importCsv(s,[rows[1]]);
   assert.equal(C.summary(s,'2026-10','statement').net,10000);
   assert.deepEqual(importCsv(s,[...rows].reverse()),s);
-  assert.deepEqual(importCsv(s,[rows[0],rows[0]]),s);
+  const repeated=importCsv(s,[rows[0],rows[0]]);
+  assert.equal(repeated.transactions.at(-1).matchStatus,'pending');
+  assert.deepEqual(importCsv(repeated,[rows[0],rows[0]]),repeated);
   const conflict={...rows[0],cents:7500};
   s=importCsv(s,[conflict]);
   assert.equal(s.transactions.at(-1).matchStatus,'pending');
@@ -211,7 +214,7 @@ test('PDF masks grouped and contiguous payment numbers next to numeric reference
   }
 });
 
-test('legacy PDF backup masking preserves row identity, amounts and user edits on reimport',()=>{
+test('legacy PDF backup restores masked rows and keeps edits when ambiguous replay is blocked',()=>{
   const pdf=parseStatement(pdfText('SENTETIK KART '+pan));
   const first=C.importStatement(wallet(),pdf,'card');
   const t=first.transactions[0];
@@ -224,14 +227,14 @@ test('legacy PDF backup masking preserves row identity, amounts and user edits o
   assert.ok(!JSON.stringify(restored).includes(pan));
   assert.ok(!C.backupText(first).includes(pan));
   assert.ok(raw.includes(pan));
-  const repeated=C.importStatement(restored,pdf,'card');
-  assert.deepEqual(repeated.transactions.map(({id,importKey,desc,category,note,reviewed,amount})=>({id,importKey,desc,category,note,reviewed,amount})),
+  assert.throws(()=>C.importStatement(restored,pdf,'card'),/tekrar aktarımı inceleme/);
+  assert.deepEqual(restored.transactions.map(({id,importKey,desc,category,note,reviewed,amount})=>({id,importKey,desc,category,note,reviewed,amount})),
     [{id:t.id,importKey:t.importKey,desc:t.desc,category:t.category,note:t.note,reviewed:true,amount:5000}]);
-  assert.deepEqual(C.summary(repeated,'2026-10'),C.summary(first,'2026-10'));
+  assert.deepEqual(C.summary(restored,'2026-10'),C.summary(first,'2026-10'));
 });
 
 
-test('PDF key masking keeps distinct spaced-card rows stable even with the same visible suffix',()=>{
+test('legacy PDF masks colliding card numbers and blocks replay without reliable row identity',async()=>{
   const left=pan.replaceAll(' ',' - ');
   const right=['4000','0000','0006','1111'].join(' - ');
   const line=number=>'01/10/2026 SENTETIK KART '+number+' 50.00';
@@ -250,9 +253,88 @@ test('PDF key masking keeps distinct spaced-card rows stable even with the same 
   }
   legacy.transactions.reverse();
   const migrated=C.readBackup(JSON.stringify(legacy));
-  const repeated=C.importStatement(migrated,parsed,'card');
-  assert.deepEqual(repeated.transactions.map(t=>[t.id,t.desc]),first.transactions.map((t,i)=>[t.id,'Sentetik düzenleme '+i]));
-  assert.equal(C.summary(repeated,'2026-10').net,10000);
-  assert.ok(!C.backupText(repeated).includes(left));
-  assert.ok(!C.backupText(repeated).includes(right));
+  const modern=await parseStatementWithIdentity(text,identityKey);
+  assert.throws(()=>C.importStatement(migrated,modern,'card'),/tekrar aktarımı inceleme/);
+  assert.deepEqual(migrated.transactions.map(t=>[t.id,t.desc]).reverse(),first.transactions.map((t,i)=>[t.id,'Sentetik düzenleme '+i]));
+  assert.equal(C.summary(migrated,'2026-10').net,10000);
+  assert.ok(!C.backupText(migrated).includes(left));
+  assert.ok(!C.backupText(migrated).includes(right));
+});
+
+test('PDF reimport keeps edits on the original card through row additions, removals and reordering',async()=>{
+  const key=await identityKey();
+  const a=pan.replaceAll(' ',' - '),b=['4000','0000','0006','1111'].join(' - ');
+  const statement=async numbers=>{
+    const [first,...rest]=numbers;
+    const text=[pdfText('SENTETIK KART '+first).replace('Donem Borcu: 50.00','Donem Borcu: '+(numbers.length*50)+'.00'),
+      ...rest.map(number=>'01/10/2026 SENTETIK KART '+number+' 50.00')].join('\n');
+    const parsed=await parseStatementWithIdentity(text,async()=>key);
+    assert.ok(!JSON.stringify(parsed).includes(a));
+    assert.ok(!JSON.stringify(parsed).includes(b));
+    return parsed;
+  };
+  let s=C.importStatement(wallet(),await statement([a]),'card');
+  const id=s.transactions[0].id;
+  s=C.updateTransaction(s,{...s.transactions[0],desc:'Sentetik düzenleme',category:'Sağlık',note:'Sentetik not'});
+  s=C.readBackup(C.backupText(s));
+  for(const numbers of [[a,b],[b,a],[a]]){
+    s=C.importStatement(s,await statement(numbers),'card');
+    const row=s.transactions[numbers.indexOf(a)];
+    assert.deepEqual([row.id,row.desc,row.category,row.note],[id,'Sentetik düzenleme','Sağlık','Sentetik not']);
+    assert.equal(C.summary(s,'2026-10').net,numbers.length*5000);
+  }
+  assert.equal(C.importStatement(s,await statement([a.replaceAll(' - ','')]),'card').transactions[0].id,id);
+  const fromOtherDevice=await parseStatementWithIdentity(pdfText('SENTETIK KART '+a),identityKey);
+  assert.throws(()=>C.importStatement(s,fromOtherDevice,'card'),/tekrar aktarımı inceleme/);
+  assert.equal(s.transactions[0].id,id);
+  const numberUnavailable=parseStatement(pdfText('SENTETIK KART **** 1111'));
+  assert.throws(()=>C.importStatement(s,numberUnavailable,'card'),/tekrar aktarımı inceleme/);
+  const indistinguishable=await statement([a,a]);
+  assert.throws(()=>C.importStatement(s,indistinguishable,'card'),/tekrar aktarımı inceleme/);
+  const importedB=C.importStatement(s,await statement([b]),'card').transactions[0];
+  assert.notEqual(importedB.id,id);
+  assert.notEqual(importedB.desc,'Sentetik düzenleme');
+});
+
+test('equal rows sharing a CSV source ID are reviewed and replay preserves the decision',()=>{
+  const row=csv({transactionId:'synthetic-collision'});
+  const once=importCsv(wallet(),[row]);
+  const twice=importCsv(once,[row,row]);
+  assert.equal(twice.transactions.length,2);
+  const candidate=twice.transactions.find(t=>t.matchStatus==='pending');
+  assert.ok(candidate);
+  assert.equal(C.summary(twice,'2026-10','statement').net,5000);
+  assert.deepEqual(importCsv(twice,[row,row]),twice);
+  const accepted=C.resolveCandidate(twice,candidate.id,'distinct');
+  assert.equal(C.summary(accepted,'2026-10','statement').net,10000);
+  assert.deepEqual(importCsv(C.readBackup(C.backupText(accepted)),[row,row]),accepted);
+  const dismissed=C.removeTransaction(twice,candidate.id);
+  assert.equal(C.summary(dismissed,'2026-10','statement').net,5000);
+  assert.deepEqual(importCsv(C.readBackup(C.backupText(dismissed)),[row,row]),dismissed);
+  assert.equal(importCsv(dismissed,[row,row,row]).transactions.filter(t=>t.matchStatus==='pending').length,1);
+});
+
+test('a manual bank payment does not bridge unrelated PDF and CSV payment dates',()=>{
+  const p=parseStatement('QNB\nHesap Kesim Tarihi: 05/10/2026\n01/10/2026 ODEME 50.00');
+  let s=C.importStatement(wallet(),p,'card');
+  s=W.attachPaymentSource(s,s.transactions[0].id,'bank',{paidOn:'2026-11-30'});
+  assert.deepEqual(C.readBackup(C.backupText(s)),s);
+  const other=csv({date:'2026-11-30',period:'2026-11',desc:'ODEME',kind:'odeme',category:'Kart ödemesi'});
+  s=importCsv(s,[other]);
+  const csvRow=s.transactions.find(t=>t.source==='csv'),manual=s.transactions.find(t=>t.kind==='payment');
+  const bad=structuredClone(s),badRow=bad.transactions.find(t=>t.id===csvRow.id);
+  delete badRow.matchCandidates;
+  Object.assign(badRow,{linkedTo:manual.id,matchStatus:'linked'});
+  assert.throws(()=>C.readBackup(JSON.stringify(bad)),/PDF.*CSV.*tarih/);
+  assert.equal(csvRow.matchStatus,undefined);
+  assert.equal(C.cardStatus(s,'card').current,-10000);
+  const pending=structuredClone(s);
+  Object.assign(pending.transactions.find(t=>t.id===csvRow.id),{matchStatus:'pending',matchCandidates:[manual.id]});
+  assert.throws(()=>C.resolveCandidate(pending,csvRow.id,'link',manual.id),/PDF.*CSV.*tarih/);
+  const nearby=importCsv(C.removeTransaction(s,csvRow.id),[{...other,date:'2026-10-04',period:'2026-10'}]);
+  const nearbyCsv=nearby.transactions.find(t=>t.source==='csv');
+  const linked=C.resolveCandidate(nearby,nearbyCsv.id,'link',manual.id);
+  assert.deepEqual(C.readBackup(C.backupText(linked)),linked);
+  assert.equal(C.cardStatus(linked,'card').current,-5000);
+  assert.equal(C.balance(linked,linked.accounts.find(account=>account.id==='bank')),95000);
 });

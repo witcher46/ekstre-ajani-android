@@ -1,7 +1,8 @@
 import * as C from './core.mjs';
 import * as W from './wallet.mjs';
 import * as V from './views.mjs';
-import {parseStatement} from './parser.mjs';
+import {parseStatementWithIdentity} from './parser.mjs';
+import {loadPdfIdentityKey} from './pdf-identity.mjs';
 import {parseStatementCsv} from './csv.mjs';
 const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const plainMoney=C.formatMoney;
@@ -82,7 +83,15 @@ window.handleBack=()=>{
  return true;
 };
 window.nativeError=errorNotice;window.nativeNotice=message=>notice(message);
-window.onPdfText=text=>{try{pending=parseStatement(text);importDraft={account:'',acknowledged:false,suggestions:new Map()};go('import');notice('PDF okundu. Kartı seçip önizlemeyi onayla.');}catch(e){errorNotice(e.message);}};
+window.onPdfText=async text=>{
+ try{
+  pending=await parseStatementWithIdentity(text,async()=>{
+   try{return await loadPdfIdentityKey();}catch{throw Error('PDF işlem kimliği için yerel anahtar açılamadı. Aktarımı yeniden dene.');}
+  });
+  importDraft={account:'',acknowledged:false,suggestions:new Map()};
+  go('import');notice('PDF okundu. Kartı seçip önizlemeyi onayla.');
+ }catch(e){errorNotice(e.message);}
+};
 function go(next,id=null,category=null){
  if(next!==page||id!==detailId||category!==expenseCategory){
   history.push({page,detailId,query,expenseCategory,scroll:window.scrollY,opener:focusTarget(actionTrigger||document.activeElement)});
@@ -313,11 +322,17 @@ $('csv-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';
  if(file.size>5*1024*1024)throw Error('CSV en fazla 5 MB olabilir.');
  const rows=parseStatementCsv(new TextDecoder('utf-8',{fatal:true}).decode(await file.arrayBuffer())),groups=[...new Set(rows.map(r=>JSON.stringify([r.bank,r.card])))];
  const merchants=[...new Set(rows.filter(r=>r.kind!=='odeme'&&C.suggestCategory(state,r.desc)!==r.category&&C.suggestCategory(state,r.desc)).map(r=>r.desc))];
- modal('CSV aktarımı',`<p>${rows.length} hareket okundu. Aynı kaynak satırları tekrar eklenmez. PDF/manual çakışmaları inceleme kutusuna alınır.</p>`+groups.map((group,i)=>select('card-'+i,JSON.parse(group).join(' · '),accountOptions(a=>a.type==='card'))).join('')+merchants.map((name,i)=>importCategoryOption(name,null,i)).join(''),f=>{
+ modal('CSV aktarımı',`<p>${rows.length} hareket okundu. Daha önce işlenen satırlar tekrar eklenmez. Olası çakışmalar incelemeye alınır.</p>`+groups.map((group,i)=>select('card-'+i,JSON.parse(group).join(' · '),accountOptions(a=>a.type==='card'))).join('')+merchants.map((name,i)=>importCategoryOption(name,null,i)).join(''),f=>{
   const targets=groups.map((g,i)=>f.get('card-'+i));if(targets.some(t=>!t)||new Set(targets).size!==targets.length)throw Error('Her kaynak kart için ayrı bir hedef kredi kartı seç.');
   const chosen=new Set(merchants.filter((_,i)=>document.querySelector(`#fields [data-category-suggestion="${i}"]:checked`)));
   const selected=rows.map(r=>r.kind!=='odeme'&&chosen.has(r.desc)?{...r,category:C.suggestCategory(state,r.desc)??r.category}:r);
-  let next=state;for(const [i,g]of groups.entries())next=C.importCsv(next,selected.filter(r=>JSON.stringify([r.bank,r.card])===g),targets[i]);commit(next);period=rows.at(-1).date.slice(0,7);render();
+  const previousIds=new Set(state.transactions.map(row=>row.id));
+  let next=state;
+  for(const [i,g]of groups.entries())next=C.importCsv(next,selected.filter(r=>JSON.stringify([r.bank,r.card])===g),targets[i]);
+  const added=next.transactions.filter(row=>!previousIds.has(row.id));
+  const review=added.filter(row=>row.matchStatus==='pending').length;
+  commit(next);period=rows.at(-1).date.slice(0,7);render();
+  notice(`CSV aktarımında ${rows.length} satır okundu. ${added.length-review} kaydedildi, ${review} incelemede, ${rows.length-added.length} daha önce işlendi.`);
  },'Kaydet',csvOpener);
 }catch(error){errorNotice(error.message);}};
 

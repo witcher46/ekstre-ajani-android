@@ -1,4 +1,4 @@
-import {maskPdfRows} from './privacy.mjs';
+import {maskPdfRows,pdfIdentityKeyId} from './privacy.mjs';
 
 export const merchantKey=value=>String(value??'').normalize('NFKD').replace(/\p{M}/gu,'').replace(/ı/g,'i').toUpperCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 export const categories=['Market / Gıda','Dışarıda yeme','Akaryakıt','Fatura / İnternet','Abonelik','Oyun / Dijital','Online alışveriş','Ulaşım','Sağlık','Giyim','Ev / Kira','Eğitim','Faiz / Ücret','Diğer'];
@@ -239,6 +239,11 @@ function incompatibleStatementPeriods(a,b){
  return effectKind(a)!=='cardPayment'&&a.period!==b.period&&
   ((x==='pdf'&&y==='csv')||(x==='csv'&&y==='pdf'));
 }
+function incompatibleDocumentPayments(a,b){
+ const x=sourceOf(a),y=sourceOf(b);
+ return a.kind==='cardPayment'&&b.kind==='cardPayment'&&
+  ((x==='pdf'&&y==='csv')||(x==='csv'&&y==='pdf'))&&!sameEconomic(a,b);
+}
 function connectedLinkRows(target,aliases){
  const connected=[target],remaining=[...aliases];
  if(target.kind==='payment')return [...connected,...remaining];
@@ -285,6 +290,9 @@ function validateLinkGroups(s,links){
    sources.add(source);
   }
   const csv=group.find(row=>sourceOf(row)==='csv'),pdf=group.find(row=>sourceOf(row)==='pdf');
+  if(pdf&&csv&&incompatibleDocumentPayments(pdf,csv)){
+   throw Error('PDF ve CSV ödemelerinin tarihleri veya işlem bilgileri uyuşmuyor.');
+  }
   // Previously confirmed legacy links did not require the two export periods to match.
   if(pdf&&csv?.csvKey.startsWith('["csv-v2",')&&incompatibleStatementPeriods(csv,pdf)){
    throw Error('Yedekte PDF ve CSV ekstre dönemleri uyuşmuyor.');
@@ -335,7 +343,7 @@ function matchingRows(rows,t){
  const viaAliases=new Set(),incompatible=new Set();
  for(const row of rows){
   if(row.id===t.id||sourceOf(row)===sourceOf(t))continue;
-  if(incompatibleStatementPeriods(row,t))incompatible.add(row.linkedTo||row.id);
+  if(incompatibleStatementPeriods(row,t)||incompatibleDocumentPayments(row,t))incompatible.add(row.linkedTo||row.id);
   if(row.linkedTo&&sameEconomic(row,t))viaAliases.add(row.linkedTo);
  }
  return rows.filter(r=>r.id!==t.id&&effective(r)&&sourceOf(r)!==sourceOf(t)&&
@@ -495,6 +503,9 @@ export function resolveCandidate(s,tid,decision,targetId){
   const aliases=next.transactions.filter(t=>t.linkedTo===targetId);
   const members=[row,...(target?[target]:[]),...aliases,...next.transactions.filter(t=>t.linkedTo===row.id)];
   const pdf=members.find(t=>sourceOf(t)==='pdf'),csv=members.find(t=>sourceOf(t)==='csv');
+  if(pdf&&csv&&incompatibleDocumentPayments(pdf,csv)){
+   throw Error('PDF ve CSV ödemelerinin tarihleri veya işlem bilgileri uyuşmuyor.');
+  }
   if(pdf&&csv&&incompatibleStatementPeriods(pdf,csv)){
    throw Error('Farklı PDF ve CSV ekstre dönemleri tek işleme bağlanamaz.');
   }
@@ -559,11 +570,44 @@ export function sanitizePdfSources(s){
  const transactions=maskPdfRows(s.transactions,row=>sourceOf(row)==='pdf');
  return transactions.some((row,index)=>row!==s.transactions[index])?{...s,transactions}:s;
 }
+function assertPdfIdentityCompatibility(previous,incoming){
+ const legacy=key=>/\[kart(?::\d{4})?\]/.test(key??'');
+ const previousKeys=new Set(previous.map(row=>pdfIdentityKeyId(row.importKey)).filter(Boolean));
+ const incomingKeys=new Set(incoming.map(row=>pdfIdentityKeyId(row.importKey)).filter(Boolean));
+ const needsReview=()=>Error('PDF tekrar aktarımı inceleme gerektiriyor. İşlem kimliği güvenle doğrulanamadı. Mevcut ekstreyi ve yeni PDF’yi karşılaştır.');
+ if(previous.some(row=>legacy(row.importKey))||
+    (previous.length&&incoming.some(row=>legacy(row.importKey)))||
+    (incomingKeys.size&&[...previousKeys].some(key=>!incomingKeys.has(key)))){
+  throw needsReview();
+ }
+ const priorIds=new Set(previous.map(row=>row.importKey));
+ const incomingIds=new Set(incoming.map(row=>row.importKey));
+ const unkeyedAdditions=incoming.filter(row=>!pdfIdentityKeyId(row.importKey)&&!priorIds.has(row.importKey));
+ if(previous.some(old=>pdfIdentityKeyId(old.importKey)&&!incomingIds.has(old.importKey)&&
+    unkeyedAdditions.some(row=>sameEconomic({...row,account:old.account},old)))){
+  throw needsReview();
+ }
+ const counts=rows=>{
+  const result=new Map();
+  for(const row of rows){
+   if(!pdfIdentityKeyId(row.importKey))continue;
+   const stem=row.importKey.slice(0,row.importKey.lastIndexOf('|'));
+   result.set(stem,(result.get(stem)??0)+1);
+  }
+  return result;
+ };
+ const nextCounts=counts(incoming);
+ for(const [stem,count] of counts(previous)){
+  if(nextCounts.has(stem)&&(count>1||nextCounts.get(stem)>1))throw needsReview();
+ }
+}
 export function importStatement(s,p,account){
  if(p.reconciliation?.status==='mismatch')throw Error('Ekstre toplamları uyuşmuyor; aktarım kaydedilmedi.');
  const a=s.accounts.find(x=>x.id===account);if(!a||a.type!=='card')throw Error('Bir kredi kartı seç.');const next=structuredClone(sanitizePdfSources(s)),key=account+'|'+p.period;
  const incoming=maskPdfRows(p.rows);
- const previous=next.transactions.filter(t=>t.statement===key);next.transactions=next.transactions.filter(t=>t.statement!==key);
+ const previous=next.transactions.filter(t=>t.statement===key);
+ assertPdfIdentityCompatibility(previous,incoming);
+ next.transactions=next.transactions.filter(t=>t.statement!==key);
  const invalidated=new Set();
  for(const old of previous){if(!incoming.some(r=>r.importKey===old.importKey&&sameEconomic({...r,account},old))){invalidated.add(old.id);const canonical=old.linkedTo?next.transactions.find(t=>t.id===old.linkedTo):null;if(canonical){canonical.matchStatus='pending';canonical.matchReason='sourceChanged';canonical.matchCandidates=[];}for(const alias of next.transactions.filter(t=>t.linkedTo===old.id)){alias.previousLinkedTo=old.id;delete alias.linkedTo;alias.matchStatus='pending';alias.matchReason='sourceChanged';alias.matchCandidates=[];}}}
  const candidates=[...next.transactions];
@@ -580,26 +624,35 @@ export function importCsv(s,rows,account){
  if(!a||a.type!=='card')throw Error('CSV için bir kredi kartı seç.');
  const next=structuredClone(s),candidates=[...next.transactions];
  const storedBatches=new Map(),incomingBatches=new Map();
- const seenSignatures=new Map(),anonymousSignatures=new Map(),seenIds=new Map(),seenSourceKeys=new Set();
+ const seenSignatures=new Map(),anonymousSignatures=new Map(),seenIds=new Map(),priorOccurrences=new Map(),incomingOccurrences=new Map();
+ const countOccurrence=(counts,key)=>{
+  const count=(counts.get(key)??0)+1;
+  counts.set(key,count);
+  return count;
+ };
  const sourceIdKey=row=>JSON.stringify([row.period,row.csvSourceId]);
- const remember=row=>{
+ const remember=(row,previous=false)=>{
   const signature=csvSignature(row);
   if(!seenSignatures.has(signature))seenSignatures.set(signature,row);
   if(row.csvSourceId){
    const identity=sourceIdKey(row);
    if(!seenIds.has(identity))seenIds.set(identity,row);
-   seenSourceKeys.add(csvKeyFor(row));
+   if(previous)countOccurrence(priorOccurrences,csvKeyFor(row));
   }else if(!anonymousSignatures.has(signature))anonymousSignatures.set(signature,row);
  };
  for(const row of candidates){
   if(row.account!==account||sourceOf(row)!=='csv')continue;
-  remember(row);
+  remember(row,true);
   if(!row.csvSourceId)appendToGroup(storedBatches,JSON.stringify([row.period,row.csvBatchId??null]),row);
  }
  for(const receipt of s.csvDismissals??[]){
   const row=readCsvDismissal(receipt);
   if(row.account!==account)continue;
-  if(row.csvSourceId)seenSourceKeys.add(receipt[0]);
+  if(row.csvSourceId){
+   countOccurrence(priorOccurrences,receipt[0]);
+   const identity=sourceIdKey(row);
+   if(!seenIds.has(identity))seenIds.set(identity,row);
+  }
   else appendToGroup(storedBatches,JSON.stringify([row.period,row.csvBatchId]),row);
  }
  const incoming=rows.map(r=>{
@@ -621,12 +674,12 @@ export function importCsv(s,rows,account){
   if(!row.csvSourceId&&!row.csvBatchId)continue;
   const signature=csvSignature(row),sameId=row.csvSourceId?seenIds.get(sourceIdKey(row)):undefined;
   row.csvKey=csvKeyFor(row);
-  if(row.csvSourceId&&seenSourceKeys.has(row.csvKey))continue;
+  if(row.csvSourceId&&countOccurrence(incomingOccurrences,row.csvKey)<=(priorOccurrences.get(row.csvKey)??0))continue;
   const ambiguous=sameId||(row.csvSourceId?anonymousSignatures:seenSignatures).get(signature);
   if(ambiguous){
    row.matchStatus='pending';
    row.matchReason=sameId?'csvSourceConflict':'csvRepeatedRow';
-   row.matchCandidates=[ambiguous.id];
+   row.matchCandidates=ambiguous.id?[ambiguous.id]:[];
   }else markCandidate(row,candidates);
   next.transactions.push(row);
   remember(row);

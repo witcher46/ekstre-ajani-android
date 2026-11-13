@@ -1,5 +1,6 @@
 import {addCents,merchantKey,money,validDate} from './core.mjs';
-import {maskPaymentIdentifiers,maskPdfRows} from './privacy.mjs';
+import {maskPaymentIdentifiers,maskPdfRows,replacePaymentIdentifiers} from './privacy.mjs';
+import {signPdfIdentity} from './pdf-identity.mjs';
 // Keep this normalization unchanged: 0.1.1 import keys depend on its exact output.
 export function clean(s){return String(s).replace(/\u00a0/g,' ').replace(/PE(?:\(cid:\d+\)){1,3}N/gi,'PESIN').replace(/\(cid:\d+\)deme/gi,'Odeme').replace(/\(cid:\d+\)ndirim/gi,'Indirim').replace(/\(cid:\d+\)/g,'').replace(/[çğıöşüÇĞİÖŞÜ]/g,c=>({'ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u','Ç':'C','Ğ':'G','İ':'I','Ö':'O','Ş':'S','Ü':'U'})[c]);}
 const months=['ocak','subat','mart','nisan','mayis','haziran','temmuz','agustos','eylul','ekim','kasim','aralik'];
@@ -56,7 +57,9 @@ function headerAmount(t,labels,pattern){
  const token=t.slice(label.index+label[0].length).match(new RegExp('^('+pattern+')(?![\\d.,])'));
  return {value:token?money(token[1]):null,present:true};
 }
-export function parseStatement(text){
+export function parseStatement(text){return parseStatementRows(text);}
+
+function parseStatementRows(text,privateIdentities){
  if(typeof text!=='string'||text.length>3e6)throw Error('PDF metni çok büyük.');const t=clean(text),top=t.slice(0,2200).toUpperCase();const bank=top.includes('QNB')?'QNB':/YAPI KREDI|YAPI VE KREDI|WORLDCARD|WORLDPUAN/.test(top)?'Yapı Kredi':null;
  if(!bank)throw Error('Bu sürüm Yapı Kredi ve QNB kredi kartı ekstrelerini destekler.');
  const isQ=bank==='QNB',pattern=isQ?enMoney:trMoney,moneyPattern='(?<![\\d.,])'+pattern+'(?![\\d.,])',cut=findDate(t,cutLabel);
@@ -73,7 +76,9 @@ export function parseStatement(text){
   }
   const tokens=[...body.matchAll(new RegExp(moneyPattern,'g'))],rawTokens=[...rawBody.matchAll(new RegExp(moneyPattern,'g'))];
   if(!tokens.length||!rawTokens.length)throw Error('Tarihli bir işlem satırının tutarı okunamadı; kısmi kayıt yapılmadı.');
-  const token=isQ?tokens.at(-1):tokens[0],rawToken=isQ?rawTokens.at(-1):rawTokens[0],sourceDesc=maskPaymentIdentifiers(rawBody.slice(0,rawToken.index).trim()),oldDesc=body.slice(0,token.index).trim(),tail=body.slice(token.index+token[0].length);
+  const token=isQ?tokens.at(-1):tokens[0],rawToken=isQ?rawTokens.at(-1):rawTokens[0];
+  const oldDesc=body.slice(0,token.index).trim(),tail=body.slice(token.index+token[0].length);
+  const sourceDesc=maskPaymentIdentifiers(rawBody.slice(0,rawToken.index).trim());
   let inst=(isQ?tail.match(/^\s*(\d{1,3}\/\d{1,3})(?:\s|$)/):(oldDesc+' '+tail).match(/\b(\d{1,3}\/\d{1,3})\b/))?.[1]||'';
   if(inst){const [a,b]=inst.split('/').map(Number);if(!(a>=1&&a<=b&&b<=120))inst='';}
   let desc=displayDescription(sourceDesc);
@@ -81,6 +86,12 @@ export function parseStatement(text){
   desc=maskPaymentIdentifiers(desc.replace(/\b\d+\.\s*(?=İndirim)/gi,'').replace(new RegExp('\\s+'+enMoney+'\\s+al(?:is)?v\\s+ind\\b','gi'),' İndirim')).replace(/^\d{8}\s+/,'').slice(0,500)||'İşlem';
   const n=money(token[0]),semantic=clean(desc).toUpperCase(),isPayment=/^ODEME\b|^TESEKKU?R\s+EDERIZ\b/.test(semantic),kind=isPayment?'cardPayment':n<0||token[0].startsWith('+')||/\b(?:INDIRIM|IADE|IPTAL)\b|\bAL(?:IS)?V\s+IND\b/.test(semantic)?'refund':'expense';
   const key=JSON.stringify([bank,period,d,legacyDescription(oldDesc,inst),n,inst]),count=(occurrences.get(key)||0)+1;occurrences.set(key,count);
+  if(privateIdentities){
+   // Canonicalize separators in place and keep each identifier in its original position.
+   const untagged=oldDesc.replaceAll('\0','\uFFFD');
+   const privateDesc=replacePaymentIdentifiers(untagged,digits=>'\0a'+digits+'z\0');
+   if(privateDesc!==untagged)privateIdentities.set(rows.length,[bank,period,d,kind,n,inst,privateDesc.replace(/\s+/g,' ').trim()]);
+  }
   rows.push({date:d,period,desc,sourceDesc,amount:Math.abs(n),kind,category:isPayment?'Kart ödemesi':categorize(desc),installment:inst,importKey:key+'|'+count});
  }
  if(!rows.length)throw Error('İşlem satırları okunamadı. Metin içeren banka PDF’i seç.');
@@ -97,4 +108,18 @@ export function parseStatement(text){
  if(!due)reasons.push('Son ödeme tarihi '+(new RegExp(dueLabel,'i').test(t)?'okunamadı.':'başlığı bulunamadı.'));
  const reconciliation={status,previousDebt:previous.value,statementDebt:statement.value,expectedDebt,difference,missing,totals,reasons};
  return {bank,period,cut,due,debt:statement.value,rows:maskPdfRows(rows),reconciliation,warning:status==='unverified'?'Ekstre toplamı tam doğrulanamadı. '+reasons.join(' '):status==='mismatch'?reasons[0]:''};
+}
+
+export async function parseStatementWithIdentity(text,loadKey){
+ const identities=new Map(),statement=parseStatementRows(text,identities);
+ if(!identities.size)return statement;
+ const key=await loadKey();
+ const tagged=await Promise.all([...identities].map(async ([index,identity])=>[index,await signPdfIdentity(key,identity)]));
+ const occurrences=new Map();
+ for(const [index,tag] of tagged){
+  const count=(occurrences.get(tag)??0)+1;
+  occurrences.set(tag,count);
+  statement.rows[index].importKey=tag+'|'+count;
+ }
+ return statement;
 }

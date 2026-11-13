@@ -206,14 +206,45 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
     assert.equal(await page.evaluate(()=>localStorage.getItem('ekstre-android-v1-recovery')),beforeRecovery);
     assert.equal(confirmations.length,beforeConfirmations);
 
-    const csvHeader='bank,kart,period,date,desc,amount_cents,category,tur';
-    const csvRow='QNB,Sentetik,2026-10,2026-10-04,SENTETIK CSV AYNI,5000,Diğer,harcama';
-    await page.locator('#csv-file').setInputFiles({
+    const firstPan=['4111','1111','1111','1111'].join(' - ');
+    const secondPan=['4000','0000','0006','1111'].join(' - ');
+    const importPrivatePdf=async numbers=>{
+      const text=['QNB','Hesap Kesim Tarihi: 05/10/2026',...numbers.map(n=>'01/10/2026 SENTETIK KART '+n+' 50.00')].join('\n');
+      await page.evaluate(text=>window.onPdfText(text),text);
+      await page.locator('#import-account').selectOption(card.id);
+      await page.locator('#acknowledge-import').check();
+      await page.locator('[data-action=confirmImport]').click();
+    };
+    await importPrivatePdf([firstPan,secondPan]);
+    const initialPrivate=(await stored()).transactions.filter(t=>t.importKey?.startsWith('pdf-hmac-v1:'));
+    assert.equal(initialPrivate.length,2);
+    await page.locator('nav [data-page=transactions]').click();
+    await page.locator('button[data-edit="'+initialPrivate[0].id+'"]').click();
+    await page.locator('[name=desc]').fill('Sentetik düzenleme');
+    await page.locator('[name=note]').fill('Sentetik not');
+    await page.locator('[name=category]').selectOption('Sağlık');
+    await page.locator('#submit').click();
+    await page.reload();
+    await importPrivatePdf([secondPan,firstPan]);
+    const repeatedPrivate=(await stored()).transactions.filter(t=>t.importKey?.startsWith('pdf-hmac-v1:'));
+    assert.deepEqual(repeatedPrivate.map(t=>t.id),[initialPrivate[1].id,initialPrivate[0].id]);
+    assert.deepEqual([repeatedPrivate[1].desc,repeatedPrivate[1].note,repeatedPrivate[1].category],
+      ['Sentetik düzenleme','Sentetik not','Sağlık']);
+    assert.ok(!JSON.stringify(repeatedPrivate).includes(firstPan)&&!JSON.stringify(repeatedPrivate).includes(secondPan));
+
+    const csvHeader='bank,kart,period,date,desc,amount_cents,category,tur,transaction_id';
+    const csvRow='QNB,Sentetik,2026-10,2026-10-04,SENTETIK CSV AYNI,5000,Diğer,harcama,sentetik-cakis';
+    const csvFile={
       name:'sentetik-csv-tekrar.csv',mimeType:'text/csv',
       buffer:Buffer.from([csvHeader,csvRow,csvRow].join('\n')),
-    });
-    await page.locator('[name=card-0]').selectOption(card.id);
-    await page.locator('#submit').click();
+    };
+    const uploadCsv=async()=>{
+      await page.locator('#csv-file').setInputFiles(csvFile);
+      await page.locator('[name=card-0]').selectOption(card.id);
+      await page.locator('#submit').click();
+    };
+    await uploadCsv();
+    assert.match(await page.locator('#toast').innerText(), /2 satır.*1 kaydedildi, 1 incelemede, 0 daha önce işlendi/);
     const csvRows=(await stored()).transactions.filter(t=>t.source==='csv');
     assert.equal(csvRows.length,2);
     assert.equal(csvRows.filter(t=>t.matchStatus==='pending').length,1);
@@ -224,6 +255,10 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
     assert.equal(await csvReview.getByRole('button',{name:'Aynı işlem',exact:true}).count(),0);
     await csvReview.getByRole('button',{name:'Ayrı gerçek işlem'}).click();
     assert.equal((await stored()).transactions.filter(t=>t.source==='csv'&&t.matchStatus==='distinct').length,1);
+    const reviewed=await stored();
+    await uploadCsv();
+    assert.match(await page.locator('#toast').innerText(), /2 satır.*0 kaydedildi, 0 incelemede, 2 daha önce işlendi/);
+    assert.deepEqual(await stored(),reviewed);
 
     await page.evaluate(cardId => {
       const wallet = JSON.parse(localStorage.getItem('ekstre-android-v1'));
