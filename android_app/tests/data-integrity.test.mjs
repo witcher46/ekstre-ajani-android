@@ -110,9 +110,9 @@ test('removing a PDF bridge reopens only dependent CSV aliases and preserves the
     assert.equal(C.summary(state,'2026-12').net,5000);
     assert.deepEqual(C.readBackup(C.backupText(state)),state);
   }
-  const revised=C.importStatement(linked,parseStatement('QNB\nHesap Kesim Tarihi: 25/12/2026\n10/11/2026 SENTETIK PLAN 75.00 1/3'),'card');
-  assert.equal(revised.transactions.find(t=>t.id===incoming.id).matchStatus,'pending');
-  assert.equal(C.summary(revised,'2026-12').net,7500);
+  const snapshot=C.backupText(linked);
+  assert.throws(()=>C.importStatement(linked,parseStatement('QNB\nHesap Kesim Tarihi: 25/12/2026\n10/11/2026 SENTETIK PLAN 75.00 1/3'),'card'),/tekrar aktarımı inceleme/);
+  assert.equal(C.backupText(linked),snapshot);
 });
 
 test('different PDF and CSV statement periods are not linked as one purchase',()=>{
@@ -261,7 +261,37 @@ test('legacy PDF masks colliding card numbers and blocks replay without reliable
   assert.ok(!C.backupText(migrated).includes(right));
 });
 
-test('PDF reimport keeps edits on the original card through row additions, removals and reordering',async()=>{
+test('a 50 TL to 75 TL PDF replacement with a masked card rejects without losing edits or links',async()=>{
+  const key=await identityKey();
+  const parse=text=>parseStatementWithIdentity(text,async()=>key);
+  const original=pdfText('SENTETIK ALISVERIS '+pan)
+    .replace('Donem Borcu: 50.00','Donem Borcu: 40.00')+'\n02/10/2026 ODEME 10.00';
+  let state=C.importStatement(wallet(),await parse(original),'card');
+  const expense=state.transactions.find(row=>row.kind==='expense');
+  const payment=state.transactions.find(row=>row.kind==='cardPayment');
+  state=C.updateTransaction(state,{...expense,desc:'Sentetik kullanıcı açıklaması',category:'Sağlık',note:'Sentetik not',reviewed:true});
+  state=W.attachPaymentSource(state,payment.id,'bank',{paidOn:'2026-10-02'});
+  const after=C.readBackup(C.backupText(state));
+  const snapshot=structuredClone(after),serialized=C.backupText(after);
+  const replacement=original.replace('40.00','65.00').replace('50.00','75.00');
+  const sameCard=await parse(replacement);
+  const masked=await parse(replacement.replace(pan,'**** 1111'));
+  assert.equal(sameCard.rows[0].amount,7500);
+  assert.notEqual(sameCard.rows[0].importKey,expense.importKey);
+  for(const candidate of [sameCard,masked]){
+    assert.equal(candidate.reconciliation.status,'verified');
+    assert.throws(()=>C.importStatement(after,candidate,'card'),/tekrar aktarımı inceleme/);
+    assert.deepEqual(after,snapshot);
+    assert.equal(C.backupText(after),serialized);
+    assert.equal(after.transactions.find(row=>row.id===payment.id).linkedTo,
+      snapshot.transactions.find(row=>row.id===payment.id).linkedTo);
+  }
+  const replay=C.importStatement(after,await parse(original),'card');
+  assert.deepEqual(new Map(replay.transactions.map(row=>[row.id,row])),
+    new Map(snapshot.transactions.map(row=>[row.id,row])));
+});
+
+test('PDF replay preserves edits through distinct additions and reordering, and rejects missing rows',async()=>{
   const key=await identityKey();
   const a=pan.replaceAll(' ',' - '),b=['4000','0000','0006','1111'].join(' - ');
   const statement=async numbers=>{
@@ -277,23 +307,47 @@ test('PDF reimport keeps edits on the original card through row additions, remov
   const id=s.transactions[0].id;
   s=C.updateTransaction(s,{...s.transactions[0],desc:'Sentetik düzenleme',category:'Sağlık',note:'Sentetik not'});
   s=C.readBackup(C.backupText(s));
-  for(const numbers of [[a,b],[b,a],[a]]){
+  for(const numbers of [[a,b],[b,a]]){
     s=C.importStatement(s,await statement(numbers),'card');
     const row=s.transactions[numbers.indexOf(a)];
     assert.deepEqual([row.id,row.desc,row.category,row.note],[id,'Sentetik düzenleme','Sağlık','Sentetik not']);
     assert.equal(C.summary(s,'2026-10').net,numbers.length*5000);
   }
-  assert.equal(C.importStatement(s,await statement([a.replaceAll(' - ','')]),'card').transactions[0].id,id);
-  const fromOtherDevice=await parseStatementWithIdentity(pdfText('SENTETIK KART '+a),identityKey);
-  assert.throws(()=>C.importStatement(s,fromOtherDevice,'card'),/tekrar aktarımı inceleme/);
-  assert.equal(s.transactions[0].id,id);
-  const numberUnavailable=parseStatement(pdfText('SENTETIK KART **** 1111'));
-  assert.throws(()=>C.importStatement(s,numberUnavailable,'card'),/tekrar aktarımı inceleme/);
-  const indistinguishable=await statement([a,a]);
-  assert.throws(()=>C.importStatement(s,indistinguishable,'card'),/tekrar aktarımı inceleme/);
-  const importedB=C.importStatement(s,await statement([b]),'card').transactions[0];
-  assert.notEqual(importedB.id,id);
-  assert.notEqual(importedB.desc,'Sentetik düzenleme');
+  const formatted=C.importStatement(s,await statement([a.replaceAll(' - ',''),b]),'card');
+  assert.equal(formatted.transactions[0].id,id);
+  const fromOtherDevice=await parseStatementWithIdentity(pdfText('SENTETIK KART '+a)
+    .replace('Donem Borcu: 50.00','Donem Borcu: 100.00')+'\n01/10/2026 SENTETIK KART '+b+' 50.00',identityKey);
+  const changedDescription=await parseStatementWithIdentity(pdfText('SENTETIK FARKLI '+a)
+    .replace('Donem Borcu: 50.00','Donem Borcu: 100.00')+'\n01/10/2026 SENTETIK KART '+b+' 50.00',async()=>key);
+  const numberUnavailable=parseStatement(pdfText('SENTETIK KART **** 1111')
+    .replace('Donem Borcu: 50.00','Donem Borcu: 100.00')+'\n01/10/2026 SENTETIK KART **** 2222 50.00');
+  const snapshot=C.backupText(s);
+  for(const candidate of [await statement([a]),await statement([b]),await statement([a,b,a]),
+    changedDescription,numberUnavailable,fromOtherDevice]){
+    assert.throws(()=>C.importStatement(s,candidate,'card'),/tekrar aktarımı inceleme/);
+    assert.equal(C.backupText(s),snapshot);
+  }
+  const november=await parseStatementWithIdentity(pdfText('SENTETIK KART '+b).replaceAll('/10/','/11/'),async()=>key);
+  const newMonth=C.importStatement(s,november,'card');
+  assert.equal(newMonth.transactions.find(row=>row.period==='2026-11').amount,5000);
+  assert.deepEqual(newMonth.transactions.filter(row=>row.period==='2026-10'),s.transactions);
+});
+
+test('PDF replay rejects reused keys with unequal terms or duplicate occurrences',()=>{
+  const original=parseStatement(pdfText('SENTETIK ALISVERIS'));
+  const s=C.importStatement(wallet(),original,'card');
+  const row=original.rows[0];
+  for(const rows of [
+    [{...row,date:'2026-10-02'}],
+    [{...row,installment:'1/2'}],
+    [{...row,sourceDesc:'SENTETIK DIGER ALISVERIS'}],
+    [row,row],
+    [row,{...row,importKey:row.importKey.replace(/\|1$/,'|2')}],
+  ]){
+    const snapshot=structuredClone(s);
+    assert.throws(()=>C.importStatement(s,{...original,rows},'card'),/tekrar aktarımı inceleme/);
+    assert.deepEqual(s,snapshot);
+  }
 });
 
 test('equal rows sharing a CSV source ID are reviewed and replay preserves the decision',()=>{

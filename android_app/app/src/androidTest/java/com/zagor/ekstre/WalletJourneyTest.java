@@ -288,6 +288,14 @@ public class WalletJourneyTest {
    assertEquals(secondId,js(a,rows+"[0].id"));
    assertEquals(firstId,js(a,rows+"[1].id"));
    assertEquals("false",js(a,"Android.load().includes("+JSONObject.quote(first)+")||Android.load().includes("+JSONObject.quote(second)+")"));
+   String original=js(a,"Android.load()"),recovery=js(a,"Android.recovery()");
+   String changed="QNB\nHesap Kesim Tarihi: 05/10/2026\nOnceki Donem Borcu: 0.00\nDonem Borcu: 125.00\n01/10/2026 SENTETIK KART "+second+" 50.00\n01/10/2026 SENTETIK KART **** 1111 75.00";
+   js(a,"window.onPdfText("+JSONObject.quote(changed)+")");
+   waitJs(a,"!!document.querySelector('[data-action=confirmImport]:enabled')");
+   click(a,"[data-action=confirmImport]");
+   waitJs(a,"document.querySelector('#error-announcement').textContent.includes('tekrar aktarımı inceleme')");
+   assertEquals(original,js(a,"Android.load()"));
+   assertEquals(recovery,js(a,"Android.recovery()"));
   }
  }
  private void importPrivatePdf(ActivityScenario<MainActivity> a,String first,String second)throws Exception{

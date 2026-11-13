@@ -570,52 +570,48 @@ export function sanitizePdfSources(s){
  const transactions=maskPdfRows(s.transactions,row=>sourceOf(row)==='pdf');
  return transactions.some((row,index)=>row!==s.transactions[index])?{...s,transactions}:s;
 }
-function assertPdfIdentityCompatibility(previous,incoming){
- const legacy=key=>/\[kart(?::\d{4})?\]/.test(key??'');
- const previousKeys=new Set(previous.map(row=>pdfIdentityKeyId(row.importKey)).filter(Boolean));
- const incomingKeys=new Set(incoming.map(row=>pdfIdentityKeyId(row.importKey)).filter(Boolean));
+function matchPdfReplay(previous,incoming){
+ if(!previous.length)return new Map();
  const needsReview=()=>Error('PDF tekrar aktarımı inceleme gerektiriyor. İşlem kimliği güvenle doğrulanamadı. Mevcut ekstreyi ve yeni PDF’yi karşılaştır.');
- if(previous.some(row=>legacy(row.importKey))||
-    (previous.length&&incoming.some(row=>legacy(row.importKey)))||
-    (incomingKeys.size&&[...previousKeys].some(key=>!incomingKeys.has(key)))){
-  throw needsReview();
- }
- const priorIds=new Set(previous.map(row=>row.importKey));
- const incomingIds=new Set(incoming.map(row=>row.importKey));
- const unkeyedAdditions=incoming.filter(row=>!pdfIdentityKeyId(row.importKey)&&!priorIds.has(row.importKey));
- if(previous.some(old=>pdfIdentityKeyId(old.importKey)&&!incomingIds.has(old.importKey)&&
-    unkeyedAdditions.some(row=>sameEconomic({...row,account:old.account},old)))){
-  throw needsReview();
- }
- const counts=rows=>{
-  const result=new Map();
+ const keyStem=key=>key.replace(/\|[1-9]\d*$/,'');
+ const index=rows=>{
+  const byKey=new Map(),counts=new Map();
   for(const row of rows){
-   if(!pdfIdentityKeyId(row.importKey))continue;
-   const stem=row.importKey.slice(0,row.importKey.lastIndexOf('|'));
-   result.set(stem,(result.get(stem)??0)+1);
+   const key=row.importKey;
+   if(typeof key!=='string'||!key||/\[kart(?::\d{4})?\]/.test(key)||byKey.has(key))throw needsReview();
+   byKey.set(key,row);
+   const stem=keyStem(key);
+   counts.set(stem,(counts.get(stem)??0)+1);
   }
-  return result;
+  return {byKey,counts};
  };
- const nextCounts=counts(incoming);
- for(const [stem,count] of counts(previous)){
-  if(nextCounts.has(stem)&&(count>1||nextCounts.get(stem)>1))throw needsReview();
+ const original=index(previous),replacement=index(incoming);
+ for(const [key,old] of original.byKey){
+  const row=replacement.byKey.get(key);
+  const stem=keyStem(key);
+  const count=original.counts.get(stem);
+  if(!row||replacement.counts.get(stem)!==count||(count>1&&pdfIdentityKeyId(key))||
+     row.kind!==old.kind||row.amount!==old.amount||row.date!==old.date||row.period!==old.period||
+     (row.installment||'')!==(old.installment||'')||
+     (old.sourceDesc!==undefined&&row.sourceDesc!==undefined&&old.sourceDesc!==row.sourceDesc)){
+   throw needsReview();
+  }
  }
+ return original.byKey;
 }
 export function importStatement(s,p,account){
  if(p.reconciliation?.status==='mismatch')throw Error('Ekstre toplamları uyuşmuyor; aktarım kaydedilmedi.');
  const a=s.accounts.find(x=>x.id===account);if(!a||a.type!=='card')throw Error('Bir kredi kartı seç.');const next=structuredClone(sanitizePdfSources(s)),key=account+'|'+p.period;
  const incoming=maskPdfRows(p.rows);
  const previous=next.transactions.filter(t=>t.statement===key);
- assertPdfIdentityCompatibility(previous,incoming);
+ const priorRows=matchPdfReplay(previous,incoming);
  next.transactions=next.transactions.filter(t=>t.statement!==key);
- const invalidated=new Set();
- for(const old of previous){if(!incoming.some(r=>r.importKey===old.importKey&&sameEconomic({...r,account},old))){invalidated.add(old.id);const canonical=old.linkedTo?next.transactions.find(t=>t.id===old.linkedTo):null;if(canonical){canonical.matchStatus='pending';canonical.matchReason='sourceChanged';canonical.matchCandidates=[];}for(const alias of next.transactions.filter(t=>t.linkedTo===old.id)){alias.previousLinkedTo=old.id;delete alias.linkedTo;alias.matchStatus='pending';alias.matchReason='sourceChanged';alias.matchCandidates=[];}}}
  const candidates=[...next.transactions];
  for(const r of incoming){
-  const old=previous.find(t=>t.importKey===r.importKey);
+  const old=priorRows.get(r.importKey);
   const category=old?.category??(['expense','refund'].includes(r.kind)?activeExpenseCategory(s,r.category):r.category);
   const row={...r,id:old?.id||id(),account,statement:key,source:'pdf',merchantName:r.desc,sourceDesc:r.sourceDesc??r.desc,desc:old&&old.desc!==old.sourceDesc?old.desc:r.desc,category,note:old?.note??'',reviewed:old?.reviewed||false};
-  if(old&&!invalidated.has(old.id)){for(const k of ['matchStatus','matchCandidates','matchReason','linkedTo','previousLinkedTo'])if(old[k]!==undefined)row[k]=old[k];}else markCandidate(row,candidates);next.transactions.push(row);
+  if(old){for(const k of ['matchStatus','matchCandidates','matchReason','linkedTo','previousLinkedTo'])if(old[k]!==undefined)row[k]=old[k];}else markCandidate(row,candidates);next.transactions.push(row);
  }
  next.statements=next.statements.filter(x=>x.id!==key);next.statements.push({id:key,account,bank:p.bank,period:p.period,cut:p.cut,due:p.due,debt:p.debt,imported:today(),reconciliationStatus:p.reconciliation?.status==='verified'?'verified':'unverified',importedMovementCount:p.rows.length});return validate(repairReferences(preferPdfAcrossCut(next)));
 }

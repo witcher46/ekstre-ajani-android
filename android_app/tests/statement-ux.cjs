@@ -302,6 +302,23 @@ async function run() {
     });
     assert.equal(await save.count(),0,'A key failure must leave no savable preview');
     assert.deepEqual(await snapshot(),beforePdfErrors);
+    await page.evaluate(()=>{delete window.Android;});
+    const originalPdf='QNB\nHesap Kesim Tarihi: 05/12/2026\nOnceki Donem Borcu: 0.00\nDonem Borcu: 50.00\n01/12/2026 SENTETIK KART 4111 1111 1111 1111 50.00';
+    await page.evaluate(text=>window.onPdfText(text),originalPdf);
+    await save.click();
+    const imported=await snapshot();
+    const row=JSON.parse(imported[0]).transactions.find(row=>row.period==='2026-12');
+    await history.getByRole('article').filter({hasText:'2026-12'}).getByRole('button',{name:'Detayı aç'}).click();
+    await page.locator('button[data-edit="'+row.id+'"]').click();
+    await page.locator('[name=desc]').fill('Sentetik özel açıklama');
+    await page.locator('[name=category]').selectOption('Ulaşım');
+    await page.locator('[name=note]').fill('Sentetik not');
+    await page.locator('#submit').click();
+    const beforeReplay=await snapshot();
+    await page.evaluate(text=>window.onPdfText(text),originalPdf.replaceAll('50.00','75.00').replace('4111 1111 1111 1111','**** 1111'));
+    await save.click();
+    assert.match(await page.locator('#error-announcement').textContent(),/tekrar aktarımı inceleme/);
+    assert.deepEqual(await snapshot(),beforeReplay,'The rejected import must not write to either wallet snapshot');
     assert.deepEqual(errors,[]);
     console.log('Statement and expense chart journeys passed; '+checks+' responsive checks');
   } finally {

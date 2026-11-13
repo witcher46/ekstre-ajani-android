@@ -106,21 +106,20 @@ test('source raw description survives import and mismatched reconciliation canno
 test('legacy automatic PDF descriptions refresh to clean text while custom descriptions and user fields survive',()=>{
  const raw='SENTETIK MAGAZA PEN 4.ndirim',clean='SENTETIK MAGAZA PEŞİN 4.İndirim';
  for(const [oldDescription,want] of [[raw,clean],['My custom refund description','My custom refund description']]){
-  let s=C.importStatement(base(),pdf([tx({id:undefined,desc:raw,sourceDesc:raw,amount:7500,importKey:'legacy-discount'})],{debt:null}),'card');
+  let s=C.importStatement(base(),pdf([tx({id:undefined,desc:raw,sourceDesc:raw,amount:7500,kind:'refund',importKey:'legacy-discount'})],{debt:null}),'card');
   const old=s.transactions[0];old.desc=oldDescription;old.category='Custom category';old.note='Checked synthetic bank row';old.reviewed=true;
   s=C.importStatement(s,pdf([tx({id:undefined,desc:clean,sourceDesc:raw,amount:7500,kind:'refund',importKey:'legacy-discount'})],{debt:null}),'card');
   assert.equal(s.transactions.length,1);const restored=s.transactions[0];
   assert.equal(restored.desc,want);assert.equal(restored.sourceDesc,raw);assert.equal(restored.id,old.id);assert.equal(restored.category,'Custom category');assert.equal(restored.note,'Checked synthetic bank row');assert.equal(restored.reviewed,true);assert.equal(restored.kind,'refund');assert.equal(restored.amount,7500);
  }
 });
-test('reimport changing kind under legacy import key does not silently retain an incompatible link',()=>{
+test('reimport changing kind under a legacy key rejects and preserves the original link',()=>{
  const p=pdf([tx({id:undefined,amount:100000,importKey:'legacy'})],{debt:null});
  let s=C.addTransaction(base(),tx({id:'manual-expense',amount:100000}));s=C.importStatement(s,p,'card');
  s=C.resolveCandidate(s,s.transactions.find(t=>t.matchStatus==='pending').id,'link','manual-expense');
- s=C.importStatement(s,pdf([tx({id:undefined,kind:'refund',amount:100000,importKey:'legacy'})],{debt:null}),'card');
- assert.equal(s.transactions.find(t=>t.source==='pdf').linkedTo,undefined);
- assert.equal(s.transactions.find(t=>t.id==='manual-expense').matchStatus,'pending');
- assert.equal(C.summary(s,'2026-10').net,-100000);
+ const snapshot=structuredClone(s);
+ assert.throws(()=>C.importStatement(s,pdf([tx({id:undefined,kind:'refund',amount:100000,importKey:'legacy'})],{debt:null}),'card'),/tekrar aktarımı inceleme/);
+ assert.deepEqual(s,snapshot);
 });
 test('overview distinguishes cash, earned margin, card liability and transfers',async()=>{
  const W=await wallet();let s=base();
