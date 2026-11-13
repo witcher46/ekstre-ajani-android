@@ -3,6 +3,25 @@ import {maskPaymentIdentifiers,maskPdfRows,replacePaymentIdentifiers} from './pr
 import {signPdfIdentity} from './pdf-identity.mjs';
 // Keep this normalization unchanged: 0.1.1 import keys depend on its exact output.
 export function clean(s){return String(s).replace(/\u00a0/g,' ').replace(/PE(?:\(cid:\d+\)){1,3}N/gi,'PESIN').replace(/\(cid:\d+\)deme/gi,'Odeme').replace(/\(cid:\d+\)ndirim/gi,'Indirim').replace(/\(cid:\d+\)/g,'').replace(/[çğıöşüÇĞİÖŞÜ]/g,c=>({'ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u','Ç':'C','Ğ':'G','İ':'I','Ö':'O','Ş':'S','Ü':'U'})[c]);}
+// QNB's PDF fonts reuse control codes across glyphs. Decode only recognized labels.
+// Never preprocess the raw source or legacy import keys with these replacements.
+const qnbLabels = [
+ [/[Öö\u0000\u0003]nceki\s+D[ö\u0000\u0002]nem(?=\s+Bakiyeniz\b)/gi,'Önceki Dönem'],
+ [/\bD\u0002nem(?=\s+Borcu\b)/gi,'Dönem'],
+ [/\bSon\s+\u0003deme(?=\s+Tarihi\b)/gi,'Son Ödeme'],
+ [/(^|[ \t])\u0004deme(?=\s*-\s*Tesekk\u0000r\s+Ederiz\b)/gim,'$1Ödeme'],
+ [/\bTesekk\u0000r(?=\s+Ederiz\b)/gi,'Teşekkür'],
+ [/\bEyl\u0006l\b/gi,'Eylül'],
+ [/\bA\u0006ustos\b/gi,'Ağustos'],
+ [/\bEk\u0006m\b/gi,'Ekim'],
+ [/\bPE[\u000e\u0010\u0011]\u0007N\b/gi,'PEŞİN'],
+ [/\u0007ndirim\b/gi,'İndirim'],
+ [/\bal\u0001v\s+ind\b/gi,'alışv ind'],
+];
+function normalizeQnbLabels(text){
+ for(const [pattern,value] of qnbLabels)text=text.replace(pattern,value);
+ return text;
+}
 const months=['ocak','subat','mart','nisan','mayis','haziran','temmuz','agustos','eylul','ekim','kasim','aralik'];
 const trMoney='[+-]?(?:\\d{1,3}(?:\\.\\d{3})+|\\d+),\\d{2}', enMoney='[+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)\\.\\d{2}';
 function date(d,m,y){m=String(m);if(!/^\d+$/.test(m)){m=({austos:'agustos',eyll:'eylul',ubat:'subat',mays:'mayis'})[m.toLowerCase()]||m.toLowerCase();m=months.indexOf(m)+1;}const s=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;return validDate(s)?s:null;}
@@ -48,6 +67,7 @@ function legacyDescription(s,inst){
 const rowPatterns=[numeric,named].map(p=>new RegExp('^'+p+'(?:\\s+(.*))?$'));
 const rowMatch=line=>rowPatterns.map(p=>line.match(p)).find(Boolean);
 const previousLabels='O?nceki\\s+D[o]?nem\\s+Hesap\\s+O?zeti\\s+Borcu(?:nuz)?|O?nceki\\s+D[o]?nem\\s+Borcu(?:nuz)?|O?nceki\\s+Hesap\\s+O?zeti\\s+Borcu(?:nuz)?|O?nceki\\s+Ekstre\\s+Borcu(?:nuz)?';
+const qnbCarryover='Onceki\\s+Donem\\s+Bakiyeniz';
 const debtLabels='(?:(?:Bu|Toplam)\\s+)?D[o]?nem\\s+Borcu(?:nuz)?|Hesap\\s+O?zeti\\s+Borcu(?:nuz)?|Ekstre\\s+Borcu(?:nuz)?';
 const cutLabel='(?:Hesap Kesim Tarihi|Hesap O?zeti Tarihi|Ekstre Kesim Tarihi)';
 const dueLabel='Son\\s+O?deme Tarihi';
@@ -60,28 +80,46 @@ function headerAmount(t,labels,pattern){
 export function parseStatement(text){return parseStatementRows(text);}
 
 function parseStatementRows(text,privateIdentities){
- if(typeof text!=='string'||text.length>3e6)throw Error('PDF metni çok büyük.');const t=clean(text),top=t.slice(0,2200).toUpperCase();const bank=top.includes('QNB')?'QNB':/YAPI KREDI|YAPI VE KREDI|WORLDCARD|WORLDPUAN/.test(top)?'Yapı Kredi':null;
+ if(typeof text!=='string'||text.length>3e6)throw Error('PDF metni çok büyük.');
+ const legacy=clean(text),top=legacy.slice(0,2200).toUpperCase();
+ const bank=top.includes('QNB')?'QNB':/YAPI KREDI|YAPI VE KREDI|WORLDCARD|WORLDPUAN/.test(top)?'Yapı Kredi':null;
  if(!bank)throw Error('Bu sürüm Yapı Kredi ve QNB kredi kartı ekstrelerini destekler.');
- const isQ=bank==='QNB',pattern=isQ?enMoney:trMoney,moneyPattern='(?<![\\d.,])'+pattern+'(?![\\d.,])',cut=findDate(t,cutLabel);
+ const isQ=bank==='QNB',t=isQ?clean(normalizeQnbLabels(text)):legacy;
+ const pattern=isQ?enMoney:trMoney,moneyPattern='(?<![\\d.,])'+pattern+'(?![\\d.,])',cut=findDate(t,cutLabel);
  if(!cut)throw Error('Kesim tarihi okunamadı; kayıt yapılmadı.');
  const period=cut.slice(0,7),rows=[],occurrences=new Map(),lines=t.split(/\r?\n/),rawLines=text.split(/\r?\n/);
+ const legacyLines=legacy.split(/\r?\n/);
+ const qnbPoints=/^ParaPuan\s+(?:Is|[\x00-\x1f]*)lemleriniz\b/i;
+ const yapiPoints=/^World\s*puan\s+(?:Detaylari|Islemleriniz|Hareketleri)\b/i;
+ const boundary=isQ?qnbPoints:yapiPoints;
+ const rowStop=new RegExp('^(?:'+previousLabels+'|'+qnbCarryover+'|'+debtLabels+'|'+cutLabel+'|'+dueLabel+')\\b','i');
  for(let i=0;i<lines.length;i++){
   const line=lines[i].trim().replace(/\s+/g,' ');
-  if(isQ&&/^ParaPuan\s+.*lemleriniz/i.test(line))break;
+  const nextLine=lines[i+1]?.trim();
+  if(boundary.test(line)||boundary.test(line+' '+(nextLine??'')))break;
   const m=rowMatch(line);if(!m)continue;
   const d=date(...m.slice(1,4));if(!d)throw Error('Ekstrede geçersiz işlem tarihi var; kısmi kayıt yapılmadı.');
-  let body=m[4]||'',rawBody=rawLines[i].trim().replace(/^\d{1,2}(?:[/.]\d{1,2}[/.]\d{4}|\s+\S+\s+\d{4})(?:\s+|$)/,'');
-  if(!new RegExp(moneyPattern).test(body)&&body&&lines[i+1]&&!rowMatch(lines[i+1].trim())&&!new RegExp('^(?:'+previousLabels+'|'+debtLabels+'|'+cutLabel+'|'+dueLabel+')\\b','i').test(lines[i+1].trim())){
-   body+=' '+lines[i+1].trim();rawBody+='\n'+rawLines[i+1].trim();i++;
+  let body=m[4]||'';
+  let legacyBody=rowMatch(legacyLines[i].trim().replace(/\s+/g,' '))?.[4]??body;
+  let rawBody=rawLines[i].trim().replace(/^\d{1,2}(?:[/.]\d{1,2}[/.]\d{4}|\s+\S+\s+\d{4})(?:\s+|$)/,'');
+  if(!new RegExp(moneyPattern).test(body)&&body&&nextLine&&!rowMatch(nextLine)&&!rowStop.test(nextLine)&&
+     !boundary.test(nextLine)&&!/(?:^|\s)Siparis\s+(?:Kodu|No)\b/i.test(nextLine)){
+   body+=' '+nextLine;legacyBody+=' '+legacyLines[i+1].trim();rawBody+='\n'+rawLines[i+1].trim();i++;
   }
   const tokens=[...body.matchAll(new RegExp(moneyPattern,'g'))],rawTokens=[...rawBody.matchAll(new RegExp(moneyPattern,'g'))];
   if(!tokens.length||!rawTokens.length)throw Error('Tarihli bir işlem satırının tutarı okunamadı; kısmi kayıt yapılmadı.');
   const token=isQ?tokens.at(-1):tokens[0],rawToken=isQ?rawTokens.at(-1):rawTokens[0];
-  const oldDesc=body.slice(0,token.index).trim(),tail=body.slice(token.index+token[0].length);
+  const semanticDesc=body.slice(0,token.index).trim(),tail=body.slice(token.index+token[0].length);
+  const legacyTokens=[...legacyBody.matchAll(new RegExp(moneyPattern,'g'))];
+  const legacyToken=isQ?legacyTokens.at(-1):legacyTokens[0];
+  const oldDesc=legacyBody.slice(0,legacyToken?.index??token.index).trim();
   const sourceDesc=maskPaymentIdentifiers(rawBody.slice(0,rawToken.index).trim());
-  let inst=(isQ?tail.match(/^\s*(\d{1,3}\/\d{1,3})(?:\s|$)/):(oldDesc+' '+tail).match(/\b(\d{1,3}\/\d{1,3})\b/))?.[1]||'';
+  const afterAmount=tail.match(/^\s*(\d{1,3}\/\d{1,3})(?:\s|$)/)?.[1];
+  const beforeAmount=semanticDesc.match(/\b(\d{1,3}\/\d{1,3})\s*(?:Taksit)?$/i);
+  const explicitBefore=beforeAmount&&!/\b(?:REF(?:ERANS)?|SIPARIS(?:\s+KODU)?|NO)\s*[:#-]?\s*$/i.test(semanticDesc.slice(0,beforeAmount.index));
+  let inst=afterAmount||(!isQ&&explicitBefore?beforeAmount[1]:'');
   if(inst){const [a,b]=inst.split('/').map(Number);if(!(a>=1&&a<=b&&b<=120))inst='';}
-  let desc=displayDescription(sourceDesc);
+  let desc=displayDescription(isQ?normalizeQnbLabels(sourceDesc):sourceDesc);
   if(inst)desc=desc.replace(inst,'').replace(/\.?\s*Taksit/i,'').trim();
   desc=maskPaymentIdentifiers(desc.replace(/\b\d+\.\s*(?=İndirim)/gi,'').replace(new RegExp('\\s+'+enMoney+'\\s+al(?:is)?v\\s+ind\\b','gi'),' İndirim')).replace(/^\d{8}\s+/,'').slice(0,500)||'İşlem';
   const n=money(token[0]),semantic=clean(desc).toUpperCase(),isPayment=/^ODEME\b|^TESEKKU?R\s+EDERIZ\b/.test(semantic),kind=isPayment?'cardPayment':n<0||token[0].startsWith('+')||/\b(?:INDIRIM|IADE|IPTAL)\b|\bAL(?:IS)?V\s+IND\b/.test(semantic)?'refund':'expense';
@@ -95,7 +133,7 @@ function parseStatementRows(text,privateIdentities){
   rows.push({date:d,period,desc,sourceDesc,amount:Math.abs(n),kind,category:isPayment?'Kart ödemesi':categorize(desc),installment:inst,importKey:key+'|'+count});
  }
  if(!rows.length)throw Error('İşlem satırları okunamadı. Metin içeren banka PDF’i seç.');
- const previous=headerAmount(t,previousLabels,pattern),statement=headerAmount(t,debtLabels,pattern),due=findDate(t,dueLabel),totals={expenses:0,payments:0,refunds:0},missing=[],reasons=[];
+ const previous=headerAmount(t,isQ?previousLabels+'|'+qnbCarryover:previousLabels,pattern),statement=headerAmount(t,debtLabels,pattern),due=findDate(t,dueLabel),totals={expenses:0,payments:0,refunds:0},missing=[],reasons=[];
  for(const r of rows){
   const field=r.kind==='expense'?'expenses':r.kind==='cardPayment'?'payments':'refunds';
   totals[field]=addCents(totals[field],r.amount);

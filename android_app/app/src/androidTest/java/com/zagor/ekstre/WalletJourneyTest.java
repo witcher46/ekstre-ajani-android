@@ -85,7 +85,30 @@ public class WalletJourneyTest {
    Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();PDFBoxResourceLoader.init(context);byte[] pdfBytes;
    try(PDDocument pdf=new PDDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()){PDPage p=new PDPage();pdf.addPage(p);try(PDPageContentStream stream=new PDPageContentStream(pdf,p)){stream.beginText();stream.setFont(PDType1Font.HELVETICA,12);stream.setLeading(18);stream.newLineAtOffset(30,700);for(String line:new String[]{"QNB","Hesap Kesim Tarihi: 05/10/2026","04/10/2026 SENTETIK MARKET 123.00"}){stream.showText(line);stream.newLine();}stream.endText();}pdf.save(out);pdfBytes=out.toByteArray();}
    Uri uri=document("ekstre-synthetic.pdf","application/pdf",pdfBytes);
-   try{for(int i=0;i<2;i++){a.onActivity(activity->activity.onActivityResult(101,Activity.RESULT_OK,new Intent().setData(uri)));waitJs(a,"!!document.querySelector('#import-account')");String card=js(a,"JSON.parse(Android.load()).accounts[3].id");js(a,"document.getElementById('import-account').value="+card);js(a,"document.getElementById('acknowledge-import').checked=true");click(a,"[data-action=confirmImport]");}assertEquals("9",js(a,"JSON.parse(Android.load()).transactions.length"));}finally{context.getContentResolver().delete(uri,null,null);}
+   Uri broken=document("ekstre-synthetic-broken.pdf","application/pdf","Not a PDF".getBytes(StandardCharsets.UTF_8));
+   try{
+    waitJs(a,"document.querySelector('#toast').textContent.includes('iptal edildi')");
+    for(int i=0;i<2;i++){
+     click(a,"[data-action=pdf]");waitPicker();selectDownload("ekstre-synthetic.pdf");
+     waitJs(a,"!!document.querySelector('#import-account')");
+     String card=js(a,"JSON.parse(Android.load()).accounts[3].id");
+     js(a,"document.getElementById('import-account').value="+card);
+     click(a,"#acknowledge-import");click(a,"[data-action=confirmImport]");
+    }
+    assertEquals("9",js(a,"JSON.parse(Android.load()).transactions.length"));
+    String original=js(a,"Android.load()"),recovery=js(a,"Android.recovery()");
+    click(a,"[data-action=pdf]");waitPicker();selectDownload("ekstre-synthetic.pdf");
+    waitJs(a,"!!document.querySelector('#import-account')");
+    click(a,"#acknowledge-import");
+    assertEquals("true",js(a,"!document.querySelector('[data-action=confirmImport]').disabled"));
+    click(a,"[data-action=pdf]");waitPicker();
+    assertEquals("true",js(a,"!document.querySelector('[data-action=confirmImport]')"));
+    selectDownload("ekstre-synthetic-broken.pdf");
+    waitJs(a,"document.querySelector('#error-announcement').textContent.includes('PDF okunamadı')");
+    assertEquals("true",js(a,"!document.querySelector('[data-action=confirmImport]')"));
+    assertEquals(original,js(a,"Android.load()"));
+    assertEquals(recovery,js(a,"Android.recovery()"));
+   }finally{context.getContentResolver().delete(uri,null,null);context.getContentResolver().delete(broken,null,null);}
    // CSV still passes through its actual file-input change handler, using a synthetic File.
    js(a,"(()=>{const input=document.getElementById('csv-file'),dt=new DataTransfer();dt.items.add(new File(['bank,kart,period,date,desc,amount_cents,category,tur\\nQNB,Kart,2026-10,2026-10-05,SENTETIK CSV,8000,Market,harcama'],'synthetic.csv',{type:'text/csv'}));input.files=dt.files;input.dispatchEvent(new Event('change'));})()");waitJs(a,"!!document.querySelector('[name=card-0]')");submit(a);assertEquals("10",js(a,"JSON.parse(Android.load()).transactions.length"));
    // Native restore is atomic and retains the previous JSON; UI restore is separately tested in Chrome.

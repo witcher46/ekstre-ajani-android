@@ -227,6 +227,81 @@ async function run() {
     await page.locator('nav [data-page=import]').click();
     await saved.getByRole('button',{name:'Detayı aç'}).click();
     await page.getByText('Belgedeki ekstre toplamları uyuşmuyor.',{exact:true}).waitFor();
+    const snapshot=()=>page.evaluate(()=>['ekstre-android-v1','ekstre-android-v1-recovery'].map(key=>localStorage.getItem(key)));
+    const beforePdfErrors=await snapshot();
+    const save=preview.getByRole('button',{name:'Onayla ve kaydet'});
+    await page.evaluate(text=>window.onPdfText(text),statement);
+    assert.equal(await save.isEnabled(),true);
+    await page.evaluate(()=>window.onPdfText('BİLİNMEYEN BANKA'));
+    assert.equal(await save.count(),0,'A parser error must discard an older preview');
+    assert.deepEqual(await snapshot(),beforePdfErrors);
+
+    await page.evaluate(()=>{
+      window.pdfRequests=[];
+      window.Android={pickPdf:id=>window.pdfRequests.push(id)};
+    });
+    const choose=()=>page.getByRole('button',{name:'PDF seç',exact:true}).click();
+    const token=()=>page.evaluate(()=>window.pdfRequests.at(-1));
+    const complete=(text,id)=>page.evaluate(([text,id])=>window.onPdfText(text,id),[text,id]);
+    const nativeError=(message,id)=>page.evaluate(([message,id])=>window.onPdfError(message,id),[message,id]);
+    await choose();
+    const first=await token();
+    assert.equal(typeof first,'string');
+    assert.equal(await save.count(),0);
+    await complete(statement,first);
+    assert.equal(await save.isEnabled(),true);
+    await choose();
+    const canceled=await token();
+    assert.equal(await save.count(),0,'Choosing a file immediately discards the older preview');
+    await nativeError('PDF seçimi iptal edildi.',canceled);
+    await complete(statement,canceled);
+    assert.equal(await save.count(),0);
+    await choose();
+    await nativeError('PDF okunamadı.',await token());
+    assert.equal(await save.count(),0);
+    await page.evaluate(()=>{window.Android.pickPdf=()=>{throw Error('Dosya seçici açılamadı.');};});
+    await choose();
+    assert.equal(await save.count(),0);
+    await page.evaluate(()=>{window.Android.pickPdf=id=>window.pdfRequests.push(id);});
+
+    await choose();
+    const earlier=await token();
+    await choose();
+    const later=await token();
+    assert.notEqual(earlier,later);
+    await complete(statement,later);
+    await nativeError('Eski okuma hatası.',earlier);
+    await complete('BİLİNMEYEN BANKA',earlier);
+    assert.equal(await save.isEnabled(),true,'Late results must preserve the newer preview');
+
+    // A pending HMAC lookup completes after a newer picker request or fails entirely.
+    const privateStatement=statement.replace('SENTETIK MARKET','SENTETIK MARKET 4111 1111 1111 1111');
+    await page.evaluate(()=>{
+      window.auditOpen=IDBFactory.prototype.open;
+      IDBFactory.prototype.open=function(){return (window.auditKeyRequest={});};
+    });
+    await choose();
+    const slow=await token();
+    await page.evaluate(([text,id])=>{window.auditSlow=window.onPdfText(text,id);},[privateStatement,slow]);
+    await page.waitForFunction(()=>!!window.auditKeyRequest);
+    await choose();
+    const current=await token();
+    await complete(statement,current);
+    await page.evaluate(async()=>{
+      window.auditKeyRequest.onerror();
+      await window.auditSlow;
+    });
+    assert.equal(await save.isEnabled(),true);
+    await choose();
+    const keyFailure=await token();
+    await page.evaluate(([text,id])=>{window.auditSlow=window.onPdfText(text,id);},[privateStatement,keyFailure]);
+    await page.evaluate(async()=>{
+      window.auditKeyRequest.onerror();
+      await window.auditSlow;
+      IDBFactory.prototype.open=window.auditOpen;
+    });
+    assert.equal(await save.count(),0,'A key failure must leave no savable preview');
+    assert.deepEqual(await snapshot(),beforePdfErrors);
     assert.deepEqual(errors,[]);
     console.log('Statement and expense chart journeys passed; '+checks+' responsive checks');
   } finally {

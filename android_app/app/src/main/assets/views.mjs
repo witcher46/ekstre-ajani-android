@@ -262,6 +262,7 @@ export function importView(ctx,pending) {
       ? {...row,category:C.activeExpenseCategory(state,row.category)}
       : row);
     const blocked = pending.reconciliation?.status === 'mismatch';
+    const needsAcknowledgement = pending.reconciliation?.status !== 'verified';
     const cards = state.accounts.filter(a => a.type === 'card');
     const selectedCard = cards.find(a=>a.id===ctx.importDraft.account) || cards[0];
     preview = `<section class="panel statement-preview" aria-labelledby="statement-preview-title">
@@ -279,7 +280,7 @@ export function importView(ctx,pending) {
       ${reconciliationPreview(ctx,pending)}
       <div class="preview-movements"><h3 id="preview-movement-title">Okunan hareketler</h3><div class="preview import-preview" role="region" aria-labelledby="preview-movement-title" tabindex="0">${rows.map((r,i) => `<article class="import-row"><div class="row"><div class="left"><strong>${esc(r.desc)}</strong><small>${esc(r.date)} · ${esc(kindNames[r.kind] || r.kind)}<br>${esc(r.category || 'Kategori belirlenmedi')}${r.installment ? ' · '+esc(r.installment) : ''}</small></div><b>${amount(ctx,r.amount)}</b></div><details class="raw-source"><summary>Orijinal banka açıklaması</summary><p>${esc(r.sourceDesc ?? r.desc)}</p></details>${['expense','refund'].includes(r.kind)?ctx.importCategoryOption(r.desc,r.category,i,ctx.importDraft.suggestions.get(i)):''}</article>`).join('') || noRows('Okunmuş hareket yok.')}</div></div>
       <p class="notice">Aynı kartın aynı dönemini tekrar aktarmak ekstre hareketlerini yeniler. Manuel kayıtlar korunur.</p>
-      <div class="preview-actions"><button class="primary" data-action="confirmImport" ${blocked || !cards.length || !rows.length ? 'disabled' : ''}>Onayla ve kaydet</button><button data-action="cancelImport">Vazgeç</button></div>
+      <div class="preview-actions"><button class="primary" data-action="confirmImport" ${blocked || !cards.length || !rows.length || (needsAcknowledgement && !ctx.importDraft.acknowledged) ? 'disabled' : ''}>Onayla ve kaydet</button><button data-action="cancelImport">Vazgeç</button></div>
     </section>`;
   }
   const {rowsByStatement,underReview}=statementGroups(state);
