@@ -242,11 +242,7 @@ public class WalletJourneyTest {
   String original=bridge.load(),recovery=bridge.recovery();
   Uri file=document(name,"application/json",corrupted.toString().getBytes(StandardCharsets.UTF_8));
   try{
-   click(a,"#settings");
-   js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");
-   UiObject2 restore=device.wait(Until.findObject(By.text("Yedek yükle")),10000);
-   assertNotNull("Restore button is touchable",restore);
-   restore.click();waitPicker();selectDownload(name);
+   openBackupPicker(a);selectDownload(name);
    waitJs(a,"document.querySelector('#toast').textContent.includes("+JSONObject.quote(error)+")");
    assertEquals(original,bridge.load());
    assertEquals(recovery,bridge.recovery());
@@ -280,12 +276,26 @@ public class WalletJourneyTest {
   click(a,"[data-action=confirmImport]");
   waitJs(a,"document.querySelector('#toast').textContent.includes('Ekstre kaydedildi')");
  }
- private void restoreDownload(ActivityScenario<MainActivity> a,String name)throws Exception{
+ private void openBackupPicker(ActivityScenario<MainActivity> a)throws Exception{
   click(a,"#settings");
-  js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");
-  UiObject2 restore=device.wait(Until.findObject(By.text("Yedek yükle")),10000);
-  assertNotNull("Restore button is touchable",restore);
-  restore.click();waitPicker();selectDownload(name);
+  waitJs(a,"!!document.querySelector('[data-action=restore]')");
+  js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center',behavior:'instant'})");
+  drawn(a);
+  JSONObject rect=new JSONObject(js(a,"(()=>{const button=document.querySelector('[data-action=restore]'),r=button.getBoundingClientRect();const x=(r.left+r.right)/2,y=(r.top+r.bottom)/2;return {x,y,viewport:innerWidth,visible:button.contains(document.elementFromPoint(x,y))};})()"));
+  if(!rect.getBoolean("visible"))evidence("restore-button-not-visible");
+  assertTrue("Restore button is visible at its rendered center",rect.getBoolean("visible"));
+  AtomicInteger tapX=new AtomicInteger(),tapY=new AtomicInteger();
+  a.onActivity(activity->{
+   WebView w=web(activity);int[] offset=new int[2];w.getLocationOnScreen(offset);
+   double scale=w.getWidth()/rect.optDouble("viewport");
+   tapX.set(offset[0]+(int)Math.round(rect.optDouble("x")*scale));
+   tapY.set(offset[1]+(int)Math.round(rect.optDouble("y")*scale));
+  });
+  assertTrue("Restore button receives a native touch",device.click(tapX.get(),tapY.get()));
+  waitPicker();
+ }
+ private void restoreDownload(ActivityScenario<MainActivity> a,String name)throws Exception{
+  openBackupPicker(a);selectDownload(name);
   UiObject2 confirm=device.wait(Until.findObject(By.res("android:id/button1").text(java.util.regex.Pattern.compile("(?iu)onayla"))),10000);
   if(confirm==null)evidence("restore-no-confirm");
   assertNotNull("Restore asks before replacing wallet",confirm);
