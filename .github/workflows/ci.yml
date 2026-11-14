@@ -3,7 +3,7 @@ on:
   push:
     branches: [main, feature/mobile-wallet-finance-v2, android/ux-finance-revision]
   pull_request:
-    branches: [main, fix/android-finance-quality, feature/android-statement-ux, fix/android-0.3.1-stability, build/android-permanent-signing, fix/android-0.4.0-data-integrity]
+    branches: [main, fix/android-finance-quality, feature/android-statement-ux, fix/android-0.3.1-stability, build/android-permanent-signing, fix/android-0.4.0-data-integrity, feature/android-0.5.0-ui-foundation]
 permissions:
   contents: read
   actions: read
@@ -13,6 +13,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref == 'integration/android-0.5.0-validation' && github.event.pull_request.head.sha || github.sha }}
+      - name: Record tested source commit
+        run: git rev-parse HEAD
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -48,7 +52,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ env.BUILD_TRIAL_APK == 'true' && github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ (env.BUILD_TRIAL_APK == 'true' || (github.event_name == 'pull_request' && github.head_ref == 'integration/android-0.5.0-validation')) && github.event.pull_request.head.sha || github.sha }}
+      - name: Record tested source commit
+        run: git rev-parse HEAD
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -121,6 +127,31 @@ jobs:
           emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim
           working-directory: android_app
           script: bash tests/run-android-ci.sh
+      - name: Verify the SQLite rollback tests ran
+        if: github.event_name == 'pull_request' && github.head_ref == 'integration/android-0.5.0-validation'
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          expected = {
+              'failedFinalSqliteWriteRollsBackWalletPreviousAndRecovery',
+              'failedFinalSqliteSaveRollsBackThePreviousSnapshot',
+              'malformedRestoreDoesNotReplaceWalletOrRecovery',
+          }
+          results = Path('android_app/app/build/outputs/androidTest-results/connected')
+          passed = set()
+          for report in results.rglob('TEST-*.xml'):
+              for case in ET.parse(report).iter('testcase'):
+                  if case.get('classname') != 'com.zagor.ekstre.SnapshotAtomicityTest':
+                      continue
+                  name = case.get('name')
+                  if name in expected and not any(case.find(tag) is not None for tag in ('failure', 'error', 'skipped')):
+                      print(f'PASS SnapshotAtomicityTest.{name}', flush=True)
+                      passed.add(name)
+          if passed != expected:
+              raise SystemExit(f'Missing passing SQLite cases: {sorted(expected - passed)}')
+          PY
       - name: Upload verified trial APK
         if: env.BUILD_TRIAL_APK == 'true'
         uses: actions/upload-artifact@v7
