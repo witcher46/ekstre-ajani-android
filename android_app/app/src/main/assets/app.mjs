@@ -4,7 +4,9 @@ import * as V from './views.mjs';
 import {parseStatementWithIdentity} from './parser.mjs';
 import {loadPdfIdentityKey} from './pdf-identity.mjs';
 import {parseStatementCsv} from './csv.mjs';
-const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+import {escapeHtml as esc,options,field,select} from './ui/form-controls.mjs';
+import {renderBottomNavigation} from './ui/navigation.mjs';
+const $=id=>document.getElementById(id);
 const plainMoney=C.formatMoney;
 const fmt=n=>`<span class="money">${plainMoney(n)}</span>`,key='ekstre-android-v1';
 const kinds={expense:'Harcama',income:'Gelir',refund:'İade',cardPayment:'Ekstre kart ödemesi',payment:'Hesaptan kart ödemesi',transfer:'Transfer'};
@@ -25,10 +27,7 @@ const errorNotice=message=>notice(message,{error:true});
 try{const raw=window.Android?Android.load():localStorage.getItem(key);if(raw)state=W.normalizeWallet(C.reviewLegacy(C.readBackup(raw)));}catch(e){loadFailed=true;errorNotice('Kayıtlar okunamadı. Mevcut verilerin üzerine yazılmayacak. '+e.message);}
 function commit(next,{restore=false}={}){if(loadFailed)throw Error('Kayıtlar okunamadığı için yazma kapalı. Önce geçerli bir yedek yükle.');next=W.normalizeWallet(next);const raw=C.backupText(next);if(window.Android){if(!(restore&&Android.restore?Android.restore(raw):Android.save(raw)))throw Error('Kayıt kaydedilemedi; değişiklik uygulanmadı.');}else {if(restore)localStorage.setItem(key+'-recovery',localStorage.getItem(key)||'');localStorage.setItem(key,raw);}state=next;render();}
 const copy=()=>structuredClone(state),accountName=id=>state.accounts.find(a=>a.id===id)?.name||'Hesap';
-const options=(items,selected)=>items.map(([value,label])=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(label)}</option>`).join('');
 const accountOptions=(filter=()=>true,selected)=>options(state.accounts.filter(filter).map(a=>[a.id,a.name]),selected);
-const field=(name,label,value='',type='text',extra='')=>`<label for="f-${name}">${label}</label><input id="f-${name}" name="${name}" type="${type}" value="${esc(value)}" ${extra}>`;
-const select=(name,label,opts)=>`<label for="f-${name}">${label}</label><select id="f-${name}" name="${name}">${opts}</select>`;
 const categoryOptions=(kind,selected)=>options([...new Set([...(kind==='income'?state.incomeCategories:state.categories),...(selected?[selected]:[])])].map(c=>[c,c]),selected);
 const cats=selected=>categoryOptions('expense',selected);
 function focusMain(){
@@ -123,9 +122,7 @@ function importCategoryOption(merchant,current,index,selectedCategory){
  return category&&category!==current?`<label><input type="checkbox" data-category-suggestion="${index}" value="${esc(category)}" ${category===selectedCategory?'checked':''}> ${esc(merchant)} · Öneriyi seç: ${esc(category)}</label>`:'';
 }
 function render(){
- const sections=[['home','⌂','Özet'],['wallet','▣','Cüzdan'],['transactions','⇅','İşlem'],['plan','◷','Plan'],['import','↓','Ekstre']];
- const activePage={account:'wallet',incomePlans:'plan',statement:'import'}[page]||page;
- $('nav').innerHTML=sections.map(([id,icon,label])=>`<button data-page="${id}" class="${activePage===id?'active':''}" ${activePage===id?'aria-current="page"':''}><span aria-hidden="true">${icon}</span>${label}</button>`).join('');
+  $('nav').innerHTML=renderBottomNavigation(page);
  const filteredExpenses=page==='transactions'&&expenseCategory!==null;
  const mode=!filteredExpenses&&['transactions','reports'].includes(page)?periodMode:'calendar';
  const s=C.summary(state,period,mode),rows=C.rowsForPeriod(state,period,mode),periodControl=`<input class="period" id="period" aria-label="Takvim ayı / ekstre dönemi" type="month" value="${period}">`;
