@@ -36,6 +36,14 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
     await transaction.focus();
     await page.keyboard.press('Space');
     await page.getByRole('dialog',{name:'İşlem ayrıntısı'}).waitFor();
+    const active = () => page.evaluate(() => document.activeElement.id);
+    assert.equal(await active(), 'dialog-title');
+    await page.keyboard.press('Tab');
+    assert.equal(await active(), 'close');
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await active(), 'submit');
+    await page.keyboard.press('Tab');
+    assert.equal(await active(), 'close');
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => document.activeElement.matches('button[data-edit]'));
 
@@ -66,6 +74,8 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
     await page.locator('[name=amount]').fill('1.234');
     await page.locator('#submit').click();
     assert.match(await page.locator('dialog [role=alert]').innerText(), /ayraç/i);
+    assert.equal(await active(), 'form-error');
+    assert.equal(await page.locator('[name=amount]').inputValue(), '1.234');
     await page.keyboard.press('Escape');
 
     await page.locator('#settings').click();
@@ -129,6 +139,7 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
     const beforeCategoryRemoval = await stored();
     await page.getByRole('button',{name:'İptal',exact:true}).click();
     assert.deepEqual(await stored(),beforeCategoryRemoval);
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.expenseCategoryEdit), 'Giyim ve aksesuar');
     await page.getByRole('button',{name:'Giyim ve aksesuar kategorisini düzenle'}).click();
     await page.getByRole('button',{name:'Kategoriyi sil'}).click();
     await page.getByLabel('Başka kategoriye taşı').check();
@@ -136,6 +147,7 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
     await page.locator('#submit').click();
     assert.equal((await stored()).merchantCategoryRules.find(r=>r.merchant==='MIGROS 5432 ANKARA').category,'Eğitim');
     assert.deepEqual((await stored()).transactions,beforeCategoryRemoval.transactions);
+    assert.equal(await page.evaluate(() => document.activeElement.matches('#main h1')), true);
 
     await page.locator('nav [data-page=transactions]').click();
     await page.locator('[data-action=addTransaction]').click();
@@ -233,13 +245,17 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
     assert.ok(!JSON.stringify(repeatedPrivate).includes(firstPan)&&!JSON.stringify(repeatedPrivate).includes(secondPan));
 
     const csvHeader='bank,kart,period,date,desc,amount_cents,category,tur,transaction_id';
-    const csvRow='QNB,Sentetik,2026-10,2026-10-04,SENTETIK CSV AYNI,5000,Diğer,harcama,sentetik-cakis';
+    const sourceCard='<b data-import-injection>Sentetik & Kart</b>';
+    const csvRow=`QNB,${sourceCard},2026-10,2026-10-04,SENTETIK CSV AYNI,5000,Diğer,harcama,sentetik-cakis`;
     const csvFile={
       name:'sentetik-csv-tekrar.csv',mimeType:'text/csv',
       buffer:Buffer.from([csvHeader,csvRow,csvRow].join('\n')),
     };
     const uploadCsv=async()=>{
       await page.locator('#csv-file').setInputFiles(csvFile);
+      await page.getByRole('dialog',{name:'CSV aktarımı'}).waitFor();
+      assert.equal(await page.locator('[data-import-injection]').count(),0);
+      assert.equal(await page.locator('label[for=f-card-0]').textContent(),`QNB · ${sourceCard}`);
       await page.locator('[name=card-0]').selectOption(card.id);
       await page.locator('#submit').click();
     };

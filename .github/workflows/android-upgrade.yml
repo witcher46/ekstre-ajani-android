@@ -2,7 +2,7 @@ name: Android distribution regression
 on:
   workflow_call:
   pull_request:
-    branches: [main, fix/android-0.3.1-stability, build/android-permanent-signing, fix/android-0.4.0-data-integrity]
+    branches: [main, fix/android-0.3.1-stability, build/android-permanent-signing, fix/android-0.4.0-data-integrity, feature/android-0.5.0-ui-foundation]
   push:
     branches: [main]
 
@@ -29,6 +29,18 @@ jobs:
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
       - name: Install Android SDK components
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"'
+      - name: Exercise the released 0.4.0 source as the upgrade baseline
+        if: github.event_name == 'pull_request' && github.base_ref == 'feature/android-0.5.0-ui-foundation'
+        run: |
+          # Until a release bump is committed, give this CI-only candidate a
+          # higher versionCode. The existing suite checks the test certificate,
+          # the package, wallet.db bytes and the restored wallet after install.
+          if grep -Fxq 'previousSourceCommit=' android_app/distribution.properties; then
+            grep -Fx 'versionCode=7' android_app/distribution.properties
+            sed -i -e 's/^versionCode=7$/versionCode=8/' \
+              -e 's/^previousSourceCommit=$/previousSourceCommit=f4fc0ec18e63309f546747e28043f910fb1b377a/' \
+              android_app/distribution.properties
+          fi
       - name: Build and test signing with disposable credentials
         run: bash android_app/tests/build-distribution-upgrade.sh
       - name: Download the archived 0.3.1 APK while available

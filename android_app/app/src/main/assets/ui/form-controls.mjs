@@ -5,6 +5,6 @@ export const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&a
 
 export const options=(items,selected)=>items.map(([value,label])=>`<option value="${escapeHtml(value)}" ${value===selected?'selected':''}>${escapeHtml(label)}</option>`).join('');
 
-export const field=(name,label,value='',type='text',extra='')=>`<label for="f-${name}">${label}</label><input id="f-${name}" name="${name}" type="${type}" value="${escapeHtml(value)}" ${extra}>`;
+export const field=(name,label,value='',type='text',extra='')=>`<label for="f-${name}">${escapeHtml(label)}</label><input id="f-${name}" name="${name}" type="${type}" value="${escapeHtml(value)}" ${extra}>`;
 
-export const select=(name,label,opts)=>`<label for="f-${name}">${label}</label><select id="f-${name}" name="${name}">${opts}</select>`;
+export const select=(name,label,opts)=>`<label for="f-${name}">${escapeHtml(label)}</label><select id="f-${name}" name="${name}">${opts}</select>`;

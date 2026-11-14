@@ -4,6 +4,7 @@ import * as V from './views.mjs';
 import {parseStatementWithIdentity} from './parser.mjs';
 import {loadPdfIdentityKey} from './pdf-identity.mjs';
 import {parseStatementCsv} from './csv.mjs';
+import {createDialog} from './ui/dialog.mjs';
 import {escapeHtml as esc,options,field,select} from './ui/form-controls.mjs';
 import {renderBottomNavigation} from './ui/navigation.mjs';
 const $=id=>document.getElementById(id);
@@ -13,8 +14,8 @@ const kinds={expense:'Harcama',income:'Gelir',refund:'İade',cardPayment:'Ekstre
 const history=[];
 let importDraft;
 let pdfRequest=null;
-let actionTrigger=null,modalOpener=null,csvOpener=null;
-let state=W.normalizeWallet(C.empty()),detailId=null,expenseCategory=null,page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,onSubmit=null,toastTimer,loadFailed=false;
+let actionTrigger=null,csvOpener=null;
+let state=W.normalizeWallet(C.empty()),detailId=null,expenseCategory=null,page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,toastTimer,loadFailed=false;
 function notice(message,{error=false}={}){
  const live=$(error?'error-announcement':'status-announcement');
  live.textContent=message;
@@ -49,33 +50,12 @@ function restoreFocus(target){
  if(current)current.focus();
  else focusMain();
 }
-function modal(title,html,save,label='Kaydet',opener=focusTarget(actionTrigger||document.activeElement)){
- modalOpener=opener;
- $('dialog-title').textContent=title;
- $('fields').innerHTML=html;
- $('form-error').textContent='';
- $('submit').textContent=label;
- onSubmit=save;
- $('modal').showModal();
- $('dialog-title').focus();
-}
-function closeModal(){
- const dialog=$('modal');
- if(!dialog.open)return;
- const opener=modalOpener;
- modalOpener=null;
- dialog.close();
- restoreFocus(opener);
-}
-$('modal').addEventListener('cancel',event=>{event.preventDefault();closeModal();});
-$('close').onclick=closeModal;
-$('form').onsubmit=e=>{
- e.preventDefault();
- try{onSubmit(new FormData(e.target));closeModal();}
- catch(error){$('form-error').textContent=error.message;$('form-error').focus();}
-};
+const {open:modal,close:closeModal}=createDialog($('modal'),{
+ captureOpener:()=>focusTarget(actionTrigger||document.activeElement),
+ restoreFocus,
+});
 window.handleBack=()=>{
- if($('modal').open){closeModal();return true;}
+ if(closeModal())return true;
  const previous=history.pop();
  if(!previous)return false;
  ({page,detailId,query,expenseCategory}=previous);
@@ -192,7 +172,7 @@ function confirmExpenseCategoryRemoval(category){
    moveRulesTo:ruleChoice==='move'?f.get('destination'):undefined,
    removeRules:ruleChoice==='remove',
   }));
- },'Kategoriyi sil',modalOpener);
+ },'Kategoriyi sil');
 }
 function confirmTransactionRemoval(id){
  const rows=C.transactionRemovalRows(state,id);
