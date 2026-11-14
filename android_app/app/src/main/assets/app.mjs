@@ -4,15 +4,18 @@ import * as V from './views.mjs';
 import {parseStatementWithIdentity} from './parser.mjs';
 import {loadPdfIdentityKey} from './pdf-identity.mjs';
 import {parseStatementCsv} from './csv.mjs';
-const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+import {createDialog} from './ui/dialog.mjs';
+import {escapeHtml as esc,options,field,select} from './ui/form-controls.mjs';
+import {renderBottomNavigation} from './ui/navigation.mjs';
+const $=id=>document.getElementById(id);
 const plainMoney=C.formatMoney;
 const fmt=n=>`<span class="money">${plainMoney(n)}</span>`,key='ekstre-android-v1';
 const kinds={expense:'Harcama',income:'Gelir',refund:'İade',cardPayment:'Ekstre kart ödemesi',payment:'Hesaptan kart ödemesi',transfer:'Transfer'};
 const history=[];
 let importDraft;
 let pdfRequest=null;
-let actionTrigger=null,modalOpener=null,csvOpener=null;
-let state=W.normalizeWallet(C.empty()),detailId=null,expenseCategory=null,page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,onSubmit=null,toastTimer,loadFailed=false;
+let actionTrigger=null,csvOpener=null;
+let state=W.normalizeWallet(C.empty()),detailId=null,expenseCategory=null,page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,toastTimer,loadFailed=false;
 function notice(message,{error=false}={}){
  const live=$(error?'error-announcement':'status-announcement');
  live.textContent=message;
@@ -25,10 +28,7 @@ const errorNotice=message=>notice(message,{error:true});
 try{const raw=window.Android?Android.load():localStorage.getItem(key);if(raw)state=W.normalizeWallet(C.reviewLegacy(C.readBackup(raw)));}catch(e){loadFailed=true;errorNotice('Kayıtlar okunamadı. Mevcut verilerin üzerine yazılmayacak. '+e.message);}
 function commit(next,{restore=false}={}){if(loadFailed)throw Error('Kayıtlar okunamadığı için yazma kapalı. Önce geçerli bir yedek yükle.');next=W.normalizeWallet(next);const raw=C.backupText(next);if(window.Android){if(!(restore&&Android.restore?Android.restore(raw):Android.save(raw)))throw Error('Kayıt kaydedilemedi; değişiklik uygulanmadı.');}else {if(restore)localStorage.setItem(key+'-recovery',localStorage.getItem(key)||'');localStorage.setItem(key,raw);}state=next;render();}
 const copy=()=>structuredClone(state),accountName=id=>state.accounts.find(a=>a.id===id)?.name||'Hesap';
-const options=(items,selected)=>items.map(([value,label])=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(label)}</option>`).join('');
 const accountOptions=(filter=()=>true,selected)=>options(state.accounts.filter(filter).map(a=>[a.id,a.name]),selected);
-const field=(name,label,value='',type='text',extra='')=>`<label for="f-${name}">${label}</label><input id="f-${name}" name="${name}" type="${type}" value="${esc(value)}" ${extra}>`;
-const select=(name,label,opts)=>`<label for="f-${name}">${label}</label><select id="f-${name}" name="${name}">${opts}</select>`;
 const categoryOptions=(kind,selected)=>options([...new Set([...(kind==='income'?state.incomeCategories:state.categories),...(selected?[selected]:[])])].map(c=>[c,c]),selected);
 const cats=selected=>categoryOptions('expense',selected);
 function focusMain(){
@@ -50,33 +50,12 @@ function restoreFocus(target){
  if(current)current.focus();
  else focusMain();
 }
-function modal(title,html,save,label='Kaydet',opener=focusTarget(actionTrigger||document.activeElement)){
- modalOpener=opener;
- $('dialog-title').textContent=title;
- $('fields').innerHTML=html;
- $('form-error').textContent='';
- $('submit').textContent=label;
- onSubmit=save;
- $('modal').showModal();
- $('dialog-title').focus();
-}
-function closeModal(){
- const dialog=$('modal');
- if(!dialog.open)return;
- const opener=modalOpener;
- modalOpener=null;
- dialog.close();
- restoreFocus(opener);
-}
-$('modal').addEventListener('cancel',event=>{event.preventDefault();closeModal();});
-$('close').onclick=closeModal;
-$('form').onsubmit=e=>{
- e.preventDefault();
- try{onSubmit(new FormData(e.target));closeModal();}
- catch(error){$('form-error').textContent=error.message;$('form-error').focus();}
-};
+const {open:modal,close:closeModal}=createDialog($('modal'),{
+ captureOpener:()=>focusTarget(actionTrigger||document.activeElement),
+ restoreFocus,
+});
 window.handleBack=()=>{
- if($('modal').open){closeModal();return true;}
+ if(closeModal())return true;
  const previous=history.pop();
  if(!previous)return false;
  ({page,detailId,query,expenseCategory}=previous);
@@ -123,9 +102,7 @@ function importCategoryOption(merchant,current,index,selectedCategory){
  return category&&category!==current?`<label><input type="checkbox" data-category-suggestion="${index}" value="${esc(category)}" ${category===selectedCategory?'checked':''}> ${esc(merchant)} · Öneriyi seç: ${esc(category)}</label>`:'';
 }
 function render(){
- const sections=[['home','⌂','Özet'],['wallet','▣','Cüzdan'],['transactions','⇅','İşlem'],['plan','◷','Plan'],['import','↓','Ekstre']];
- const activePage={account:'wallet',incomePlans:'plan',statement:'import'}[page]||page;
- $('nav').innerHTML=sections.map(([id,icon,label])=>`<button data-page="${id}" class="${activePage===id?'active':''}" ${activePage===id?'aria-current="page"':''}><span aria-hidden="true">${icon}</span>${label}</button>`).join('');
+  $('nav').innerHTML=renderBottomNavigation(page);
  const filteredExpenses=page==='transactions'&&expenseCategory!==null;
  const mode=!filteredExpenses&&['transactions','reports'].includes(page)?periodMode:'calendar';
  const s=C.summary(state,period,mode),rows=C.rowsForPeriod(state,period,mode),periodControl=`<input class="period" id="period" aria-label="Takvim ayı / ekstre dönemi" type="month" value="${period}">`;
@@ -195,7 +172,7 @@ function confirmExpenseCategoryRemoval(category){
    moveRulesTo:ruleChoice==='move'?f.get('destination'):undefined,
    removeRules:ruleChoice==='remove',
   }));
- },'Kategoriyi sil',modalOpener);
+ },'Kategoriyi sil');
 }
 function confirmTransactionRemoval(id){
  const rows=C.transactionRemovalRows(state,id);
