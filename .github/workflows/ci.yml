@@ -3,7 +3,7 @@ on:
   push:
     branches: [main, feature/mobile-wallet-finance-v2, android/ux-finance-revision]
   pull_request:
-    branches: [main, fix/android-finance-quality, feature/android-statement-ux, fix/android-0.3.1-stability, build/android-permanent-signing, fix/android-0.4.0-data-integrity]
+    branches: [main, fix/android-finance-quality, feature/android-statement-ux, fix/android-0.3.1-stability, build/android-permanent-signing, fix/android-0.4.0-data-integrity, feature/android-0.5.0-ui-foundation]
 permissions:
   contents: read
   actions: read

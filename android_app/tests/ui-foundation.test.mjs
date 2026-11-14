@@ -15,6 +15,15 @@ test('form controls escape user-controlled values without changing existing mark
     '<label for="f-account">Hesap</label><select id="f-account" name="account"><option value="x" >Test</option></select>');
 });
 
+test('plain-text form labels cannot inject markup into a dialog',()=>{
+  const label='<b data-action="demo">Sentetik & Kart</b>';
+  const escaped='&lt;b data-action=&quot;demo&quot;&gt;Sentetik &amp; Kart&lt;/b&gt;';
+  assert.equal(select('card-0',label,''),
+    `<label for="f-card-0">${escaped}</label><select id="f-card-0" name="card-0"></select>`);
+  assert.equal(field('name',label),
+    `<label for="f-name">${escaped}</label><input id="f-name" name="name" type="text" value="" >`);
+});
+
 test('bottom navigation keeps the five original routes and their exact markup',()=>{
   assert.deepEqual(NAV_ITEMS.map(([id])=>id),['home','wallet','transactions','plan','import']);
   assert.equal(renderBottomNavigation('home'),
