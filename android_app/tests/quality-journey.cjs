@@ -5,6 +5,116 @@ const assert = require('node:assert/strict');
 
 const root = path.resolve(__dirname,'../app/src/main/assets');
 
+async function quickAddJourney(page) {
+  const add = page.getByRole('button',{name:'Ekle',exact:true});
+  const menu = page.getByRole('dialog',{name:'Hızlı Ekle'});
+  const option = name => menu.getByRole('button',{name,exact:true});
+  const active = () => page.evaluate(() => document.activeElement.id);
+  const wallet = () => page.evaluate(() => JSON.parse(localStorage.getItem('ekstre-android-v1')));
+  const open = async name => { await add.click(); await option(name).click(); };
+  const submitTwice = () => page.locator('#form').evaluate(form => {
+    form.requestSubmit();
+    form.requestSubmit();
+  });
+
+  await add.focus();
+  await page.keyboard.press('Enter');
+  await menu.waitFor();
+  assert.equal(await active(),'dialog-title');
+  assert.deepEqual(await page.locator('#nav button').allTextContents(),['⌂Özet','▣Cüzdan','⇅İşlemler','◷Plan','↓Ekstre']);
+  assert.equal(await menu.getByRole('button',{name:'Kaydet'}).count(),0);
+  assert.equal(await page.evaluate(() => {
+    const buttons = document.querySelectorAll('header button, #quick-add-options button, #close');
+    return document.documentElement.clientWidth === 320 && buttons.length === 7 &&
+      [...buttons].every(button => {
+        const bounds = button.getBoundingClientRect();
+        return bounds.left >= 0 && bounds.right <= 320 && bounds.width >= 48 && bounds.height >= 48;
+      });
+  }),true);
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.evaluate(() => document.activeElement.textContent),'Kart Borcu Ödemesi');
+  await page.keyboard.press('Tab');
+  assert.equal(await active(),'close');
+  await page.keyboard.press('Escape');
+  assert.equal(await active(),'quick-add');
+
+  await open('Kart Borcu Ödemesi');
+  assert.match(await menu.getByRole('alert').innerText(),/bir kredi kartı ve kaynak/);
+  assert.equal(await active(),'form-error');
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.evaluate(() => document.activeElement.textContent),'Kart Borcu Ödemesi');
+  await option('Kart Borcu Ödemesi').press('Enter');
+  await page.keyboard.press('Tab');
+  assert.equal(await active(),'close');
+  assert.equal(await wallet(),null);
+  await page.keyboard.press('Escape');
+  await open('Gider');
+  await page.getByRole('dialog',{name:'Hesap / kart ekle'}).waitFor();
+  await page.keyboard.press('Escape');
+  assert.equal(await active(),'quick-add');
+
+  await page.evaluate(async () => {
+    const C = await import('/core.mjs');
+    const initial = C.empty();
+    initial.accounts = [
+      {id:'quick-bank',name:'Sentetik banka',type:'bank',opening:100000},
+      {id:'quick-cash',name:'Sentetik nakit',type:'cash',opening:10000},
+      {id:'quick-card-a',name:'Sentetik kart A',type:'card',opening:10000},
+      {id:'quick-card-b',name:'Sentetik kart B',type:'card',opening:25000},
+    ];
+    localStorage.setItem('ekstre-android-v1',C.backupText(initial));
+  });
+  await page.reload();
+
+  await open('Gider');
+  await page.getByRole('dialog',{name:'Gider ekle'}).waitFor();
+  assert.equal(await page.locator('#f-kind').inputValue(),'expense');
+  await page.locator('#f-desc').fill('Sentetik hızlı gider');
+  await page.locator('#f-amount').fill('20');
+  await submitTwice();
+  assert.equal((await wallet()).transactions.length,1);
+  assert.equal(await active(),'quick-add');
+  assert.equal(await page.locator('[data-stat=netExpense]').innerText(),'₺20,00');
+
+  await open('Gelir');
+  await page.getByRole('dialog',{name:'Gelir ekle'}).waitFor();
+  assert.equal(await page.locator('#f-kind').inputValue(),'income');
+  await page.locator('#f-desc').fill('Sentetik hızlı gelir');
+  await page.locator('#f-amount').fill('50');
+  await page.locator('#submit').click();
+  assert.equal(await page.locator('[data-stat=income]').innerText(),'₺50,00');
+
+  await page.locator('nav [data-page=transactions]').click();
+  await open('Transfer');
+  await page.getByRole('dialog',{name:'Transfer yap'}).waitFor();
+  assert.equal(await page.locator('#f-kind').inputValue(),'transfer');
+  await page.locator('#f-target').selectOption('quick-cash');
+  await page.locator('#f-desc').fill('Sentetik hızlı transfer');
+  await page.locator('#f-amount').fill('10');
+  await page.locator('#submit').click();
+  await page.locator('button[data-edit]').filter({hasText:'Sentetik hızlı transfer'}).waitFor();
+
+  await page.locator('nav [data-page=wallet]').click();
+  await page.locator('[data-card-view=quick-card-b]').click();
+  await open('Kart Borcu Ödemesi');
+  await page.getByRole('dialog',{name:'Kart borcu öde'}).waitFor();
+  assert.equal(await page.locator('#f-target').inputValue(),'quick-card-b');
+  await page.locator('#f-account').selectOption('quick-bank');
+  await page.locator('#f-amount').fill('40');
+  await page.locator('#submit').dblclick();
+  assert.equal(await page.locator('[data-stat=cardDebt]').innerText(),'₺210,00');
+  assert.deepEqual((await wallet()).transactions.map(({kind,amount}) => [kind,amount]),
+    [['expense',2000],['income',5000],['transfer',1000],['payment',4000]]);
+  await page.locator('nav [data-page=home]').click();
+  assert.equal(await page.locator('[data-stat=cash]').innerText(),'₺1.090,00');
+  assert.equal(await page.locator('[data-stat=netExpense]').innerText(),'₺20,00');
+  assert.equal(await page.locator('[data-stat=income]').innerText(),'₺50,00');
+
+  await page.evaluate(() => localStorage.removeItem('ekstre-android-v1'));
+  await page.reload();
+  console.log('Quick Add: all four existing forms, 320px, focus, and one save per action passed');
+}
+
 (async () => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.CHROME_PATH || undefined});
   try {
@@ -26,6 +136,7 @@ const root = path.resolve(__dirname,'../app/src/main/assets');
       return route.fulfill({body:fs.readFileSync(file),contentType});
     });
     await page.goto('https://wallet.test/');
+    await quickAddJourney(page);
     await page.locator('nav [data-page=wallet]').focus();
     await page.keyboard.press('Enter');
     assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Cüzdanım');

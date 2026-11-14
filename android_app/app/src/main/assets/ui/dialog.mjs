@@ -9,6 +9,7 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
   const submit = dialog.querySelector('#submit');
   let opener;
   let save;
+  let saving = false;
 
   function open(heading, html, onSubmit, label = 'Kaydet', target = captureOpener()) {
     const replacing = dialog.open;
@@ -18,6 +19,7 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
     fields.innerHTML = html;
     error.textContent = '';
     submit.textContent = label;
+    submit.hidden = !onSubmit;
     if (!replacing) dialog.showModal();
     dialog.scrollTop = 0;
     title.focus({preventScroll:true});
@@ -32,6 +34,11 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
     return true;
   }
 
+  function showError(message) {
+    error.textContent = message;
+    error.focus();
+  }
+
   dialog.addEventListener('cancel', event => {
     event.preventDefault();
     close();
@@ -39,27 +46,31 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
   dismiss.addEventListener('click', close);
   form.addEventListener('submit', event => {
     event.preventDefault();
-    if (!dialog.open) return;
+    if (!dialog.open || !save || saving) return;
+    saving = true;
     try {
       save(new FormData(form));
       close();
     } catch (failure) {
-      error.textContent = failure.message;
-      error.focus();
+      showError(failure.message);
+    } finally {
+      saving = false;
     }
   });
   dialog.addEventListener('keydown', event => {
     if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
     const focused = dialog.ownerDocument.activeElement;
-    // Close and submit bound the form's native tab order.
+    const last = submit.hidden
+      ? [...fields.querySelectorAll('button:not([hidden]):enabled')].at(-1) ?? dismiss
+      : submit;
     if (event.shiftKey && (focused === dismiss || focused === title)) {
       event.preventDefault();
-      submit.focus();
-    } else if (!event.shiftKey && focused === submit) {
+      last.focus();
+    } else if (!event.shiftKey && (focused === last || (submit.hidden && focused === error))) {
       event.preventDefault();
       dismiss.focus();
     }
   });
 
-  return {open, close};
+  return {open, close, showError};
 }

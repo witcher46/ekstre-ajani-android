@@ -126,7 +126,12 @@ public class WalletJourneyTest {
  }
  @Test public void keyboardBackAndModal()throws Exception{
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
-   waitJs(a,"!!document.querySelector('[data-action=demo]')");click(a,"[data-action=demo]");click(a,"[data-action=addTransaction]");drawn(a);
+   waitJs(a,"!!document.querySelector('[data-action=demo]')");click(a,"[data-action=demo]");
+   click(a,"#quick-add");
+   waitJs(a,"document.activeElement.id==='dialog-title' && document.activeElement.textContent==='Hızlı Ekle'");
+   device.pressBack();
+   waitJs(a,"!document.querySelector('dialog[open]') && document.activeElement.id==='quick-add'");
+   click(a,"#quick-add");click(a,"#quick-add-options [data-action=addTransaction]");drawn(a);
    waitJs(a,"document.activeElement.id==='dialog-title'");
    // WebView DOM inputs are not reliably exposed as android.widget.EditText.
    // Tap the rendered input on the device; focus and real IME remain mandatory.
@@ -142,7 +147,7 @@ public class WalletJourneyTest {
    assertTrue("First Back hides the software keyboard",waitForIme(a,false));
    assertEquals("Dialog stays open after the keyboard is dismissed","true",js(a,"!!document.querySelector('dialog[open]')"));
    device.pressBack();
-   waitJs(a,"!document.querySelector('dialog[open]') && document.activeElement.matches('[data-action=addTransaction]')");
+   waitJs(a,"!document.querySelector('dialog[open]') && document.activeElement.id==='quick-add'");
   }
  }
  private boolean waitForIme(ActivityScenario<MainActivity> a,boolean expected)throws InterruptedException{
@@ -163,7 +168,7 @@ public class WalletJourneyTest {
     for(int width:new int[]{320,360,390,412}){
      device.executeShellCommand("wm size "+width+"x844");device.executeShellCommand("wm density 160");a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");AtomicInteger zoom=new AtomicInteger();a.onActivity(activity->zoom.set(web(activity).getSettings().getTextZoom()));assertEquals(200,zoom.get());
      reports.put(layoutCase(a,"home",width,dir));
-     for(String page:new String[]{"wallet","transactions","plan","reports","import","settings","bankDetail","cardDetail","incomePlans","importPreview","transactionModal","paymentModal"}){
+     for(String page:new String[]{"wallet","transactions","plan","reports","import","settings","bankDetail","cardDetail","incomePlans","importPreview","transactionModal","paymentModal","quickAddModal"}){
       js(a,"if(document.querySelector('dialog[open]'))window.handleBack()");
       if(page.equals("settings"))click(a,"#settings");
       else if(page.equals("reports")){click(a,"nav [data-page=home]");click(a,"[data-page=reports]");}
@@ -171,12 +176,17 @@ public class WalletJourneyTest {
       else if(page.equals("incomePlans")){click(a,"nav [data-page=home]");click(a,"[data-page=incomePlans]");}
       else if(page.equals("importPreview"))js(a,"window.onPdfText('QNB\\nHesap Kesim Tarihi: 05/10/2026\\n04/10/2026 SENTETIK MAGAZA PEN 4.ndirim 9999999999.99')");
       else if(page.equals("transactionModal")||page.equals("paymentModal")){click(a,"nav [data-page=home]");click(a,page.equals("paymentModal")?"[data-action=payCard]":"[data-action=addTransaction]");}
+      else if(page.equals("quickAddModal")){
+       click(a,"#quick-add");
+       waitJs(a,"document.querySelectorAll('#quick-add-options button').length===4");
+       assertEquals("Quick Add tap targets fit the viewport", "true",js(a,"[...document.querySelectorAll('header button,#quick-add-options button,#close')].every(b=>{const r=b.getBoundingClientRect();return r.left>=0&&r.right<=document.documentElement.clientWidth+1&&r.width>=48&&r.height>=48;})"));
+      }
       else click(a,"nav [data-page="+page+"]");
       reports.put(layoutCase(a,page,width,dir));
      }
     }
    }finally{try(FileOutputStream out=new FileOutputStream(new File(dir,"native-layout-results.json"))){out.write(reports.toString().getBytes(StandardCharsets.UTF_8));}device.executeShellCommand("settings put system font_scale 1.0");device.executeShellCommand("wm size reset");device.executeShellCommand("wm density reset");}
-   JSONArray failures=new JSONArray();for(int i=0;i<reports.length();i++){JSONObject report=reports.getJSONObject(i);if(report.getJSONArray("failures").length()>0)failures.put(report);}assertEquals("All native money, overlap and system bar bounds: "+failures,0,failures.length());assertEquals(52,reports.length());
+   JSONArray failures=new JSONArray();for(int i=0;i<reports.length();i++){JSONObject report=reports.getJSONObject(i);if(report.getJSONArray("failures").length()>0)failures.put(report);}assertEquals("All native money, overlap and system bar bounds: "+failures,0,failures.length());assertEquals(56,reports.length());
   }
  }
  @Test public void salaryCardPaymentAndIncomePlanStayConsistent()throws Exception{

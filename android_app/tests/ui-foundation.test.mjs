@@ -24,12 +24,12 @@ test('plain-text form labels cannot inject markup into a dialog',()=>{
     `<label for="f-name">${escaped}</label><input id="f-name" name="name" type="text" value="" >`);
 });
 
-test('bottom navigation keeps the five original routes and their exact markup',()=>{
+test('bottom navigation keeps the five original routes and their labels',()=>{
   assert.deepEqual(NAV_ITEMS.map(([id])=>id),['home','wallet','transactions','plan','import']);
   assert.equal(renderBottomNavigation('home'),
     '<button data-page="home" class="active" aria-current="page"><span aria-hidden="true">⌂</span>Özet</button>'+
     '<button data-page="wallet" class="" ><span aria-hidden="true">▣</span>Cüzdan</button>'+
-    '<button data-page="transactions" class="" ><span aria-hidden="true">⇅</span>İşlem</button>'+
+    '<button data-page="transactions" class="" ><span aria-hidden="true">⇅</span>İşlemler</button>'+
     '<button data-page="plan" class="" ><span aria-hidden="true">◷</span>Plan</button>'+
     '<button data-page="import" class="" ><span aria-hidden="true">↓</span>Ekstre</button>');
 });

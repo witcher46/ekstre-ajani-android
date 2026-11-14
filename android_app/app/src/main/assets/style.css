@@ -35,3 +35,15 @@ button.transaction:last-child{border-bottom:0}
 button.transaction .amount{flex-shrink:1}
 [hidden]{display:none!important}
 @media(max-width:600px){main{padding-left:14px;padding-right:14px}.panel{padding:16px}.grid{grid-template-columns:minmax(0,1fr)}.hero .grid{gap:6px}.row>b{flex-basis:100%}.chart-label>b{flex-basis:100%}.actions{flex-direction:column}.row>div:last-child:not(:first-child){max-width:100%}.row>div:last-child>button{margin:4px;min-width:48px}.brand strong{font-size:1rem}h1{font-size:1.65rem}.lead{font-size:.9rem}.row .left strong{overflow-wrap:anywhere}}
+
+.header-actions{display:flex;align-items:center;gap:8px;flex:none}
+.header-actions button,.dialog-head .icon{min-width:48px}
+#quick-add-options{display:grid;gap:8px}
+#quick-add-options button{text-align:start}
+@media(max-width:350px){
+  header{padding-inline:12px;gap:8px}
+  .brand{gap:6px}
+  .brand>div{overflow-wrap:anywhere}
+  .header-actions{gap:6px}
+  #quick-add{padding-inline:8px}
+}
