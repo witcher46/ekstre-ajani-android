@@ -23,6 +23,7 @@ public class MainActivity extends Activity {
  private final ExecutorService worker=Executors.newSingleThreadExecutor();
  private ValueCallback<Uri[]> chooser;
  private String exportText;
+ private String pdfPickerRequest;
  private int textZoom=100;
  private static final int PDF=101,FILE=102,EXPORT=103;
  private static final String HOME="https://appassets.androidplatform.net/assets/index.html";
@@ -60,7 +61,11 @@ public class MainActivity extends Activity {
   });
   web.addJavascriptInterface(new Bridge(),"Android");web.loadUrl(HOME);
  }
- private void callback(String fn,String value){runOnUiThread(()->{if(!isFinishing()&&!isDestroyed())web.evaluateJavascript("window."+fn+"("+JSONObject.quote(value)+")",null);});}
+ private void callback(String fn,String value){callback(fn,value,null);}
+ private void callback(String fn,String value,String request){
+  String args=JSONObject.quote(value)+(request==null?"":","+JSONObject.quote(request));
+  runOnUiThread(()->{if(!isFinishing()&&!isDestroyed())web.evaluateJavascript("window."+fn+"("+args+")",null);});
+ }
  private String readSnapshot(int id){
   int length;try(Cursor c=db.rawQuery("SELECT length(content) FROM snapshots WHERE id=?",new String[]{String.valueOf(id)})){if(!c.moveToFirst())return "";length=c.getInt(0);}
   StringBuilder content=new StringBuilder(length);
@@ -81,19 +86,35 @@ public class MainActivity extends Activity {
   @JavascriptInterface public String recovery(){synchronized(MainActivity.this){return readSnapshot(3);}}
   @JavascriptInterface public boolean save(String content){return writeSnapshot(content,false);}
   @JavascriptInterface public boolean restore(String content){return writeSnapshot(content,true);}
-  @JavascriptInterface public void pickPdf(){runOnUiThread(()->{try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/pdf"),PDF);}catch(Exception e){callback("nativeError","Dosya seçici açılamadı.");}});}
+  @JavascriptInterface public void pickPdf(String request){runOnUiThread(()->{
+   if(request==null||request.isEmpty())return;
+   if(pdfPickerRequest!=null){callback("onPdfError","PDF dosya seçici zaten açık.",request);return;}
+   pdfPickerRequest=request;
+   try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/pdf"),PDF);}
+   catch(Exception e){pdfPickerRequest=null;callback("onPdfError","Dosya seçici açılamadı.",request);}
+  });}
   @JavascriptInterface public void exportBackup(String content){if(content==null||content.getBytes(StandardCharsets.UTF_8).length>BACKUP_LIMIT){callback("nativeError","Yedek 32 MB sınırını aşıyor; mevcut kayıtlar korunuyor.");return;}runOnUiThread(()->{exportText=content;try{startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json").putExtra(Intent.EXTRA_TITLE,"ekstre-ajani-yedek.json"),EXPORT);}catch(Exception e){exportText=null;callback("nativeError","Yedek dosyası oluşturulamadı.");}});}
  }
  @Override protected void onActivityResult(int req,int result,Intent data){
   super.onActivityResult(req,result,data);Uri uri=data==null?null:data.getData();
   if(req==FILE){if(chooser!=null){chooser.onReceiveValue(result==RESULT_OK&&uri!=null?new Uri[]{uri}:null);chooser=null;}return;}
-  if(result!=RESULT_OK||uri==null){if(req==PDF)callback("nativeError","PDF seçimi iptal edildi.");if(req==EXPORT)exportText=null;return;}
+  if(req==PDF){
+   String request=pdfPickerRequest;
+   pdfPickerRequest=null;
+   if(request==null)return;
+   if(result!=RESULT_OK||uri==null){callback("onPdfError","PDF seçimi iptal edildi.",request);return;}
+   readPdf(uri,request);
+   return;
+  }
+  if(result!=RESULT_OK||uri==null){if(req==EXPORT)exportText=null;return;}
   if(req==EXPORT){final String saved=exportText;exportText=null;worker.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null||saved==null)throw new IOException();out.write(saved.getBytes(StandardCharsets.UTF_8));callback("nativeNotice","Yedek kaydedildi.");}catch(Exception e){callback("nativeError","Yedek kaydedilemedi.");}});return;}
-  if(req==PDF)worker.execute(()->{
+ }
+ private void readPdf(Uri uri,String request){
+  worker.execute(()->{
    try(InputStream in=getContentResolver().openInputStream(uri);ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
     if(in==null)throw new IOException();byte[] buf=new byte[16384];int n;while((n=in.read(buf))!=-1){if(bytes.size()+n>20*1024*1024)throw new IOException("PDF en fazla 20 MB olabilir.");bytes.write(buf,0,n);}
-    try(PDDocument pdf=PDDocument.load(bytes.toByteArray())){if(pdf.getNumberOfPages()>100)throw new IOException("PDF en fazla 100 sayfa olabilir.");PDFTextStripper stripper=new PDFTextStripper();stripper.setSortByPosition(true);String text=stripper.getText(pdf);if(text.trim().isEmpty())throw new IOException("PDF metin içermiyor. Taranmış belgeler desteklenmiyor.");if(text.length()>3_000_000)throw new IOException("PDF metni çok büyük.");callback("onPdfText",text);}
-   }catch(Exception e){callback("nativeError","PDF okunamadı. Şifresiz, metin içeren banka PDF’i seç. "+(e instanceof IOException?e.getMessage():""));}
+    try(PDDocument pdf=PDDocument.load(bytes.toByteArray())){if(pdf.getNumberOfPages()>100)throw new IOException("PDF en fazla 100 sayfa olabilir.");PDFTextStripper stripper=new PDFTextStripper();stripper.setSortByPosition(true);String text=stripper.getText(pdf);if(text.trim().isEmpty())throw new IOException("PDF metin içermiyor. Taranmış belgeler desteklenmiyor.");if(text.length()>3_000_000)throw new IOException("PDF metni çok büyük.");callback("onPdfText",text,request);}
+   }catch(Exception e){callback("onPdfError","PDF okunamadı. Şifresiz, metin içeren banka PDF’i seç. "+(e instanceof IOException?e.getMessage():""),request);}
   });
  }
  @Override public void onBackPressed(){web.evaluateJavascript("window.handleBack && window.handleBack()",result->{if(!"true".equals(result))super.onBackPressed();});}

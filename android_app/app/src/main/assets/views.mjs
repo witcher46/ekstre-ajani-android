@@ -36,10 +36,36 @@ function upcoming(ctx) {
   return rows.length ? `<section class="panel"><div class="section-heading"><h2>Yaklaşan / geciken ödemeler</h2><button data-page="plan">Ödeme planı</button></div>${rows.map(r => `<div class="row"><div class="left"><strong>${ctx.esc(r.name)}</strong><small>${ctx.dateStatus(r.date)}${r.estimated ? ' · Kaydedilmiş ödemelere göre tahmin' : ''}</small></div><b>${amount(ctx,r.amount)}</b></div>`).join('')}<p class="notice">Takvim bankadaki ödeme durumunu doğrulamaz.</p></section>` : '';
 }
 
+const expensePercent = new Intl.NumberFormat('tr-TR',{style:'percent',maximumFractionDigits:1});
+
+function expenseBreakdown(ctx,rows) {
+  const totals = new Map();
+  let total=0;
+  for (const row of rows) {
+    if (row.kind !== 'expense' || row.amount <= 0) continue;
+    totals.set(row.category,C.addCents(totals.get(row.category) || 0,row.amount));
+    total=C.addCents(total,row.amount);
+  }
+  const categories=[...totals].sort((a,b)=>C.compareCents(b[1],a[1])||a[0].localeCompare(b[0],'tr'));
+  const totalCents=BigInt(total);
+  return `<section class="panel expense-breakdown" aria-labelledby="expense-breakdown-title">
+    <h2 id="expense-breakdown-title">Kategori bazlı gider dağılımı</h2>
+    ${total?`<p class="expense-total"><span>Brüt gider</span> <strong>${amount(ctx,total)}</strong></p>
+    <ul class="expense-category-list">${categories.map(([category,value])=>{
+      const permille=Number((BigInt(value)*1000n+totalCents/2n)/totalCents);
+      return `<li><button type="button" class="expense-category" data-expense-category="${ctx.esc(category)}">
+        <span class="expense-category-values"><span class="expense-category-name">${ctx.esc(category||'Kategorisiz')}</span><span class="expense-category-amount">${amount(ctx,value)}</span><span class="expense-category-share">${permille?expensePercent.format(permille/1000):'<span aria-label="Yüzde 0,1’den az">&lt;%0,1</span>'}</span></span>
+        <meter min="0" max="1000" value="${permille}" aria-hidden="true"></meter>
+      </button></li>`;
+    }).join('')}</ul>`:noRows('Seçili ayda gider kaydı yok.')}
+  </section>`;
+}
+
 export function homeView(ctx) {
   const {state,periodControl,transactionList} = ctx;
   const overview = W.overview(state,ctx.period);
-  const recent = newest(C.rowsForPeriod(state,ctx.period)).slice(0,5);
+  const monthRows=C.rowsForPeriod(state,ctx.period);
+  const recent = newest(monthRows).slice(0,5);
   return shell(`<h1>Parana genel bakış</h1><p class="lead">Paran, gelirlerin ve kart borçların aynı cüzdanda.</p>
     <section class="hero panel" aria-label="Cüzdan özeti"><small>BANKA VE NAKİT BAKİYESİ</small><div class="big" data-stat="cash">${amount(ctx,overview.cash)}</div>
       <dl class="compact-totals">${compactStat(ctx,'cardDebt','Kart borcu tahmini',overview.cardDebt)}${overview.cardCredit > 0 ? compactStat(ctx,'cardCredit','Kart artı bakiyesi',overview.cardCredit) : ''}${compactStat(ctx,'netWorth','Net varlık',overview.netWorth)}</dl>
@@ -50,6 +76,7 @@ export function homeView(ctx) {
     <div class="section-heading month-heading"><div><h2>Aylık gelir ve gider</h2><p class="notice">Takvim ayı · işlem tarihine göre</p></div><button data-page="reports">Raporlar ↗</button></div>
     <div class="toolbar">${periodControl}</div>
     <section class="panel month-summary"><dl class="compact-totals">${compactStat(ctx,'income','Gelir',overview.income)}${compactStat(ctx,'netExpense','Net gider',overview.netExpense)}${compactStat(ctx,'margin','Gelir − gider',overview.margin)}</dl><p class="notice">İadeler giderden düşer. Kart ödemeleri ve transferler gider sayılmaz.</p></section>
+    ${expenseBreakdown(ctx,monthRows)}
     ${overview.plannedIncome ? `<div class="panel planned-income"><div><strong>Bu ay planlanan gelir</strong><p class="notice">Alındı olarak onaylanana kadar bakiyeye ve gelire eklenmez.</p><b>${amount(ctx,overview.plannedIncome)}</b></div><button data-page="incomePlans">Gelir planları</button></div>` : ''}
     ${reviewWarning(ctx)}${sourceWarning(ctx)}${upcoming(ctx)}
     <section class="panel"><div class="section-heading"><h2>Son hareketler</h2><button data-page="transactions">Tüm işlemler</button></div>${transactionList(recent)}</section>
@@ -76,10 +103,10 @@ export function walletView(ctx) {
 function installmentPanel(ctx,installments) {
   if (!installments) return '';
   const items = installments.items || [];
-  return `<details class="panel optional-detail" ${items.length ? 'open' : ''}><summary>Taksit görünümü${items.length ? ` · ${ctx.esc(items.length)} plan` : ' · Kayıt yok'}</summary><div class="summary-grid">${metric(ctx,'installmentPosted','Kaydedilmiş taksit gideri',installments.postedExpense)}${metric(ctx,'installmentFuture','Gelecek taksit yükü tahmini',installments.estimatedFutureLiability)}</div>
-    <p class="notice">Gelecek taksitler tahmindir; mevcut borca veya aylık gidere yeniden eklenmez. Toplam satın alma bedeli belgeyle doğrulanmış olmayabilir.</p>
+  return `<details class="panel optional-detail" ${items.length ? 'open' : ''}><summary>Taksit görünümü${items.length ? ` · ${ctx.esc(items.length)} plan` : ' · Kayıt yok'}</summary><div class="summary-grid">${metric(ctx,'installmentPosted','Kaydedilmiş taksit gideri',installments.postedExpense)}${metric(ctx,'installmentPlanned','Gelecek taksitler · kayıtlı plan',installments.plannedFutureLiability)}${metric(ctx,'installmentFuture','Gelecek taksitler · ekstre tahmini',installments.estimatedFutureLiability)}</div>
+    <p class="notice">Kayıtlı planlarda taksitler kendi tarihlerinde güncel borca yansır. Ekstre tahmini görülen taksit tutarlarına dayanır.</p>
     ${installments.ambiguous ? '<p class="warning">Bazı taksit hareketleri kesin gruplanamadı. Tahmini tutarları belgeyle kontrol et; aynı tutarlı ayrı alışverişler olabilir.</p>' : ''}
-    ${items.map(item => `<article class="installment-item"><div class="row"><div class="left"><strong>${ctx.esc(item.desc)}</strong><small>Kaydedilen taksit ${ctx.esc(item.current)} / ${ctx.esc(item.total)} · Kalan ${ctx.esc(item.remaining)} taksit${item.ambiguous ? ' · Gruplama belirsiz' : ''}</small></div><b>${amount(ctx,item.amount)}</b></div><dl class="card-details">${detail(ctx,'Kaydedilmiş gider',item.postedExpense,true)}${detail(ctx,'Gelecek taksitler · tahmin',item.estimatedFutureLiability,true)}</dl></article>`).join('') || noRows('Bu kartta taksit bilgisi bulunan hareket yok.')}
+    ${items.map(item => `<article class="installment-item"><div class="row"><div class="left"><strong>${ctx.esc(item.desc)}</strong><small>Kaydedilen taksit ${ctx.esc(item.current)} / ${ctx.esc(item.total)} · Kalan ${ctx.esc(item.remaining)} taksit${item.ambiguous ? ' · Gruplama belirsiz' : ''}</small></div><b>${amount(ctx,item.amount)}</b></div><dl class="card-details">${detail(ctx,'Kaydedilmiş gider',item.postedExpense,true)}${detail(ctx,item.estimated?'Gelecek taksitler · tahmin':'Gelecek taksitler · kayıtlı plan',item.estimated?item.estimatedFutureLiability:item.plannedFutureLiability,true)}</dl></article>`).join('') || noRows('Bu kartta taksit bilgisi bulunan hareket yok.')}
   </details>`;
 }
 
@@ -117,15 +144,15 @@ export function accountView(ctx,accountId) {
 
 function categoryPanel(ctx,title,values,empty) {
   const rows = values || [];
-  const maximum = Math.max(1,...rows.map(([,value]) => Math.abs(value)));
-  return `<section class="panel"><h2>${ctx.esc(title)}</h2>${rows.map(([category,value]) => `<div class="chart-label"><span>${ctx.esc(category)}</span><b>${amount(ctx,value)}</b></div><progress class="bar" max="${ctx.esc(maximum)}" value="${ctx.esc(Math.abs(value))}" aria-label="${ctx.esc(category)}"></progress>`).join('') || noRows(empty)}</section>`;
+  const maximum = rows.reduce((max,[,value]) => C.absCents(value)>max?C.absCents(value):max,1);
+  return `<section class="panel"><h2>${ctx.esc(title)}</h2>${rows.map(([category,value]) => `<div class="chart-label"><span>${ctx.esc(category)}</span><b>${amount(ctx,value)}</b></div><progress class="bar" max="${ctx.esc(maximum)}" value="${ctx.esc(C.absCents(value))}" aria-label="${ctx.esc(category)}"></progress>`).join('') || noRows(empty)}</section>`;
 }
 
 export function reportsView(ctx) {
   const {state,esc,periodControl} = ctx;
   const overview = W.overview(state,ctx.period);
-  const periods = [...new Set([ctx.period,...state.transactions.filter(C.effective).map(t => t.date.slice(0,7))])].sort().reverse();
-  return shell(`<h1>Raporlar</h1><p class="lead">Aylık gelir ve gideri, hesaba giren ve çıkan paradan ayrı oku.</p><p class="notice">Takvim ayı · gerçek işlem tarihine göre</p><div class="toolbar">${periodControl}</div>
+  const periods = [...new Set([ctx.period,...state.transactions.filter(C.effective).map(C.calendarPeriods(state))])].sort().reverse();
+  return shell(`<h1>Raporlar</h1><p class="lead">Aylık gelir ve gideri, hesaba giren ve çıkan paradan ayrı oku.</p><p class="notice">Takvim ayı · taksitler ait oldukları ayda</p><div class="toolbar">${periodControl}</div>
     <section class="panel"><h2>Gelir ve gider</h2><div class="summary-grid">${metric(ctx,'income','Gelir',overview.income)}${metric(ctx,'netExpense','Net gider',overview.netExpense)}${metric(ctx,'margin','Gelir − gider',overview.margin)}</div><dl class="card-details">${detail(ctx,'Kaydedilmiş harcamalar',overview.spent,true)}${detail(ctx,'İadeler',overview.refunds,true)}</dl><p class="notice">Kartla harcama giderdir. Kart borcu ödemeleri, transferler ve açılış bakiyeleri gelir veya gider yaratmaz.</p></section>
     <section class="panel"><h2>Banka ve nakit akışı</h2><div class="summary-grid">${metric(ctx,'cashIn','Hesaplara giren para',overview.cashIn)}${metric(ctx,'cashOut','Hesaplardan çıkan para',overview.cashOut)}${metric(ctx,'cardPayments','Kart borcu ödemeleri',overview.cardPayments)}${metric(ctx,'transfers','Hesaplar arası transferler',overview.transfers)}</div><p class="notice">Nakit akışı banka ve nakit hareketlerini gösterir. Kaynak hesabı bilinen kart ödemeleri para çıkışına dahildir. Hesapların arasındaki transferler toplam giriş ve çıkışa tekrar eklenmez. Kart ödemeleri ve transferler aylık gider sayılmaz.</p></section>
     ${categoryPanel(ctx,'Kategori dağılımı',overview.categories,'Bu ay kaydedilmiş gider yok.')}${categoryPanel(ctx,'Gelir kategorileri',overview.incomeByCategory,'Bu ay kaydedilmiş gelir yok.')}
@@ -134,33 +161,134 @@ export function reportsView(ctx) {
 }
 
 function reconciliationPreview(ctx,pending) {
-  const r = pending.reconciliation || {status:'unverified',missing:[],reasons:['Belgede karşılaştırılabilir başlık toplamları doğrulanamadı.'],totals:{}};
-  const labels = {verified:'Toplamlar doğrulandı',unverified:'Toplamlar doğrulanamadı',mismatch:'Toplamlar uyuşmuyor · aktarım kapalı'};
-  return `<section class="reconciliation ${r.status === 'verified' ? 'verified' : 'warning'}" aria-label="Ekstre mutabakatı"><h3>${ctx.esc(labels[r.status] || labels.unverified)}</h3><dl class="card-details">${detail(ctx,'Önceki dönem borcu',r.previousDebt,true)}${detail(ctx,'Belgedeki dönem borcu',r.statementDebt ?? pending.debt,true)}${detail(ctx,'Hareketlerden beklenen dönem borcu',r.expectedDebt,true)}${detail(ctx,'Mutabakat farkı',r.difference,true)}</dl>
-    ${(r.reasons || []).length ? `<ul>${r.reasons.map(reason => `<li>${ctx.esc(reason)}</li>`).join('')}</ul>` : ''}${(r.missing || []).length ? `<p>Okunamayan alanlar: ${r.missing.map(item => ctx.esc(statementFields[item] || item)).join(', ')}</p>` : ''}
-    ${r.status === 'mismatch' ? '<p>Belgedeki borç ve hareket toplamları çelişiyor. Bu önizleme kaydedilemez; belgeyi ve okunan satırları kontrol et.</p>' : r.status !== 'verified' ? '<p>Eksik başlıklar nedeniyle borç doğrulanamadı. Satırları belgeyle karşılaştırdıktan sonra ayrıca onay vermen gerekir.</p><label class="acknowledge" for="acknowledge-import"><input type="checkbox" id="acknowledge-import" required><span>Toplamların doğrulanamadığını anladım; okunan hareketleri kontrol ettim ve aktarımı onaylıyorum.</span></label>' : '<p>Belgede okunan başlık toplamları ve hareketler birbiriyle uyumlu.</p>'}</section>`;
+  const r = pending.reconciliation || {status:'unverified',missing:[],reasons:['Belgede karşılaştırılabilir başlık toplamları doğrulanamadı.']};
+  const labels = {verified:'Toplamlar doğrulandı',unverified:'Toplamlar doğrulanamadı',mismatch:'Mutabakat farkı var · aktarım kapalı'};
+  return `<section class="reconciliation ${r.status==='verified'?'verified':'warning'}" aria-label="Ekstre mutabakatı">
+    <details ${r.status==='mismatch'?'open':''}><summary>${ctx.esc(labels[r.status] || labels.unverified)}</summary>
+      <dl class="card-details">${detail(ctx,'Hesap kesimi',pending.cut)}${detail(ctx,'Son ödeme tarihi',pending.due)}${detail(ctx,'Önceki dönem borcu',r.previousDebt,true)}${detail(ctx,'Belgedeki dönem borcu',r.statementDebt ?? pending.debt,true)}${detail(ctx,'Hareketlerden beklenen dönem borcu',r.expectedDebt,true)}${detail(ctx,'Mutabakat farkı',r.difference,true)}</dl>
+      ${(r.reasons || []).length?`<ul>${r.reasons.map(reason=>`<li>${ctx.esc(reason)}</li>`).join('')}</ul>`:''}
+      ${(r.missing || []).length?`<p>Okunamayan alanlar: ${r.missing.map(item=>ctx.esc(statementFields[item] || item)).join(', ')}</p>`:''}
+    </details>
+    ${r.status!=='verified'&&r.status!=='mismatch'?`<label class="acknowledge" for="acknowledge-import"><input type="checkbox" id="acknowledge-import" ${ctx.importDraft.acknowledged?'checked':''} required><span>Okunan hareketleri kontrol ettim ve aktarımı onaylıyorum.</span></label>`:''}
+  </section>`;
+}
+
+
+function statementGroups(state) {
+  const rowsByStatement = new Map();
+  const statementsByMovement = new Map();
+  for (const row of state.transactions) {
+    if (!row.statement) continue;
+    if (!rowsByStatement.has(row.statement)) rowsByStatement.set(row.statement, []);
+    rowsByStatement.get(row.statement).push(row);
+    for (const movement of [row.id,row.linkedTo].filter(Boolean)) {
+      if (!statementsByMovement.has(movement)) statementsByMovement.set(movement, new Set());
+      statementsByMovement.get(movement).add(row.statement);
+    }
+  }
+  const underReview = new Set();
+  for (const row of state.transactions) {
+    if (row.matchStatus !== 'pending') continue;
+    for (const id of [row.id,...(row.matchCandidates || [])]) {
+      for (const statement of statementsByMovement.get(id) || []) underReview.add(statement);
+    }
+  }
+  return {rowsByStatement,underReview};
+}
+
+function statementTotals(rows) {
+  if (!rows.length) return {};
+  const totals = {expense:0,cardPayment:0,refund:0};
+  // These are the source rows in the statement, including any linked copies.
+  for (const row of rows) {
+    if (Object.hasOwn(totals,row.kind)) totals[row.kind] = C.addCents(totals[row.kind],row.amount);
+  }
+  return {expenses:totals.expense,payments:totals.cardPayment,refunds:totals.refund};
+}
+
+function totalsList(ctx,totals,debt=undefined) {
+  return `<dl class="statement-totals">${detail(ctx,'Harcama',totals.expenses,true)}${detail(ctx,'Ödeme',totals.payments,true)}${detail(ctx,'İade / indirim',totals.refunds,true)}${debt!==undefined?detail(ctx,'Dönem borcu',debt,true):''}</dl>`;
+}
+
+function statementStatus(statement,pending,movementCount) {
+  if (statement.reconciliationStatus === 'mismatch') return {label:'İnceleme gerekiyor',reason:'Belgedeki ekstre toplamları uyuşmuyor.'};
+  if (Number.isSafeInteger(statement.importedMovementCount) && statement.importedMovementCount !== movementCount) {
+    return {label:'İnceleme gerekiyor',reason:'Kayıtlı hareketler aktarımdan sonra değişmiş.'};
+  }
+  if (pending) return {label:'İnceleme gerekiyor',reason:'Bu ekstreyle ilişkili olası eşleşmeler inceleme kutusunda.'};
+  if (statement.reconciliationStatus === 'verified') return {label:'Doğrulandı',tone:'verified'};
+  if (statement.reconciliationStatus === 'unverified') return {label:'İnceleme gerekiyor',reason:'Aktarımda belgedeki toplamlar tam doğrulanamadı.'};
+  return {label:'Eski aktarım — doğrulama bilgisi yok',tone:'legacy'};
+}
+
+function statementCard(ctx,statement,rows,pending) {
+  const {state,esc}=ctx;
+  const status=statementStatus(statement,pending,rows.length);
+  return `<article class="statement-card">
+    <div class="statement-card-heading"><div><h3>${esc(statement.bank || 'Banka bilinmiyor')} <span>· ${esc(statement.period)}</span></h3><p>${esc(accountName(state,statement.account))}</p></div><span class="statement-status ${status.tone||''}">${status.label}</span></div>
+    <p class="statement-meta">${esc(rows.length)} hareket${statement.imported?` · Aktarım ${esc(statement.imported)}`:''}</p>
+    ${totalsList(ctx,statementTotals(rows),statement.debt??null)}
+    <button type="button" class="statement-detail-button" data-statement-view="${esc(statement.id)}" aria-label="${esc(`Detayı aç · ${statement.bank||'Ekstre'} · ${statement.period} · ${accountName(state,statement.account)}`)}">Detayı aç</button>
+  </article>`;
+}
+
+export function statementView(ctx,id) {
+  const statement=ctx.state.statements.find(st=>st.id===id);
+  if (!statement) return shell('<h1>Ekstre bulunamadı</h1><button data-action="back">Ekstrelere dön</button>');
+  const {rowsByStatement,underReview}=statementGroups(ctx.state);
+  const rows=rowsByStatement.get(id) || [];
+  const pending=underReview.has(id);
+  const status=statementStatus(statement,pending,rows.length);
+  return shell(`<button class="back-link" data-action="back">← Ekstreler</button>
+    <h1>${ctx.esc(statement.bank || 'Ekstre')} · ${ctx.esc(statement.period)}</h1>
+    <p class="lead">${ctx.esc(accountName(ctx.state,statement.account))}</p>
+    <section class="panel"><h2>Ekstre bilgileri</h2><p class="statement-status ${status.tone||''}">${status.label}</p>
+      ${status.reason?`<p>${status.reason}</p>`:''}
+      ${totalsList(ctx,statementTotals(rows),statement.debt??null)}
+      <dl class="card-details">${detail(ctx,'Hesap kesimi',statement.cut)}${detail(ctx,'Son ödeme tarihi',statement.due)}${detail(ctx,'İçe aktarma tarihi',statement.imported)}</dl>
+      <div class="actions"><button data-card-view="${ctx.esc(statement.account)}">Kredi kartını aç</button>${pending?'<button data-page="review">İnceleme kutusu</button>':''}</div>
+    </section>
+    <section class="panel"><h2>Belgedeki hareketler · ${ctx.esc(rows.length)}</h2>
+      ${rows.length?ctx.transactionList(newest(rows)):noRows('Bu ekstreye bağlı hareket kaydı yok.')}
+      ${rows.length>ctx.listLimit?'<button data-action="more">Daha fazla göster</button>':''}
+    </section>`);
 }
 
 export function importView(ctx,pending) {
   const {state,esc} = ctx;
   let preview = '';
   if (pending) {
-    const totals = pending.reconciliation?.totals || {};
-    const rows = pending.rows || [];
+    const rows = (pending.rows || []).map(row=>['expense','refund'].includes(row.kind)
+      ? {...row,category:C.activeExpenseCategory(state,row.category)}
+      : row);
     const blocked = pending.reconciliation?.status === 'mismatch';
+    const needsAcknowledgement = pending.reconciliation?.status !== 'verified';
     const cards = state.accounts.filter(a => a.type === 'card');
-    preview = `<section class="panel"><h2>Aktarım önizlemesi</h2><p>${esc(pending.bank || 'Kaynak banka bilinmiyor')} · ${esc(pending.period)} · ${esc(rows.length)} hareket</p><dl class="card-details">${detail(ctx,'Hesap kesimi',pending.cut)}${detail(ctx,'Son ödeme tarihi',pending.due)}</dl>${pending.warning ? `<p class="warning">${esc(pending.warning)}</p>` : ''}
-      <div class="summary-grid">${metric(ctx,'importExpenses','Okunan harcamalar',totals.expenses)}${metric(ctx,'importPayments','Okunan kart ödemeleri',totals.payments)}${metric(ctx,'importRefunds','Okunan iadeler',totals.refunds)}</div>
+    const selectedCard = cards.find(a=>a.id===ctx.importDraft.account) || cards[0];
+    preview = `<section class="panel statement-preview" aria-labelledby="statement-preview-title">
+      <div class="preview-heading"><h2 id="statement-preview-title">Aktarım önizlemesi</h2><p>${esc(pending.bank || 'Kaynak banka bilinmiyor')} · ${esc(pending.period)} · ${esc(rows.length)} hareket</p></div>
+      ${totalsList(ctx,pending.reconciliation?.totals || statementTotals(rows))}
+      <div class="preview-card-controls">
+        <div><label for="import-account">Hedef kredi kartı</label>
+          <div class="preview-select">
+            <select id="import-account" ${!cards.length ? 'disabled' : ''}>${cards.length ? cards.map(a => `<option value="${esc(a.id)}" ${a===selectedCard?'selected':''}>${esc(a.name)}</option>`).join('') : '<option value="">Önce kredi kartı ekle</option>'}</select>
+            <span class="preview-select-value" aria-hidden="true"><span id="import-account-display">${esc(selectedCard?.name ?? 'Önce kredi kartı ekle')}</span><span>⌄</span></span>
+          </div>
+        </div>
+        <button type="button" data-action="addImportCard">+ Kart ekle</button>
+      </div>
       ${reconciliationPreview(ctx,pending)}
-      <p class="notice">Aynı kartın aynı dönemi yeniden aktarılırsa o ekstrenin hareketleri yenilenir. Manuel kayıtlar korunur; olası eşleşmeler kararını bekler.</p>
-      <label for="import-account">Hedef kredi kartı</label><select id="import-account" ${!cards.length ? 'disabled' : ''}>${cards.length ? cards.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('') : '<option value="">Önce kredi kartı ekle</option>'}</select><button data-action="addAccount">+ Kart ekle</button>
-      <h3>Okunan hareketler</h3><div class="preview import-preview">${rows.map(r => `<article class="import-row"><div class="row"><div class="left"><strong>${esc(r.desc)}</strong><small>${esc(r.date)} · ${esc(kindNames[r.kind] || r.kind)}<br>${esc(r.category || 'Kategori belirlenmedi')}${r.installment ? ' · '+esc(r.installment) : ''}</small></div><b>${amount(ctx,r.amount)}</b></div><details class="raw-source"><summary>Orijinal banka açıklaması</summary><p>${esc(r.sourceDesc ?? r.desc)}</p></details></article>`).join('') || noRows('Okunmuş hareket yok.')}</div>
-      <div class="actions"><button class="primary" data-action="confirmImport" ${blocked || !cards.length || !rows.length ? 'disabled aria-disabled="true"' : ''}>Onayla ve kaydet</button><button data-action="cancelImport">Vazgeç</button></div>
+      <div class="preview-movements"><h3 id="preview-movement-title">Okunan hareketler</h3><div class="preview import-preview" role="region" aria-labelledby="preview-movement-title" tabindex="0">${rows.map((r,i) => `<article class="import-row"><div class="row"><div class="left"><strong>${esc(r.desc)}</strong><small>${esc(r.date)} · ${esc(kindNames[r.kind] || r.kind)}<br>${esc(r.category || 'Kategori belirlenmedi')}${r.installment ? ' · '+esc(r.installment) : ''}</small></div><b>${amount(ctx,r.amount)}</b></div><details class="raw-source"><summary>Orijinal banka açıklaması</summary><p>${esc(r.sourceDesc ?? r.desc)}</p></details>${['expense','refund'].includes(r.kind)?ctx.importCategoryOption(r.desc,r.category,i,ctx.importDraft.suggestions.get(i)):''}</article>`).join('') || noRows('Okunmuş hareket yok.')}</div></div>
+      <p class="notice">Aynı kartın aynı dönemini tekrar aktarmak ekstre hareketlerini yeniler. Manuel kayıtlar korunur.</p>
+      <div class="preview-actions"><button class="primary" data-action="confirmImport" ${blocked || !cards.length || !rows.length || (needsAcknowledgement && !ctx.importDraft.acknowledged) ? 'disabled' : ''}>Onayla ve kaydet</button><button data-action="cancelImport">Vazgeç</button></div>
     </section>`;
   }
+  const {rowsByStatement,underReview}=statementGroups(state);
+  const history=[...state.statements].sort((a,b)=>b.cut.localeCompare(a.cut));
   return shell(`<h1>Ekstreler</h1><p class="lead">PDF cihazda işlenir. Dosyan dışarı gönderilmez.</p><section class="panel"><h2>Yeni ekstre aktar</h2><p>Metin içeren, şifresiz Yapı Kredi veya QNB kredi kartı PDF'i seç. En fazla 20 MB / 100 sayfa.</p><div class="actions"><button class="primary" data-action="pdf">PDF seç</button><button data-action="csv">Masaüstü CSV'si</button></div><p class="notice">Taranmış görseller ve diğer bankaların PDF'leri desteklenmez. PDF kart hareketlerini aktarır; banka hesabının canlı bakiyesini getirmez.</p></section>${preview}
-    <section class="panel"><h2>Aktarılan ekstreler</h2>${[...state.statements].sort((a,b) => b.cut.localeCompare(a.cut)).map(st => `<div class="row"><div class="left"><button class="text-button" data-card-view="${esc(st.account)}">${esc(accountName(state,st.account))}</button><small>${esc(st.period)} · ${esc(st.bank || '')}</small></div><b>${amount(ctx,st.debt)}</b></div>`).join('') || noRows('Henüz ekstre aktarılmadı.')}</section>`);
+    <section class="statement-history" aria-labelledby="statement-history-title"><h2 id="statement-history-title" tabindex="-1">Aktarılan ekstreler</h2>${history.map(st=>statementCard(ctx,st,rowsByStatement.get(st.id)||[],underReview.has(st.id))).join('') || noRows('Henüz ekstre aktarılmadı.')}</section>`);
 }
+
 
 export function incomePlansView(ctx) {
   const {state,esc,transactionList} = ctx;

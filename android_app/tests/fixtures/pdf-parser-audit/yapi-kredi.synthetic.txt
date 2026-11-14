@@ -1,0 +1,11 @@
+YAPI VE KREDİ
+Hesap Özeti Tarihi: 05.10.2026
+Son Ödeme Tarihi: 15.10.2026
+Önceki Hesap Özeti Borcu (TL): 100,00
+Hesap Özeti Borcu (TL): 255,00
+İşlem Tarihi Açıklama Taksitli Harcama (TL) Worldpuan
+01.10.2026 SENTETIK MARKET 100,00 0,00
+02.10.2026 SENTETIK TAKSIT 85,00 2/6 3,00
+03.10.2026 SENTETIK IADE -10,00 0,00
+04.10.2026 ODEME TESEKKUR 20,00 0,00
+Worldpuan Detayları

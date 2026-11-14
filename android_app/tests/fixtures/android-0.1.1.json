@@ -1,0 +1,99 @@
+{
+  "format": "ekstre-android",
+  "version": 1,
+  "accounts": [
+    {
+      "id": "synthetic-card",
+      "name": "Sentetik kart",
+      "type": "card",
+      "opening": 0
+    },
+    {
+      "id": "synthetic-bank",
+      "name": "Sentetik banka",
+      "type": "bank",
+      "opening": 100000
+    }
+  ],
+  "transactions": [
+    {
+      "date": "2026-10-02",
+      "period": "2026-10",
+      "desc": "Sentetik düzenleme",
+      "amount": 10000,
+      "kind": "expense",
+      "category": "Sentetik özel kategori",
+      "installment": "",
+      "importKey": "[\"QNB\",\"2026-10\",\"2026-10-02\",\"SENTETIK BIMEKS\",10000,\"\"]|1",
+      "id": "synthetic-spend",
+      "account": "synthetic-card",
+      "statement": "synthetic-card|2026-10",
+      "source": "pdf",
+      "sourceDesc": "SENTETIK BIMEKS",
+      "note": "Sentetik not",
+      "reviewed": true
+    },
+    {
+      "date": "2026-10-03",
+      "period": "2026-10",
+      "desc": "ODEME",
+      "amount": 2000,
+      "kind": "cardPayment",
+      "category": "Kart ödemesi",
+      "installment": "",
+      "importKey": "[\"QNB\",\"2026-10\",\"2026-10-03\",\"ODEME\",2000,\"\"]|1",
+      "id": "synthetic-payment",
+      "account": "synthetic-card",
+      "statement": "synthetic-card|2026-10",
+      "source": "pdf",
+      "sourceDesc": "ODEME",
+      "note": "",
+      "reviewed": false,
+      "linkedTo": "synthetic-bank-outflow",
+      "matchStatus": "linked"
+    },
+    {
+      "id": "synthetic-bank-outflow",
+      "account": "synthetic-bank",
+      "target": "synthetic-card",
+      "date": "2026-10-03",
+      "kind": "payment",
+      "amount": 2000,
+      "desc": "Sentetik banka ödemesi",
+      "category": "Kart ödemesi",
+      "period": "2026-10",
+      "source": "manual"
+    }
+  ],
+  "statements": [
+    {
+      "id": "synthetic-card|2026-10",
+      "account": "synthetic-card",
+      "bank": "QNB",
+      "period": "2026-10",
+      "cut": "2026-10-05",
+      "due": null,
+      "debt": 8000,
+      "imported": "2026-10-05"
+    }
+  ],
+  "budgets": {},
+  "subscriptions": [],
+  "categories": [
+    "Market / Gıda",
+    "Dışarıda yeme",
+    "Akaryakıt",
+    "Fatura / İnternet",
+    "Abonelik",
+    "Oyun / Dijital",
+    "Online alışveriş",
+    "Ulaşım",
+    "Sağlık",
+    "Giyim",
+    "Ev / Kira",
+    "Eğitim",
+    "Faiz / Ücret",
+    "Diğer",
+    "Sentetik özel kategori"
+  ]
+}

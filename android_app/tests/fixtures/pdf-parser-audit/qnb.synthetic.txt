@@ -1,0 +1,12 @@
+QNB
+Hesap Kesim Tarihi: 05/10/2026
+Son Ödeme Tarihi: 15/10/2026
+Önceki Dönem Hesap Özeti Borcu: 100.00
+Dönem Borcu: 255.00
+İşlem Tarihi Açıklama Tutar
+01/10/2026 SENTETIK MARKET 100.00
+02/10/2026 SENTETIK TAKSIT 85.00 2/6
+03/10/2026 SENTETIK IADE -10.00
+04/10/2026 ODEME TESEKKUR 20.00
+ParaPuan İşlemleriniz
+05/10/2026 SENTETIK PUAN KARSILIGI 999.00

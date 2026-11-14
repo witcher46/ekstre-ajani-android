@@ -6,10 +6,10 @@ Bu belge masaüstü, Android ve web uygulamalarının sonuçlarını aynı finan
 
 1. TL tutarları hesaplamada tamsayı kuruş olarak tutulur (`1 TL = 100 kuruş`). Para dönüşümü, toplama ve bölme kayan nokta yuvarlamasına bırakılmaz.
 2. Açılış bakiyesi gelir değildir. Hesaplar arasındaki transfer gelir veya gider yaratmaz.
-3. Kredi kartı alışverişi, yapıldığı dönemde bir kez harcama ve kart borcu oluşturur.
+3. Taksitsiz kredi kartı alışverişi işlem ayında gider sayılır. Her taksit ait olduğu ayda bir kez gider sayılır. 100 TL üç taksite 33,33 + 33,33 + 33,34 TL olarak dağılır.
 4. Kart borcunu banka hesabından ödemek bankadaki parayı ve kart borcunu azaltır; ikinci bir gider oluşturmaz.
 5. Planlanan gelir tahmindir. Gerçekleşti olarak işaretlenene kadar kullanılabilir bakiyeye ve gerçekleşen gelir raporuna eklenmez.
-6. İade ve düzeltmeler kaynak işlemle ilişkilendirilir; geçmiş hareketler sessizce silinmez veya yeni bir gider gibi yeniden sayılmaz.
+6. İade, gerçekleştiği ayda negatif gider olarak yazılır. Ekimdeki 1.000 TL alışverişin kasımda gelen 400 TL iadesi ekimdeki gideri değiştirmez ve kasımda gideri 400 TL azaltır. Kaynak ilişkilendirmesi mümkün olduğunda korunur.
 7. Aynı kaynağın yeniden aktarımı mükerrer kayıt oluşturmamalı ve kullanıcının düzenlemelerini korumalıdır. Kaynaklar arası belirsiz eşleşme kullanıcı kararına kadar incelemede kalır.
 8. Bankanın vermediği canlı bakiye, asgari ödeme, ekstre borcu veya tarih uygulama tarafından uydurulmaz. Tahmin ve doğrulanmış belge verisi ayrı gösterilir.
 9. Finans verisi yerel depolarda kalır. Otomatik bulut eşitlemesi veya CI'ya gerçek finans belgesi gönderimi yoktur.
@@ -25,12 +25,15 @@ Başlangıç banka bakiyesi `2.000.000 kuruş`, alınmış gelir `3.000.000 kuru
 
 Test ve örneklerde yalnızca sentetik veri kullanılmalıdır.
 
+## Android uygulaması
+
+Manuel taksit planında ilk taksit tarihini kullanıcı seçer. PDF’deki taksit giderinin ayı, bankanın bildirdiği ekstre döneminden alınır. Satırdaki kaynak işlem tarihi korunur. Belgedeki dönem borcu, kayıtlardan hesaplanan güncel borç ve gelecekteki taksitler ayrı gösterilir. Mevcut Android borç tahmini, manuel plandaki gelecek taksitleri tarihleri geldiğinde işler.
+
 ## Ürün kararı bekleyen alanlar
 
 Bu ortak sözleşme aşağıdaki konularda henüz platformlar arası politika tanımlamaz. Bir uygulamadaki mevcut kod davranışı diğer platformlar için ürün kararı sayılmaz; bu başlıklarda sessiz varsayım veya otomatik uyumlaştırma yapılmamalıdır.
 
-- Taksitli alışverişin hangi ayda ve hangi tutarla gider/borç sayılacağı; henüz vadesi gelmemiş taksitlerin borç ve net finansal duruma etkisi.
-- İadenin gideri azaltması veya gelir sayılması ve alışverişten farklı dönemde geldiğinde hangi döneme yazılacağı.
+- Taksitin belge veya kullanıcı tarafından belirlenmemiş ilk ayı ile gelecek taksitlerin kart limiti ve net finansal duruma etkisi.
 - “Ekstre dönem borcu”, “kalan borç”, “güncel borç” ve “kullanılabilir limit” tanımları ile her birinin kaynak ve kesim tarihi.
 - Otomatik hareket eşleştirmesinde tarih/açıklama toleransları ve hangi koşullarda kullanıcı onayının zorunlu olduğu. Belirsiz eşleşme incelemede kalır.
 - Ekstre toplamı ile hesaplanan toplam arasında kabul edilecek mutabakat farkı. Kuruş farkı gizlenmez; tolerans ancak açık ürün kararı ve testle tanımlanır.

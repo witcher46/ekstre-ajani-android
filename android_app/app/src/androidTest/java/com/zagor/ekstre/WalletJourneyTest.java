@@ -23,6 +23,7 @@ import org.junit.*;
 import org.junit.runner.RunWith;
 import org.json.*;
 import static org.junit.Assert.*;
+import static org.junit.Assume.assumeTrue;
 
 @RunWith(AndroidJUnit4.class)
 public class WalletJourneyTest {
@@ -55,9 +56,16 @@ public class WalletJourneyTest {
   if(file==null){UiObject2 roots=device.wait(Until.findObject(By.desc("Show roots")),5000);assertNotNull("File picker roots are accessible",roots);roots.click();UiObject2 downloads=device.wait(Until.findObject(By.text("Downloads")),5000);assertNotNull("Downloads is available",downloads);downloads.click();file=device.wait(Until.findObject(By.text(name)),8000);}
   if(file==null)evidence("download-not-found");assertNotNull("Synthetic file is visible in Android picker: "+name,file);file.click();
  }
- @Before public void emptyTestApp(){InstrumentationRegistry.getInstrumentation().getTargetContext().deleteDatabase("wallet.db");}
+ @Before public void emptyTestApp(){
+  if(!Boolean.parseBoolean(InstrumentationRegistry.getArguments().getString("preserveWallet"))){
+   InstrumentationRegistry.getInstrumentation().getTargetContext().deleteDatabase("wallet.db");
+  }
+ }
  @Test public void previousApkIsPreservedAndCaptured()throws Exception{
-  device.executeShellCommand("am start -W -n com.zagor.ekstre.preview.revision/com.zagor.ekstre.MainActivity");
+  String previous="com.zagor.ekstre.preview.revision";
+  assumeTrue("This test requires the separately installed historical APK",
+   device.executeShellCommand("pm list packages "+previous).contains("package:"+previous+"\n"));
+  device.executeShellCommand("am start -W -n "+previous+"/com.zagor.ekstre.MainActivity");
    boolean ready=device.wait(Until.hasObject(By.textContains("Parana genel")),15000);evidence("previous-ready-"+ready);assertTrue("Previous APK text visible; package="+device.getCurrentPackageName()+" "+systemLabels(),ready);
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();File dir=new File(context.getExternalFilesDir(null),"screens");dir.mkdirs();
   device.takeScreenshot(new File(dir,"previous-apk-home.png"));
@@ -77,7 +85,30 @@ public class WalletJourneyTest {
    Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();PDFBoxResourceLoader.init(context);byte[] pdfBytes;
    try(PDDocument pdf=new PDDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()){PDPage p=new PDPage();pdf.addPage(p);try(PDPageContentStream stream=new PDPageContentStream(pdf,p)){stream.beginText();stream.setFont(PDType1Font.HELVETICA,12);stream.setLeading(18);stream.newLineAtOffset(30,700);for(String line:new String[]{"QNB","Hesap Kesim Tarihi: 05/10/2026","04/10/2026 SENTETIK MARKET 123.00"}){stream.showText(line);stream.newLine();}stream.endText();}pdf.save(out);pdfBytes=out.toByteArray();}
    Uri uri=document("ekstre-synthetic.pdf","application/pdf",pdfBytes);
-   try{for(int i=0;i<2;i++){a.onActivity(activity->activity.onActivityResult(101,Activity.RESULT_OK,new Intent().setData(uri)));waitJs(a,"!!document.querySelector('#import-account')");String card=js(a,"JSON.parse(Android.load()).accounts[3].id");js(a,"document.getElementById('import-account').value="+card);js(a,"document.getElementById('acknowledge-import').checked=true");click(a,"[data-action=confirmImport]");}assertEquals("9",js(a,"JSON.parse(Android.load()).transactions.length"));}finally{context.getContentResolver().delete(uri,null,null);}
+   Uri broken=document("ekstre-synthetic-broken.pdf","application/pdf","Not a PDF".getBytes(StandardCharsets.UTF_8));
+   try{
+    waitJs(a,"document.querySelector('#toast').textContent.includes('iptal edildi')");
+    for(int i=0;i<2;i++){
+     click(a,"[data-action=pdf]");waitPicker();selectDownload("ekstre-synthetic.pdf");
+     waitJs(a,"!!document.querySelector('#import-account')");
+     String card=js(a,"JSON.parse(Android.load()).accounts[3].id");
+     js(a,"document.getElementById('import-account').value="+card);
+     click(a,"#acknowledge-import");click(a,"[data-action=confirmImport]");
+    }
+    assertEquals("9",js(a,"JSON.parse(Android.load()).transactions.length"));
+    String original=js(a,"Android.load()"),recovery=js(a,"Android.recovery()");
+    click(a,"[data-action=pdf]");waitPicker();selectDownload("ekstre-synthetic.pdf");
+    waitJs(a,"!!document.querySelector('#import-account')");
+    click(a,"#acknowledge-import");
+    assertEquals("true",js(a,"!document.querySelector('[data-action=confirmImport]').disabled"));
+    click(a,"[data-action=pdf]");waitPicker();
+    assertEquals("true",js(a,"!document.querySelector('[data-action=confirmImport]')"));
+    selectDownload("ekstre-synthetic-broken.pdf");
+    waitJs(a,"document.querySelector('#error-announcement').textContent.includes('PDF okunamadı')");
+    assertEquals("true",js(a,"!document.querySelector('[data-action=confirmImport]')"));
+    assertEquals(original,js(a,"Android.load()"));
+    assertEquals(recovery,js(a,"Android.recovery()"));
+   }finally{context.getContentResolver().delete(uri,null,null);context.getContentResolver().delete(broken,null,null);}
    // CSV still passes through its actual file-input change handler, using a synthetic File.
    js(a,"(()=>{const input=document.getElementById('csv-file'),dt=new DataTransfer();dt.items.add(new File(['bank,kart,period,date,desc,amount_cents,category,tur\\nQNB,Kart,2026-10,2026-10-05,SENTETIK CSV,8000,Market,harcama'],'synthetic.csv',{type:'text/csv'}));input.files=dt.files;input.dispatchEvent(new Event('change'));})()");waitJs(a,"!!document.querySelector('[name=card-0]')");submit(a);assertEquals("10",js(a,"JSON.parse(Android.load()).transactions.length"));
    // Native restore is atomic and retains the previous JSON; UI restore is separately tested in Chrome.
@@ -91,7 +122,7 @@ public class WalletJourneyTest {
   report.put("page",page);report.put("width",width);
   AtomicInteger bottom=new AtomicInteger(),safeBottom=new AtomicInteger();a.onActivity(activity->{WebView w=web(activity);int[] location=new int[2];w.getLocationOnScreen(location);bottom.set(location[1]+w.getHeight());safeBottom.set(device.getDisplayHeight()-w.getRootWindowInsets().getInsets(WindowInsets.Type.navigationBars()).bottom);});
   report.put("webBottom",bottom.get());report.put("safeBottom",safeBottom.get());if(bottom.get()>safeBottom.get())report.getJSONArray("failures").put("system-bar-overlap");
-  assertTrue("Android screenshot captured",device.takeScreenshot(new File(dir,"android-"+page+"-"+width+"-150.png")));return report;
+  assertTrue("Android screenshot captured",device.takeScreenshot(new File(dir,"android-"+page+"-"+width+"-200.png")));return report;
  }
  @Test public void keyboardBackAndModal()throws Exception{
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
@@ -103,7 +134,7 @@ public class WalletJourneyTest {
    AtomicInteger tapX=new AtomicInteger(),tapY=new AtomicInteger();a.onActivity(activity->{WebView w=web(activity);int[] offset=new int[2];w.getLocationOnScreen(offset);double scale=w.getWidth()/rect.optDouble("viewport",1);tapX.set(offset[0]+(int)Math.round(rect.optDouble("x")*scale));tapY.set(offset[1]+(int)Math.round(rect.optDouble("y")*scale));});
    assertTrue("Rendered description input accepts a native touch",device.click(tapX.get(),tapY.get()));
    waitJs(a,"document.activeElement===document.querySelector('[name=desc]')");
-   AtomicBoolean keyboard=new AtomicBoolean(false);for(int i=0;i<20;i++){a.onActivity(activity->keyboard.set(web(activity).getRootWindowInsets().isVisible(WindowInsets.Type.ime())));if(keyboard.get())break;Thread.sleep(200);}assertTrue("Software keyboard opens",keyboard.get());js(a,"document.getElementById('submit').scrollIntoView({block:'end'})");drawn(a);evidence("keyboard-open");assertEquals("Submit remains reachable above the keyboard","true",js(a,"(()=>{const r=document.getElementById('submit').getBoundingClientRect();return r.top>=0&&r.bottom<=visualViewport.height+1;})()"));device.pressBack();device.pressBack();waitJs(a,"!document.querySelector('dialog[open]')");
+   AtomicBoolean keyboard=new AtomicBoolean(false);for(int i=0;i<20;i++){a.onActivity(activity->keyboard.set(web(activity).getRootWindowInsets().isVisible(WindowInsets.Type.ime())));if(keyboard.get())break;Thread.sleep(200);}assertTrue("Software keyboard opens",keyboard.get());js(a,"document.getElementById('submit').scrollIntoView({block:'end'})");drawn(a);evidence("keyboard-open");assertEquals("Submit remains reachable above the keyboard","true",js(a,"(()=>{const r=document.getElementById('submit').getBoundingClientRect();return r.top>=0&&r.bottom<=visualViewport.height+1;})()"));device.pressBack();device.pressBack();waitJs(a,"!document.querySelector('dialog[open]') && document.activeElement.matches('[data-action=addTransaction]')");
   }
  }
  @Test(timeout=180000) public void fontScaleSystemBarsAndScreenshots()throws Exception{
@@ -111,9 +142,9 @@ public class WalletJourneyTest {
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
    waitJs(a,"!!document.querySelector('[data-action=demo]')");click(a,"[data-action=demo]");
    js(a,"(()=>{const s=JSON.parse(Android.load()),date=new Date().toISOString().slice(0,10),category='Sentetik uzun kategori adı '.repeat(4);s.accounts[0].opening=999999999999;s.accounts[1].opening=999999999999;s.transactions[0].amount=999999999999;s.transactions[0].desc='Sentetik uzun mağaza açıklaması '.repeat(8);s.transactions[0].category=category;s.categories.push(category);s.budgets[date.slice(0,7)+'|Toplam']=999999999999;s.subscriptions.push({id:'native-long-sub',name:'Uzun isimli aylık internet ve dijital içerik aboneliği',account:s.accounts[0].id,amount:999999999999,next:date,category:'Abonelik'});return Android.save(JSON.stringify(s));})()");
-   try{device.executeShellCommand("settings put system font_scale 1.5");
+   try{device.executeShellCommand("settings put system font_scale 2.0");
     for(int width:new int[]{320,360,390,412}){
-     device.executeShellCommand("wm size "+width+"x844");device.executeShellCommand("wm density 160");a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");AtomicInteger zoom=new AtomicInteger();a.onActivity(activity->zoom.set(web(activity).getSettings().getTextZoom()));assertEquals(150,zoom.get());
+     device.executeShellCommand("wm size "+width+"x844");device.executeShellCommand("wm density 160");a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");AtomicInteger zoom=new AtomicInteger();a.onActivity(activity->zoom.set(web(activity).getSettings().getTextZoom()));assertEquals(200,zoom.get());
      reports.put(layoutCase(a,"home",width,dir));
      for(String page:new String[]{"wallet","transactions","plan","reports","import","settings","bankDetail","cardDetail","incomePlans","importPreview","transactionModal","paymentModal"}){
       js(a,"if(document.querySelector('dialog[open]'))window.handleBack()");
@@ -186,10 +217,162 @@ public class WalletJourneyTest {
    a.onActivity(activity->activity.onActivityResult(103,Activity.RESULT_OK,new Intent().setData(output)));
    String written="";for(int i=0;i<50;i++){written=readDocument(context,output);if(written.equals(original))break;Thread.sleep(100);}assertEquals("Native export writes complete JSON bytes",original,written);device.pressBack();
    click(a,"nav [data-page=wallet]");account(a,"Yedek sonrası sentetik hesap","bank");assertEquals(originalAccounts+1,new JSONObject(ref.get().load()).getJSONArray("accounts").length());
-   click(a,"#settings");js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center'})");UiObject2 restore=device.wait(Until.findObject(By.text("Yedek yükle")),10000);assertNotNull("Restore button is touchable",restore);restore.click();waitPicker();selectDownload("synthetic-wallet-backup.json");
-   UiObject2 confirm=device.wait(Until.findObject(By.res("android:id/button1").text(java.util.regex.Pattern.compile("(?iu)onayla"))),10000);if(confirm==null)evidence("restore-no-confirm");assertNotNull("Restore asks before replacing wallet",confirm);confirm.click();
+   restoreDownload(a,"synthetic-wallet-backup.json");
    waitJs(a,"JSON.parse(Android.load()).accounts.length==="+originalAccounts);assertEquals(3,new JSONObject(ref.get().load()).getJSONArray("transactions").length());assertEquals(originalAccounts+1,new JSONObject(ref.get().recovery()).getJSONArray("accounts").length());
    a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");assertEquals("3",js(a,"JSON.parse(Android.load()).transactions.length"));
   }finally{context.getContentResolver().delete(output,null,null);}
  }
+
+ @Test public void invalidBackupLinkDoesNotReplaceNativeWallet()throws Exception{
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=demo]')");
+   click(a,"[data-action=demo]");
+   AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();
+   a.onActivity(activity->bridge.set(activity.new Bridge()));
+   String original=bridge.get().load(),recovery=bridge.get().recovery();
+   JSONObject corrupted=new JSONObject(original);
+   JSONArray rows=corrupted.getJSONArray("transactions");
+   rows.getJSONObject(1).put("source","csv").put("matchStatus","linked").put("linkedTo",rows.getJSONObject(0).getString("id"));
+   assertRejectedRestore(a,context,bridge.get(),"synthetic-invalid-link.json",corrupted,"işlem bağlantısı");
+
+   JSONObject distant=new JSONObject(original);
+   JSONArray distantRows=distant.getJSONArray("transactions");
+   String card=distantRows.getJSONObject(0).getString("account");
+   String bank=distant.getJSONArray("accounts").getJSONObject(0).getString("id");
+   distantRows.put(new JSONObject()
+    .put("id","synthetic-bank-payment").put("account",bank).put("target",card)
+    .put("date","2026-11-30").put("period","2026-11").put("kind","payment").put("source","manual")
+    .put("amount",5000).put("desc","Sentetik banka ödemesi").put("category","Kart ödemesi"));
+   for(String source:new String[]{"pdf","csv"}){
+    boolean pdf=source.equals("pdf");
+    JSONObject payment=new JSONObject()
+     .put("id","synthetic-"+source+"-payment").put("account",card)
+     .put("date",pdf?"2026-10-01":"2026-11-30").put("period",pdf?"2026-10":"2026-11")
+     .put("kind","cardPayment").put("source",source).put("amount",5000)
+     .put("desc","Sentetik ekstre ödemesi").put("category","Kart ödemesi")
+     .put("linkedTo","synthetic-bank-payment").put("matchStatus","linked");
+    if(!pdf)payment.put("csvKey","synthetic-legacy-csv");
+    distantRows.put(payment);
+   }
+   assertRejectedRestore(a,context,bridge.get(),"synthetic-distant-link.json",distant,"PDF ve CSV ödemelerinin tarihleri");
+   assertEquals(original,bridge.get().load());
+   assertEquals(recovery,bridge.get().recovery());
+  }
+ }
+ private void assertRejectedRestore(ActivityScenario<MainActivity> a,Context context,MainActivity.Bridge bridge,
+                                    String name,JSONObject corrupted,String error)throws Exception{
+  String original=bridge.load(),recovery=bridge.recovery();
+  Uri file=document(name,"application/json",corrupted.toString().getBytes(StandardCharsets.UTF_8));
+  try{
+   openBackupPicker(a);selectDownload(name);
+   waitJs(a,"document.querySelector('#toast').textContent.includes("+JSONObject.quote(error)+")");
+   assertEquals(original,bridge.load());
+   assertEquals(recovery,bridge.recovery());
+  }finally{context.getContentResolver().delete(file,null,null);}
+ }
+ @Test public void privatePdfIdentitySurvivesWebViewRecreation()throws Exception{
+  String first=String.join(" - ","4111","1111","1111","1111");
+  String second=String.join(" - ","4000","0000","0006","1111");
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=demo]')");
+   click(a,"[data-action=demo]");
+   importPrivatePdf(a,first,second);
+   String rows="JSON.parse(Android.load()).transactions.filter(row=>row.source==='pdf')";
+   assertEquals("2",js(a,rows+".length"));
+   String firstId=js(a,rows+"[0].id"),secondId=js(a,rows+"[1].id");
+   assertEquals("true",js(a,rows+".every(row=>row.importKey.startsWith('pdf-hmac-v1:'))"));
+   a.recreate();
+   waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");
+   importPrivatePdf(a,second,first);
+   assertEquals(secondId,js(a,rows+"[0].id"));
+   assertEquals(firstId,js(a,rows+"[1].id"));
+   assertEquals("false",js(a,"Android.load().includes("+JSONObject.quote(first)+")||Android.load().includes("+JSONObject.quote(second)+")"));
+   String original=js(a,"Android.load()"),recovery=js(a,"Android.recovery()");
+   String changed="QNB\nHesap Kesim Tarihi: 05/10/2026\nOnceki Donem Borcu: 0.00\nDonem Borcu: 125.00\n01/10/2026 SENTETIK KART "+second+" 50.00\n01/10/2026 SENTETIK KART **** 1111 75.00";
+   js(a,"window.onPdfText("+JSONObject.quote(changed)+")");
+   waitJs(a,"!!document.querySelector('[data-action=confirmImport]:enabled')");
+   click(a,"[data-action=confirmImport]");
+   waitJs(a,"document.querySelector('#error-announcement').textContent.includes('tekrar aktarımı inceleme')");
+   assertEquals(original,js(a,"Android.load()"));
+   assertEquals(recovery,js(a,"Android.recovery()"));
+  }
+ }
+ private void importPrivatePdf(ActivityScenario<MainActivity> a,String first,String second)throws Exception{
+  String text="QNB\nHesap Kesim Tarihi: 05/10/2026\n01/10/2026 SENTETIK KART "+first+" 50.00\n01/10/2026 SENTETIK KART "+second+" 50.00";
+  js(a,"window.onPdfText("+JSONObject.quote(text)+")");
+  waitJs(a,"!!document.querySelector('#import-account')");
+  js(a,"(()=>{const select=document.querySelector('#import-account');select.value=JSON.parse(Android.load()).accounts.find(a=>a.type==='card').id;select.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  click(a,"#acknowledge-import");
+  click(a,"[data-action=confirmImport]");
+  waitJs(a,"document.querySelector('#toast').textContent.includes('Ekstre kaydedildi')");
+ }
+ private void openBackupPicker(ActivityScenario<MainActivity> a)throws Exception{
+  // The static settings button exists before app.mjs registers its click handler.
+  waitJs(a,"!!document.querySelector('#settings[data-page=settings]')");
+  click(a,"#settings");
+  waitJs(a,"!!document.querySelector('[data-action=restore]')");
+  js(a,"document.querySelector('[data-action=restore]').scrollIntoView({block:'center',behavior:'instant'})");
+  drawn(a);
+  JSONObject rect=new JSONObject(js(a,"(()=>{const button=document.querySelector('[data-action=restore]'),r=button.getBoundingClientRect();const x=(r.left+r.right)/2,y=(r.top+r.bottom)/2;return {x,y,viewport:innerWidth,visible:button.contains(document.elementFromPoint(x,y))};})()"));
+  if(!rect.getBoolean("visible"))evidence("restore-button-not-visible");
+  assertTrue("Restore button is visible at its rendered center",rect.getBoolean("visible"));
+  AtomicInteger tapX=new AtomicInteger(),tapY=new AtomicInteger();
+  a.onActivity(activity->{
+   WebView w=web(activity);int[] offset=new int[2];w.getLocationOnScreen(offset);
+   double scale=w.getWidth()/rect.optDouble("viewport");
+   tapX.set(offset[0]+(int)Math.round(rect.optDouble("x")*scale));
+   tapY.set(offset[1]+(int)Math.round(rect.optDouble("y")*scale));
+  });
+  assertTrue("Restore button receives a native touch",device.click(tapX.get(),tapY.get()));
+  waitPicker();
+ }
+ private void restoreDownload(ActivityScenario<MainActivity> a,String name)throws Exception{
+  openBackupPicker(a);selectDownload(name);
+  UiObject2 confirm=device.wait(Until.findObject(By.res("android:id/button1").text(java.util.regex.Pattern.compile("(?iu)onayla"))),10000);
+  if(confirm==null)evidence("restore-no-confirm");
+  assertNotNull("Restore asks before replacing wallet",confirm);
+  confirm.click();
+ }
+ @Test public void restorePreviousTrialBackup()throws Exception{
+  String path=InstrumentationRegistry.getArguments().getString("previousTrialBackup");
+  assumeTrue("Requires the synthetic snapshot from the installed 0.3.0 trial",path!=null);
+  String raw=device.executeShellCommand("cat "+path);
+  JSONObject expected=new JSONObject(raw);
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String name="synthetic-from-0.3.0.json";
+  Uri file=document(name,"application/json",raw.getBytes(StandardCharsets.UTF_8));
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('#settings')");
+   restoreDownload(a,name);
+   waitJs(a,"JSON.parse(Android.load())?.accounts?.some(a=>a.id==='synthetic-card') === true");
+   a.recreate();
+   assertMigratedWallet(a,expected);
+  }finally{context.getContentResolver().delete(file,null,null);}
+ }
+
+ @Test public void upgradedWalletSurvivesRestart()throws Exception{
+  String path=InstrumentationRegistry.getArguments().getString("previousTrialBackup");
+  assumeTrue("Requires an in-place upgrade on the disposable emulator",
+   path!=null&&Boolean.parseBoolean(InstrumentationRegistry.getArguments().getString("preserveWallet")));
+  JSONObject expected=new JSONObject(device.executeShellCommand("cat "+path));
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   assertMigratedWallet(a,expected);
+   a.recreate();
+   assertMigratedWallet(a,expected);
+  }
+ }
+ private void assertMigratedWallet(ActivityScenario<MainActivity> a,JSONObject expected)throws Exception{
+  waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+  AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();
+  a.onActivity(activity->bridge.set(activity.new Bridge()));
+  JSONObject restored=new JSONObject(bridge.get().load());
+  for(String key:new String[]{"accounts","transactions","statements","budgets","categories","merchantCategoryRules","incomePlans"}){
+   assertEquals("Preserved "+key,expected.get(key).toString(),restored.get(key).toString());
+  }
+  js(a,"document.getElementById('period').value='2026-10';document.getElementById('period').dispatchEvent(new Event('change'))");
+  assertEquals("true",js(a,"document.querySelector('[data-stat=netExpense]').textContent.includes('100,00')"));
+  assertEquals("true",js(a,"document.querySelector('[data-stat=cardDebt]').textContent.includes('80,00')"));
+ }
+
 }
