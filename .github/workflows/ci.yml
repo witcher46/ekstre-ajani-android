@@ -128,7 +128,7 @@ jobs:
           working-directory: android_app
           script: bash tests/run-android-ci.sh
       - name: Verify the SQLite rollback tests ran
-        if: github.event_name == 'pull_request' && github.head_ref == 'integration/android-0.5.0-validation'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref == 'integration/android-0.5.0-validation')
         run: |
           python3 - <<'PY'
           from pathlib import Path
