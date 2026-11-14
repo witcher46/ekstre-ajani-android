@@ -94,6 +94,40 @@ public class SnapshotAtomicityTest {
   }
  }
 
+ @Test public void failedFinalSqliteSaveRollsBackThePreviousSnapshot() {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String first=wallet("first"),current=wallet("current"),candidate=wallet("candidate");
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)) {
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(bridge.save(first));
+   assertTrue(bridge.restore(current));
+   assertEquals(current,bridge.load());
+   assertEquals(first,bridge.recovery());
+
+   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)) {
+    String priorPrevious=snapshot(database,2),priorRecovery=snapshot(database,3);
+    database.execSQL("CREATE TRIGGER "+TRIGGER
+      +" BEFORE INSERT ON snapshots WHEN NEW.id=1"
+      +" BEGIN SELECT RAISE(ABORT, 'synthetic-save-failure'); END");
+    try {
+     assertFalse("Forced SQLite write failure must reject a normal save",bridge.save(candidate));
+     assertEquals("Active wallet is intact",current,bridge.load());
+     assertEquals("Recovery is intact",first,bridge.recovery());
+     assertEquals("Previous snapshot update was rolled back",priorPrevious,snapshot(database,2));
+     assertEquals("Restore-only recovery is unchanged",priorRecovery,snapshot(database,3));
+    } finally {
+     database.execSQL("DROP TRIGGER IF EXISTS "+TRIGGER);
+    }
+    assertTrue("Normal saves work again after a failure",bridge.save(candidate));
+    assertEquals(candidate,bridge.load());
+    assertEquals(current,snapshot(database,2));
+    assertEquals(first,snapshot(database,3));
+   }
+   scenario.recreate();
+   assertEquals("Saved wallet survives activity recreation",candidate,bridge(scenario).load());
+  }
+ }
+
  @Test public void malformedRestoreDoesNotReplaceWalletOrRecovery() {
   String first=wallet("first"),current=wallet("current");
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
