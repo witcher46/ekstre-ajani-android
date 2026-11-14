@@ -127,6 +127,7 @@ public class WalletJourneyTest {
  @Test public void keyboardBackAndModal()throws Exception{
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
    waitJs(a,"!!document.querySelector('[data-action=demo]')");click(a,"[data-action=demo]");click(a,"[data-action=addTransaction]");drawn(a);
+   waitJs(a,"document.activeElement.id==='dialog-title'");
    // WebView DOM inputs are not reliably exposed as android.widget.EditText.
    // Tap the rendered input on the device; focus and real IME remain mandatory.
    js(a,"document.querySelector('[name=desc]').scrollIntoView({block:'center'})");drawn(a);
@@ -134,8 +135,24 @@ public class WalletJourneyTest {
    AtomicInteger tapX=new AtomicInteger(),tapY=new AtomicInteger();a.onActivity(activity->{WebView w=web(activity);int[] offset=new int[2];w.getLocationOnScreen(offset);double scale=w.getWidth()/rect.optDouble("viewport",1);tapX.set(offset[0]+(int)Math.round(rect.optDouble("x")*scale));tapY.set(offset[1]+(int)Math.round(rect.optDouble("y")*scale));});
    assertTrue("Rendered description input accepts a native touch",device.click(tapX.get(),tapY.get()));
    waitJs(a,"document.activeElement===document.querySelector('[name=desc]')");
-   AtomicBoolean keyboard=new AtomicBoolean(false);for(int i=0;i<20;i++){a.onActivity(activity->keyboard.set(web(activity).getRootWindowInsets().isVisible(WindowInsets.Type.ime())));if(keyboard.get())break;Thread.sleep(200);}assertTrue("Software keyboard opens",keyboard.get());js(a,"document.getElementById('submit').scrollIntoView({block:'end'})");drawn(a);evidence("keyboard-open");assertEquals("Submit remains reachable above the keyboard","true",js(a,"(()=>{const r=document.getElementById('submit').getBoundingClientRect();return r.top>=0&&r.bottom<=visualViewport.height+1;})()"));device.pressBack();device.pressBack();waitJs(a,"!document.querySelector('dialog[open]') && document.activeElement.matches('[data-action=addTransaction]')");
+   assertTrue("Software keyboard opens",waitForIme(a,true));
+   js(a,"document.getElementById('submit').scrollIntoView({block:'end'})");drawn(a);evidence("keyboard-open");
+   assertEquals("Submit remains reachable above the keyboard","true",js(a,"(()=>{const r=document.getElementById('submit').getBoundingClientRect();return r.top>=0&&r.bottom<=visualViewport.height+1;})()"));
+   device.pressBack();
+   assertTrue("First Back hides the software keyboard",waitForIme(a,false));
+   assertEquals("Dialog stays open after the keyboard is dismissed","true",js(a,"!!document.querySelector('dialog[open]')"));
+   device.pressBack();
+   waitJs(a,"!document.querySelector('dialog[open]') && document.activeElement.matches('[data-action=addTransaction]')");
   }
+ }
+ private boolean waitForIme(ActivityScenario<MainActivity> a,boolean expected)throws InterruptedException{
+  AtomicBoolean visible=new AtomicBoolean();
+  for(int i=0;i<20;i++){
+   a.onActivity(activity->visible.set(web(activity).getRootWindowInsets().isVisible(WindowInsets.Type.ime())));
+   if(visible.get()==expected)return true;
+   Thread.sleep(200);
+  }
+  return false;
  }
  @Test(timeout=180000) public void fontScaleSystemBarsAndScreenshots()throws Exception{
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();File dir=new File(context.getExternalFilesDir(null),"screens");dir.mkdirs();JSONArray reports=new JSONArray();

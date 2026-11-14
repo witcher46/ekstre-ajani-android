@@ -2,7 +2,7 @@ name: Android distribution regression
 on:
   workflow_call:
   pull_request:
-    branches: [main, fix/android-0.3.1-stability, build/android-permanent-signing, fix/android-0.4.0-data-integrity]
+    branches: [main, fix/android-0.3.1-stability, build/android-permanent-signing, fix/android-0.4.0-data-integrity, feature/android-0.5.0-ui-foundation]
   push:
     branches: [main]
 
@@ -17,8 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref == 'integration/android-0.5.0-validation' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Record tested source commit
+        run: git rev-parse HEAD
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
         with:
           distribution: temurin
@@ -29,8 +32,32 @@ jobs:
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
       - name: Install Android SDK components
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"'
+      - name: Exercise the released 0.4.0 source as the upgrade baseline
+        id: upgrade-baseline
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && (github.base_ref == 'feature/android-0.5.0-ui-foundation' || github.head_ref == 'integration/android-0.5.0-validation'))
+        run: |
+          properties=android_app/distribution.properties
+          # Until 0.5.0 is versioned in source, bump only the CI candidate.
+          baseline=f4fc0ec18e63309f546747e28043f910fb1b377a
+          if grep -Fxq 'versionCode=7' "$properties"; then
+            grep -Fx 'previousSourceCommit=' "$properties"
+            sed -i -e 's/^versionCode=7$/versionCode=8/' \
+              -e "s/^previousSourceCommit=$/previousSourceCommit=$baseline/" "$properties"
+          fi
+          if grep -Fxq 'versionCode=8' "$properties"; then
+            grep -Fx "previousSourceCommit=$baseline" "$properties"
+            echo 'verify_release_040=true' >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and test signing with disposable credentials
         run: bash android_app/tests/build-distribution-upgrade.sh
+      - name: Require 0.4.0 with versionCode 7 and test candidate with versionCode 8
+        if: steps.upgrade-baseline.outputs.verify_release_040 == 'true'
+        run: |
+          aapt="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          "$aapt" dump badging "$RUNNER_TEMP/ekstre-upgrade/baseline.apk" |
+            grep -F "package: name='com.zagor.ekstre' versionCode='7' versionName='0.4.0'"
+          "$aapt" dump badging "$RUNNER_TEMP/ekstre-upgrade/candidate.apk" |
+            grep -F "package: name='com.zagor.ekstre' versionCode='8'"
       - name: Download the archived 0.3.1 APK while available
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         continue-on-error: true

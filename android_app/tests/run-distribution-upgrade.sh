@@ -87,7 +87,14 @@ adb install -r "$work/candidate.apk"
 test "$uid_before" = "$(adb shell run-as "$permanent" id -u)"
 adb exec-out run-as "$permanent" cat databases/wallet.db > "$work/after.db"
 cmp "$work/before.db" "$work/after.db"
+# Start instrumentation after force-stop so ActivityScenario opens the app in
+# a fresh process. Assert the saved wallet and rendered totals before the byte check.
+adb shell am force-stop "$permanent"
 run_case upgradedWalletSurvivesRestart -e preserveWallet true
+adb shell am force-stop "$permanent"
+adb exec-out run-as "$permanent" cat databases/wallet.db > "$work/after-process-restart.db"
+cmp "$work/before.db" "$work/after-process-restart.db"
+echo 'After a fresh process launch, wallet.db bytes and rendered report totals matched.'
 
 if [[ -f $legacy_apk ]]; then
   adb exec-out run-as "$legacy" cat databases/wallet.db > "$work/legacy-after.db"
