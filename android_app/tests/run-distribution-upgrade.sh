@@ -89,6 +89,15 @@ adb exec-out run-as "$permanent" cat databases/wallet.db > "$work/after.db"
 cmp "$work/before.db" "$work/after.db"
 run_case upgradedWalletSurvivesRestart -e preserveWallet true
 
+# Activity recreation is not a process restart. Kill and relaunch the upgraded
+# app on the disposable emulator, then verify the native wallet.db is unchanged.
+adb shell am force-stop "$permanent"
+adb shell am start -W -n "$permanent/$activity" | grep -F 'Status: ok'
+adb shell am force-stop "$permanent"
+adb exec-out run-as "$permanent" cat databases/wallet.db > "$work/after-process-restart.db"
+cmp "$work/before.db" "$work/after-process-restart.db"
+echo 'Upgraded wallet survived process death and relaunch byte-for-byte.'
+
 if [[ -f $legacy_apk ]]; then
   adb exec-out run-as "$legacy" cat databases/wallet.db > "$work/legacy-after.db"
   cmp "$work/legacy-before.db" "$work/legacy-after.db"
