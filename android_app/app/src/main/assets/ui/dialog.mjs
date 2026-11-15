@@ -44,15 +44,19 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
     close();
   });
   dismiss.addEventListener('click', close);
-  // A successful save can close the dialog between the two pointer clicks.
-  // Consume the repeat before it activates a control beneath the dialog.
+  function ignoreRepeat(event) {
+    if (event.detail < 2) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  // A save can close the dialog before a second click reaches the same point.
+  // Catch both the focus-changing press and the click on the revealed page.
   submit.addEventListener('click', event => {
     if (event.detail !== 1) return;
-    dialog.ownerDocument.addEventListener('click', repeat => {
-      if (repeat.detail < 2) return;
-      repeat.preventDefault();
-      repeat.stopImmediatePropagation();
-    }, {capture:true, once:true});
+    const captureOnce = {capture:true, once:true};
+    dialog.ownerDocument.addEventListener('mousedown', ignoreRepeat, captureOnce);
+    dialog.ownerDocument.addEventListener('click', ignoreRepeat, captureOnce);
   });
   form.addEventListener('submit', event => {
     event.preventDefault();
