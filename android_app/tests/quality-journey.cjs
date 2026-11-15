@@ -463,7 +463,7 @@ async function reviewCenterJourney(page) {
     assert.equal(csvRows.filter(t=>t.matchStatus==='pending').length,1);
     await page.locator('#settings').click();
     await page.getByRole('button',{name:'İnceleme ve kaynak bağlantıları'}).click();
-    const csvReview=page.locator('section').filter({hasText:'CSV satırı daha önceki bir kayda benziyor'});
+    const csvReview=page.locator('.review-item').filter({hasText:'Tekrar eden CSV satırı'});
     await csvReview.waitFor();
     assert.equal(await csvReview.getByRole('button',{name:'Aynı işlem',exact:true}).count(),0);
     await csvReview.getByRole('button',{name:'Ayrı gerçek işlem'}).click();
