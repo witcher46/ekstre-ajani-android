@@ -4,6 +4,7 @@ import * as C from '../app/src/main/assets/core.mjs';
 import * as W from '../app/src/main/assets/wallet.mjs';
 import * as V from '../app/src/main/assets/views.mjs';
 import {escapeHtml} from '../app/src/main/assets/ui/form-controls.mjs';
+import {parseStatement} from '../app/src/main/assets/parser.mjs';
 
 const base=(name='Sentetik kart',opening=0)=>W.normalizeWallet({
   ...C.empty(),
@@ -19,10 +20,11 @@ const movement=(id,kind,date,amount,extra={})=>({
   id,kind,date,amount,account:'card',period:date.slice(0,7),
   desc:'Sentetik '+id,category:'Diğer',note:'',...extra,
 });
-const htmlFor=s=>V.accountView({
+const viewContext=s=>({
   state:s,esc:escapeHtml,fmt:n=>'<span class="money">'+escapeHtml(C.formatMoney(n))+'</span>',
   transactionList:()=>'<p>Sentetik hareket listesi</p>',period:'2026-10',periodControl:'',
-},'card');
+});
+const htmlFor=s=>V.accountView(viewContext(s),'card');
 
 test('known statement: payment is not an expense; refund and post-cut purchases stay separate',()=>{
   let s=base();
@@ -70,10 +72,47 @@ test('latest statement without debt: shows Unknown instead of a manufactured 0, 
   assert.match(html,/önceki bilinen ekstreye dayanıyor/);
   assert.match(html,/data-stat="cardStatementRemaining"><span class="muted">Bilinmiyor<\/span>/);
   assert.match(html,/data-stat="cardPaidAfterCut"><span class="muted">Bilinmiyor<\/span>/);
-  assert.match(html,/Ekstre toplamları doğrulanamadı/);
+  assert.match(html,/Aktarımda belgedeki toplamlar tam doğrulanamadı\./);
   assert.ok(html.includes(C.formatMoney(250_000)));
   assert.ok(!html.includes('<img src=x onerror=alert(1)>'), 'card names are never raw HTML');
   assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
+});
+
+test('card summary and statement detail both require review after an imported movement is deleted',()=>{
+  const parsed=parseStatement([
+    'QNB', 'Hesap Kesim Tarihi: 05/10/2026',
+    '03/10/2026 SENTETIK MAGAZA 123.45', '04/10/2026 SENTETIK MARKET 50.00',
+  ].join('\n'));
+  assert.equal(parsed.rows.length,2);
+  const imported=C.importStatement(base(),{...parsed,reconciliation:{status:'verified'}},'card');
+  const [st]=imported.statements;
+  assert.match(htmlFor(imported),/Ekstre toplamları doğrulandı/);
+  assert.match(V.statementView(viewContext(imported),st.id),/statement-status verified">Doğrulandı/);
+
+  const reduced=C.removeTransaction(imported,imported.transactions[0].id);
+  const restored=W.normalizeWallet(C.readBackup(C.backupText(reduced)));
+  assert.equal(restored.transactions.filter(row=>row.statement===st.id).length,1);
+  assert.equal(restored.statements[0].importedMovementCount,2);
+  assert.equal(restored.statements[0].reconciliationStatus,'verified');
+  const before=C.backupText(restored);
+  const summary=htmlFor(restored);
+  const detail=V.statementView(viewContext(restored),st.id);
+  for(const html of [summary,detail]){
+    assert.match(html,/İnceleme gerekiyor/);
+    assert.match(html,/Kayıtlı hareketler aktarımdan sonra değişmiş\./);
+  }
+  assert.doesNotMatch(summary,/Ekstre toplamları doğrulandı/);
+  assert.equal(C.backupText(restored),before);
+});
+
+test('legacy statements without reconciliation metadata remain readable',()=>{
+  const old=base();
+  old.statements=[statement('2026-10','2026-10-05','2026-10-20',200_000)];
+  const restored=W.normalizeWallet(C.readBackup(C.backupText(old)));
+  for(const html of [htmlFor(restored),V.statementView(viewContext(restored),'card|2026-10')]){
+    assert.match(html,/doğrulama bilgisi yok/);
+    assert.doesNotMatch(html,/Ekstre toplamları doğrulandı/);
+  }
 });
 
 test('without statements, due date and statement debt are not shown as zero or invented',()=>{

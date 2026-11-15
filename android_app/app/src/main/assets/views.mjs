@@ -122,10 +122,6 @@ function cardView(ctx,account) {
   const anchorText = anchor
     ? 'Tahminin dayanağı: bilinen ' + anchor.period + ' ekstresi (kesim ' + anchor.cut + ') ve sonraki kayıtlar.'
     : 'Tahminin dayanağı: kartın kayıtlı açılış borcu ve işlem hareketleri.';
-  const reconciliation = latest?.reconciliationStatus === 'verified' ? 'Ekstre toplamları doğrulandı'
-    : latest?.reconciliationStatus === 'mismatch' ? 'Ekstre toplamlarında uyuşmazlık'
-    : latest?.reconciliationStatus === 'unverified' ? 'Ekstre toplamları doğrulanamadı'
-    : 'Ekstre toplamlarının doğrulama bilgisi yok';
 
   let html = '<div class="detail-heading"><div><h1>' + esc(account.name) +
     '</h1><p class="lead">Kredi kartı · belgelere ve yerel kayıtlara göre</p></div>' +
@@ -146,6 +142,10 @@ function cardView(ctx,account) {
     '<div class="card-section-heading"><h2 id="card-statement-heading">Son ekstre ve ödeme durumu</h2>' +
     '<span class="card-source-label">' + (latest ? 'Ekstre: ' + esc(latest.period) : 'Ekstre yok') + '</span></div>';
   if(latest){
+    const {rowsByStatement,underReview} = statementGroups(state);
+    const status = statementStatus(latest,underReview.has(latest.id),rowsByStatement.get(latest.id)?.length ?? 0);
+    const label = status.tone === 'verified' ? 'Ekstre toplamları doğrulandı' : status.label;
+    const reconciliation = status.reason ? label + ' · ' + status.reason : label;
     html += '<p class="notice">' + esc(latest.bank || 'Banka bilinmiyor') + ' · ' + esc(reconciliation) + '</p>' +
       '<dl class="card-details">' +
       detail(ctx,'Hesap kesim tarihi',latest.cut) +
