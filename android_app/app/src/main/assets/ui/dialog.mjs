@@ -44,6 +44,16 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
     close();
   });
   dismiss.addEventListener('click', close);
+  // A successful save can close the dialog between the two pointer clicks.
+  // Consume the repeat before it activates a control beneath the dialog.
+  submit.addEventListener('click', event => {
+    if (event.detail !== 1) return;
+    dialog.ownerDocument.addEventListener('click', repeat => {
+      if (repeat.detail < 2) return;
+      repeat.preventDefault();
+      repeat.stopImmediatePropagation();
+    }, {capture:true, once:true});
+  });
   form.addEventListener('submit', event => {
     event.preventDefault();
     if (!dialog.open || !save || saving) return;
