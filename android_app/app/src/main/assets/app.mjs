@@ -50,7 +50,7 @@ function restoreFocus(target){
  if(current)current.focus();
  else focusMain();
 }
-const {open:modal,close:closeModal}=createDialog($('modal'),{
+const {open:modal,close:closeModal,showError:showDialogError}=createDialog($('modal'),{
  captureOpener:()=>focusTarget(actionTrigger||document.activeElement),
  restoreFocus,
 });
@@ -237,11 +237,12 @@ function transactionForm(existing,preset='expense'){
  $('f-kind').onchange=updateFields;$('f-account').onchange=updateFields;updateFields();
  if(locked){for(const name of ['amount','date','installment'])if($('f-'+name))$('f-'+name).readOnly=true;}
 }
-function payCardForm(cardId){
+function payCardForm(cardId,{sourceId=''}={}){
  const cards=state.accounts.filter(a=>a.type==='card'),sources=state.accounts.filter(a=>a.type!=='card');
  if(!cards.length||!sources.length)throw Error('Kart ödemesi için bir kredi kartı ve kaynak banka / nakit hesabı ekle.');
  const card=cards.find(a=>a.id===cardId)||cards[0],status=W.cardDetail(state,card.id),suggested=status.statementRemaining>0?status.statementRemaining:status.debt;
- modal('Kart borcu öde',select('target','Ödenecek kredi kartı',options(cards.map(a=>[a.id,a.name]),card.id))+select('account','Paranın çıktığı banka / nakit hesabı',options([['','Kaynak hesabı seç'],...sources.map(a=>[a.id,a.name])],''))+field('amount','Ödenen tutar (TL)',suggested?C.decimalMoney(suggested):'','text','inputmode="decimal" required')+field('date','Gerçek ödeme tarihi',C.today(),'date','required')+'<p class="notice">Banka / nakit bakiyesi azalır, kart borcu kapanır. Bu ödeme yeni bir gider değildir. Ekstrede aynı ödeme varsa incelemede eşleştir.</p>',f=>{
+ const source=sources.find(account=>account.id===sourceId);
+ modal('Kart borcu öde',select('target','Ödenecek kredi kartı',options(cards.map(a=>[a.id,a.name]),card.id))+select('account','Paranın çıktığı banka / nakit hesabı',options([['','Kaynak hesabı seç'],...sources.map(a=>[a.id,a.name])],source?.id??''))+field('amount','Ödenen tutar (TL)',suggested?C.decimalMoney(suggested):'','text','inputmode="decimal" required')+field('date','Gerçek ödeme tarihi',C.today(),'date','required')+'<p class="notice">Banka / nakit bakiyesi azalır, kart borcu kapanır. Bu ödeme yeni bir gider değildir. Ekstrede aynı ödeme varsa incelemede eşleştir.</p>',f=>{
   if(!f.get('account'))throw Error('Kaynak hesabı seç.');commit(C.addTransaction(state,{id:C.id(),kind:'payment',account:f.get('account'),target:f.get('target'),amount:C.money(f.get('amount')),date:f.get('date'),period:f.get('date').slice(0,7),desc:accountName(f.get('target'))+' borç ödemesi',category:'Kart ödemesi',note:''}));
  },'Ödemeyi kaydet');
  $('f-target').onchange=()=>{const d=W.cardDetail(state,$('f-target').value);$('f-amount').value=C.decimalMoney(d.statementRemaining>0?d.statementRemaining:d.debt);};
@@ -264,7 +265,24 @@ function fitLayout(){
 }
 const layoutObserver=new ResizeObserver(()=>requestAnimationFrame(fitLayout));layoutObserver.observe($('main'));layoutObserver.observe($('nav'));window.addEventListener('resize',fitLayout);
 
+function openQuickAdd(){
+ if($('modal').open)return;
+ modal('Hızlı Ekle',`
+  <div id="quick-add-options">
+   <button type="button" data-action="addTransaction">Gider</button>
+   <button type="button" data-action="addIncome">Gelir</button>
+   <button type="button" data-action="transfer">Transfer</button>
+   <button type="button" data-action="quickPayCard">Kart Borcu Ödemesi</button>
+  </div>`,null);
+}
+
 const actions={
+ quickAdd:openQuickAdd,
+ quickPayCard:()=>{
+  const account=page==='account'?state.accounts.find(a=>a.id===detailId):undefined;
+  if(account?.type==='card')payCardForm(account.id);
+  else payCardForm(undefined,{sourceId:account?.id});
+ },
  back:()=>{if(!window.handleBack())go('import');},
  clearExpenseCategory:()=>{expenseCategory=null;render();focusMain();},
  addImportCard:()=>accountForm(null,{fromImport:true}),
@@ -300,7 +318,7 @@ const actions={
  },
  cancelImport:()=>{invalidatePdfPreview();document.querySelector('[data-action="pdf"]')?.focus();}
 };
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete&&confirm('Gelir planı kaldırılsın mı? Kaydedilmiş gelirler korunur.')){const next=copy();next.incomePlans=next.incomePlans.filter(p=>p.id!==b.dataset.incomeDelete);commit(next);}else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action]();else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule&&confirm('Bu satıcı kuralı silinsin mi?')){commit(C.removeMerchantRule(state,b.dataset.removeRule));closeModal();}else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link){if(confirm('Bu iki kaynak aynı işlemi mi gösteriyor? İkinci kez sayılmayacak.'))commit(C.resolveCandidate(state,b.dataset.link,'link',$('match-'+b.dataset.link).value));}else if(b.dataset.distinct){if(confirm('Bu ayrı bir gerçek işlem mi? Toplama ayrıca eklenecek.'))commit(C.resolveCandidate(state,b.dataset.distinct,'distinct'));}else if(b.dataset.subdelete&&confirm('Abonelik silinsin mi?')){const next=copy();next.subscriptions=next.subscriptions.filter(r=>r.id!==b.dataset.subdelete);commit(next);}else if(b.dataset.budget&&confirm('Bütçe kaldırılsın mı?')){const next=copy();delete next.budgets[b.dataset.budget];commit(next);}}catch(error){errorNotice(error.message);}finally{actionTrigger=null;}});
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete&&confirm('Gelir planı kaldırılsın mı? Kaydedilmiş gelirler korunur.')){const next=copy();next.incomePlans=next.incomePlans.filter(p=>p.id!==b.dataset.incomeDelete);commit(next);}else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action]();else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule&&confirm('Bu satıcı kuralı silinsin mi?')){commit(C.removeMerchantRule(state,b.dataset.removeRule));closeModal();}else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link){if(confirm('Bu iki kaynak aynı işlemi mi gösteriyor? İkinci kez sayılmayacak.'))commit(C.resolveCandidate(state,b.dataset.link,'link',$('match-'+b.dataset.link).value));}else if(b.dataset.distinct){if(confirm('Bu ayrı bir gerçek işlem mi? Toplama ayrıca eklenecek.'))commit(C.resolveCandidate(state,b.dataset.distinct,'distinct'));}else if(b.dataset.subdelete&&confirm('Abonelik silinsin mi?')){const next=copy();next.subscriptions=next.subscriptions.filter(r=>r.id!==b.dataset.subdelete);commit(next);}else if(b.dataset.budget&&confirm('Bütçe kaldırılsın mı?')){const next=copy();delete next.budgets[b.dataset.budget];commit(next);}}catch(error){if(b.closest('#quick-add-options'))showDialogError(error.message);else errorNotice(error.message);}finally{actionTrigger=null;}});
 function rememberImportAccount(field){
  importDraft.account=field.value;
  $('import-account-display').textContent=field.selectedOptions[0]?.textContent??'';

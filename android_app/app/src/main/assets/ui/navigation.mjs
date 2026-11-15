@@ -4,7 +4,7 @@
 export const NAV_ITEMS=Object.freeze([
   Object.freeze(['home','⌂','Özet']),
   Object.freeze(['wallet','▣','Cüzdan']),
-  Object.freeze(['transactions','⇅','İşlem']),
+  Object.freeze(['transactions','⇅','İşlemler']),
   Object.freeze(['plan','◷','Plan']),
   Object.freeze(['import','↓','Ekstre']),
 ]);
