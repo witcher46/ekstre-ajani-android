@@ -45,7 +45,7 @@ test('known statement: payment is not an expense; refund and post-cut purchases 
   assert.match(html,/Belgedeki dönem borcu/);
   assert.match(html,/Ödemelere göre kalan dönem borcu/);
   assert.match(html,/Gerçekleşen iadeler/);
-  assert.match(html,/Kart borcunu öde/);
+  assert.match(html,/Bu kartın borcunu öde/);
   assert.match(html,/Ekstre toplamları doğrulandı/);
   assert.match(html,/data-statement-view="card\|2026-10"/);
   assert.ok(html.includes(C.formatMoney(140_000)));
