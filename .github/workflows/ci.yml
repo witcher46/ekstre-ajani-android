@@ -14,9 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'pull_request' && (github.head_ref == 'integration/android-0.5.0-validation' || (github.base_ref == 'main' && github.head_ref == 'feature/android-quick-add')) && github.event.pull_request.head.sha || github.sha }}
-      - name: Record tested source commit
-        run: git rev-parse HEAD
+          fetch-depth: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && '0' || '1' }}
+      - uses: ./.github/actions/select-tested-source
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -52,9 +51,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ (env.BUILD_TRIAL_APK == 'true' || (github.event_name == 'pull_request' && (github.head_ref == 'integration/android-0.5.0-validation' || (github.base_ref == 'main' && github.head_ref == 'feature/android-quick-add')))) && github.event.pull_request.head.sha || github.sha }}
-      - name: Record tested source commit
-        run: git rev-parse HEAD
+          ref: ${{ env.BUILD_TRIAL_APK == 'true' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && '0' || '1' }}
+      - uses: ./.github/actions/select-tested-source
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -128,7 +127,7 @@ jobs:
           working-directory: android_app
           script: bash tests/run-android-ci.sh
       - name: Verify the SQLite rollback tests ran
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && (github.head_ref == 'integration/android-0.5.0-validation' || (github.base_ref == 'main' && github.head_ref == 'feature/android-quick-add')))
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.base_ref == 'main')
         run: |
           python3 - <<'PY'
           from pathlib import Path

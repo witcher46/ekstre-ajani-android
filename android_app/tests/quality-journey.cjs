@@ -57,8 +57,8 @@ async function quickAddJourney(page) {
     const C = await import('/core.mjs');
     const initial = C.empty();
     initial.accounts = [
-      {id:'quick-bank',name:'Sentetik banka',type:'bank',opening:100000},
       {id:'quick-cash',name:'Sentetik nakit',type:'cash',opening:10000},
+      {id:'quick-bank',name:'Sentetik banka',type:'bank',opening:100000},
       {id:'quick-card-a',name:'Sentetik kart A',type:'card',opening:10000},
       {id:'quick-card-b',name:'Sentetik kart B',type:'card',opening:25000},
     ];
@@ -66,9 +66,31 @@ async function quickAddJourney(page) {
   });
   await page.reload();
 
+  await page.locator('nav [data-page=wallet]').click();
+  await page.locator('[data-account-view=quick-bank]').click();
+  for(const [name,kind] of [['Gider','expense'],['Gelir','income'],['Transfer','transfer']]){
+    await open(name);
+    assert.equal(await page.locator('#f-kind').inputValue(),kind);
+    assert.equal(await page.locator('#f-account').inputValue(),'quick-bank');
+    await page.keyboard.press('Escape');
+    assert.equal(await active(),'quick-add');
+  }
+
+  await open('Kart Borcu Ödemesi');
+  const paymentForm = page.getByRole('dialog',{name:'Kart borcu öde'});
+  const source = paymentForm.getByLabel('Paranın çıktığı banka / nakit hesabı');
+  assert.equal(await source.inputValue(),'quick-bank');
+  await source.selectOption('quick-cash');
+  assert.equal(await source.inputValue(),'quick-cash');
+  await page.keyboard.press('Escape');
+  assert.equal(await active(),'quick-add');
+  assert.equal((await wallet()).transactions.length,0);
+
+  await page.locator('nav [data-page=home]').click();
   await open('Gider');
   await page.getByRole('dialog',{name:'Gider ekle'}).waitFor();
   assert.equal(await page.locator('#f-kind').inputValue(),'expense');
+  await page.locator('#f-account').selectOption('quick-bank');
   await page.locator('#f-desc').fill('Sentetik hızlı gider');
   await page.locator('#f-amount').fill('20');
   await submitTwice();
@@ -79,6 +101,7 @@ async function quickAddJourney(page) {
   await open('Gelir');
   await page.getByRole('dialog',{name:'Gelir ekle'}).waitFor();
   assert.equal(await page.locator('#f-kind').inputValue(),'income');
+  await page.locator('#f-account').selectOption('quick-bank');
   await page.locator('#f-desc').fill('Sentetik hızlı gelir');
   await page.locator('#f-amount').fill('50');
   await page.locator('#submit').click();
@@ -88,6 +111,7 @@ async function quickAddJourney(page) {
   await open('Transfer');
   await page.getByRole('dialog',{name:'Transfer yap'}).waitFor();
   assert.equal(await page.locator('#f-kind').inputValue(),'transfer');
+  await page.locator('#f-account').selectOption('quick-bank');
   await page.locator('#f-target').selectOption('quick-cash');
   await page.locator('#f-desc').fill('Sentetik hızlı transfer');
   await page.locator('#f-amount').fill('10');
@@ -99,7 +123,12 @@ async function quickAddJourney(page) {
   await open('Kart Borcu Ödemesi');
   await page.getByRole('dialog',{name:'Kart borcu öde'}).waitFor();
   assert.equal(await page.locator('#f-target').inputValue(),'quick-card-b');
-  await page.locator('#f-account').selectOption('quick-bank');
+  assert.equal(await source.inputValue(),'');
+  await page.locator('#submit').click();
+  assert.equal(await paymentForm.getByRole('alert').innerText(),'Kaynak hesabı seç.');
+  assert.equal(await active(),'form-error');
+  assert.equal((await wallet()).transactions.length,3);
+  await source.selectOption('quick-bank');
   await page.locator('#f-amount').fill('40');
   await page.locator('#submit').dblclick();
   assert.equal(await page.locator('[data-stat=cardDebt]').innerText(),'₺210,00');

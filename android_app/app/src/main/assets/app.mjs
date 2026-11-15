@@ -237,11 +237,12 @@ function transactionForm(existing,preset='expense'){
  $('f-kind').onchange=updateFields;$('f-account').onchange=updateFields;updateFields();
  if(locked){for(const name of ['amount','date','installment'])if($('f-'+name))$('f-'+name).readOnly=true;}
 }
-function payCardForm(cardId){
+function payCardForm(cardId,{sourceId=''}={}){
  const cards=state.accounts.filter(a=>a.type==='card'),sources=state.accounts.filter(a=>a.type!=='card');
  if(!cards.length||!sources.length)throw Error('Kart ödemesi için bir kredi kartı ve kaynak banka / nakit hesabı ekle.');
  const card=cards.find(a=>a.id===cardId)||cards[0],status=W.cardDetail(state,card.id),suggested=status.statementRemaining>0?status.statementRemaining:status.debt;
- modal('Kart borcu öde',select('target','Ödenecek kredi kartı',options(cards.map(a=>[a.id,a.name]),card.id))+select('account','Paranın çıktığı banka / nakit hesabı',options([['','Kaynak hesabı seç'],...sources.map(a=>[a.id,a.name])],''))+field('amount','Ödenen tutar (TL)',suggested?C.decimalMoney(suggested):'','text','inputmode="decimal" required')+field('date','Gerçek ödeme tarihi',C.today(),'date','required')+'<p class="notice">Banka / nakit bakiyesi azalır, kart borcu kapanır. Bu ödeme yeni bir gider değildir. Ekstrede aynı ödeme varsa incelemede eşleştir.</p>',f=>{
+ const source=sources.find(account=>account.id===sourceId);
+ modal('Kart borcu öde',select('target','Ödenecek kredi kartı',options(cards.map(a=>[a.id,a.name]),card.id))+select('account','Paranın çıktığı banka / nakit hesabı',options([['','Kaynak hesabı seç'],...sources.map(a=>[a.id,a.name])],source?.id??''))+field('amount','Ödenen tutar (TL)',suggested?C.decimalMoney(suggested):'','text','inputmode="decimal" required')+field('date','Gerçek ödeme tarihi',C.today(),'date','required')+'<p class="notice">Banka / nakit bakiyesi azalır, kart borcu kapanır. Bu ödeme yeni bir gider değildir. Ekstrede aynı ödeme varsa incelemede eşleştir.</p>',f=>{
   if(!f.get('account'))throw Error('Kaynak hesabı seç.');commit(C.addTransaction(state,{id:C.id(),kind:'payment',account:f.get('account'),target:f.get('target'),amount:C.money(f.get('amount')),date:f.get('date'),period:f.get('date').slice(0,7),desc:accountName(f.get('target'))+' borç ödemesi',category:'Kart ödemesi',note:''}));
  },'Ödemeyi kaydet');
  $('f-target').onchange=()=>{const d=W.cardDetail(state,$('f-target').value);$('f-amount').value=C.decimalMoney(d.statementRemaining>0?d.statementRemaining:d.debt);};
@@ -277,7 +278,11 @@ function openQuickAdd(){
 
 const actions={
  quickAdd:openQuickAdd,
- quickPayCard:()=>payCardForm(page==='account'?detailId:undefined),
+ quickPayCard:()=>{
+  const account=page==='account'?state.accounts.find(a=>a.id===detailId):undefined;
+  if(account?.type==='card')payCardForm(account.id);
+  else payCardForm(undefined,{sourceId:account?.id});
+ },
  back:()=>{if(!window.handleBack())go('import');},
  clearExpenseCategory:()=>{expenseCategory=null;render();focusMain();},
  addImportCard:()=>accountForm(null,{fromImport:true}),

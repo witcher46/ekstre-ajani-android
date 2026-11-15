@@ -1,0 +1,18 @@
+name: Select tested source
+description: Prefer the PR head when it has the same tree as GitHub's merge candidate.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+      run: |
+        if [[ "$GITHUB_EVENT_NAME" == pull_request && "$GITHUB_BASE_REF" == main ]]; then
+          head_tree=$(git rev-parse --verify "${PR_HEAD}^{tree}")
+          merge_tree=$(git rev-parse --verify 'HEAD^{tree}')
+          if [[ "$head_tree" == "$merge_tree" ]] && git merge-base --is-ancestor "$PR_BASE" "$PR_HEAD"; then
+            git checkout --detach "$PR_HEAD"
+          fi
+        fi
+        git rev-parse HEAD
