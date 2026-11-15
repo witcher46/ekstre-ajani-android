@@ -35,13 +35,13 @@ test('bottom navigation keeps the five original routes and their labels',()=>{
 });
 
 test('subpages select their parent tab; secondary pages do not invent one',()=>{
-  for(const [page,parent] of [['account','wallet'],['incomePlans','plan'],['statement','import']]){
+  for(const [page,parent] of [['account','wallet'],['incomePlans','plan'],['statement','import'],['review','transactions']]){
     assert.equal(activeBottomPage(page),parent);
     const html=renderBottomNavigation(page);
     assert.match(html,new RegExp('data-page="'+parent+'" class="active" aria-current="page"'));
     assert.equal((html.match(/aria-current="page"/g)||[]).length,1);
   }
-  for(const page of ['reports','review','settings']){
+  for(const page of ['reports','settings']){
     assert.equal(activeBottomPage(page),page);
     assert.equal((renderBottomNavigation(page).match(/aria-current="page"/g)||[]).length,0);
   }
