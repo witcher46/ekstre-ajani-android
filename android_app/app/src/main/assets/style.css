@@ -47,3 +47,32 @@ button.transaction .amount{flex-shrink:1}
   .header-actions{gap:6px}
   #quick-add{padding-inline:8px}
 }
+
+/* Review Center: reusable low-density decision layout; never alters ledger data. */
+.review-center .review-counts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}
+.review-center .review-counts>div{border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.review-center .review-counts strong{font-size:1.7rem;font-variant-numeric:tabular-nums}
+.review-center .review-counts span{color:var(--muted);font-size:.9rem}
+.review-principle{border-left:3px solid var(--mint);padding:10px 12px;margin:16px 0 26px;color:var(--text);background:#1e342f}
+.review-center section>h2{margin-top:28px}
+.review-item-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.review-item-head>div{flex:1 1 12rem;min-width:0}
+.review-item-head h2{font-size:1.05rem;line-height:1.45;margin:7px 0}
+.review-item-head>strong{overflow-wrap:anywhere;font-variant-numeric:tabular-nums;max-width:100%}
+.review-reason{color:#f2d7a6;background:#453a29;border:1px solid #6a5835;display:inline-block;padding:4px 8px;border-radius:8px;font-size:.78rem;font-weight:600}
+.review-meta{font-size:.87rem;color:var(--muted);overflow-wrap:anywhere}
+.review-impact{font-size:.9rem;color:var(--text);margin:14px 0 8px}
+.review-decisions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:8px;margin:18px 0 8px}
+.review-decisions button{min-height:48px}
+.review-candidates label{font-size:.9rem}
+.review-destructive{margin-top:14px;border-top:1px solid var(--line);padding-top:8px}
+.review-destructive summary,.review-history summary{cursor:pointer;min-height:48px;padding-block:12px;font-weight:650;line-height:1.4}
+.review-destructive button{margin-top:8px}
+.review-history{margin-top:24px}
+.review-linked-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line);padding:14px 0}
+.review-linked-row>div{flex:1 1 13rem;min-width:0}
+.review-linked-row strong,.review-linked-row small,.review-record-description{display:block;overflow-wrap:anywhere}
+.review-record-amount{font-variant-numeric:tabular-nums;margin:6px 0}
+.review-linked-row button{flex:0 1 auto;min-height:48px}
+.review-empty strong{display:block;margin-bottom:6px}
+@media(max-width:350px){.review-center .review-counts>div{padding:10px}.review-decisions{grid-template-columns:minmax(0,1fr)}}
