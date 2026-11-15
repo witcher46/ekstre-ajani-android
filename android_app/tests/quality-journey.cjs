@@ -200,6 +200,85 @@ async function reviewCenterJourney(page) {
   console.log('Review Center: pending, postpone, linking, report and navigation passed');
 }
 
+async function advancedReportsJourney(page) {
+  const saved = () => page.evaluate(() => localStorage.getItem('ekstre-android-v1'));
+  await page.evaluate(async () => {
+    const C = await import('/core.mjs');
+    const state = C.empty();
+    state.accounts = [
+      {id:'report-bank',name:'Sentetik çok uzun banka hesabı açıklaması',type:'bank',opening:100000},
+      {id:'report-cash',name:'Sentetik nakit',type:'cash',opening:10000},
+      {id:'report-card',name:'Sentetik kart',type:'card',opening:0},
+    ];
+    const rows = [
+      ['2026-01-06','income','report-bank',3000,'Maaş','Sentetik ocak'],
+      ['2026-10-06','income','report-bank',100000,'Maaş','Sentetik maaş'],
+      ['2026-10-07','expense','report-card',20000,'Market / Gıda','Sentetik kart alışverişi'],
+      ['2026-10-08','expense','report-bank',5000,'Diğer','Sentetik banka gideri'],
+      ['2026-10-09','payment','report-bank',10000,'Kart ödemesi','Sentetik kart ödemesi','report-card'],
+      ['2026-10-10','transfer','report-bank',3000,'Transfer','Sentetik transfer','report-cash'],
+      ['2026-11-11','refund','report-card',25000,'Market / Gıda','Sentetik iade'],
+    ];
+    for(const [date,kind,account,amount,category,desc,target] of rows){
+      state.transactions.push({id:'ar-'+state.transactions.length,date,period:date.slice(0,7),kind,account,amount,category,desc,...(target?{target}:{})});
+    }
+    localStorage.setItem('ekstre-android-v1',C.backupText(state));
+  });
+  const original = await saved();
+  await page.reload();
+  await page.getByRole('button',{name:'Raporlar ↗'}).click();
+  await page.getByLabel('Bitiş ayı').fill('2026-11');
+  await page.getByLabel('Bitiş ayı').evaluate(input => {
+    input.value='10000-01';
+    input.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  assert.equal(await page.getByLabel('Bitiş ayı').inputValue(),'2026-11');
+  const stat = name => page.locator('[data-stat='+name+']').innerText();
+  const months = page.locator('[data-report-month]');
+  assert.equal(await months.count(),6);
+  assert.equal(await stat('range-income'),'₺1.000,00');
+  assert.equal(await stat('range-netExpense'),'₺0,00');
+  assert.match(await stat('netExpense'),/^[-−]₺250,00$/);
+  assert.equal(await stat('margin'),'₺250,00');
+  assert.equal(await page.locator('[data-report-month="2026-09"]').getByText('₺0,00',{exact:true}).count(),10);
+  await page.getByLabel('Rapor aralığı').selectOption('12');
+  assert.equal(await months.count(),12);
+  assert.equal(await stat('range-income'),'₺1.030,00');
+  assert.equal(await page.evaluate(() => document.activeElement.id),'f-report-range');
+
+  await page.getByLabel('Rapor hesabı').selectOption('report-card');
+  assert.equal(await stat('range-income'),'₺0,00');
+  assert.match(await stat('range-netExpense'),/^[-−]₺50,00$/);
+  await page.getByLabel('Aylık değişimini ve işlemlerini görmek istediğin kategori').selectOption('category:Market / Gıda');
+  const details = page.locator('#report-category-transactions');
+  assert.equal(await details.locator('button[data-edit]').count(),2);
+  await details.getByText('Sentetik iade',{exact:true}).waitFor();
+  await details.getByText('Sentetik kart alışverişi',{exact:true}).waitFor();
+
+  await page.getByLabel('Rapor hesabı').selectOption('report-bank');
+  await page.getByLabel('Bitiş ayı').fill('2026-10');
+  assert.equal(await stat('cashOut'),'₺180,00');
+  assert.equal(await stat('cardCashPayments'),'₺100,00');
+  assert.equal(await stat('netExpense'),'₺50,00');
+  await page.getByRole('button',{name:'Ayın işlem kayıtları'}).click();
+  assert.equal(await page.locator('#report-movements button[data-edit]').count(),4);
+  assert.equal(await page.locator('#report-movements-toggle').getAttribute('aria-expanded'),'true');
+  assert.equal(await page.evaluate(() => {
+    const edge=document.documentElement.clientWidth;
+    return edge===320 && [...document.querySelectorAll('.advanced-reports .panel,.report-controls select')].every(e=>{
+      const r=e.getBoundingClientRect();
+      return r.left>=0&&r.right<=edge+1&&e.scrollWidth<=e.clientWidth+1;
+    });
+  }),true);
+  assert.equal(await saved(),original);
+  assert.equal(await page.evaluate(() => window.handleBack()),true);
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.page),'reports');
+
+  await page.evaluate(() => localStorage.removeItem('ekstre-android-v1'));
+  await page.reload();
+  console.log('Advanced Reports: range, account, signed categories, drilldowns, navigation and 320px passed');
+}
+
 (async () => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.CHROME_PATH || undefined});
   try {
@@ -223,6 +302,7 @@ async function reviewCenterJourney(page) {
     await page.goto('https://wallet.test/');
     await quickAddJourney(page);
     await reviewCenterJourney(page);
+    await advancedReportsJourney(page);
     await page.locator('nav [data-page=wallet]').focus();
     await page.keyboard.press('Enter');
     assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Cüzdanım');

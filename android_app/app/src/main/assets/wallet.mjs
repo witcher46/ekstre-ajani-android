@@ -15,17 +15,31 @@ export function normalizeWallet(s){
  return C.sanitizePdfSources(C.validate(next));
 }
 
-function paymentRows(s){
+export function paymentRows(s){
  const manuals=s.transactions.filter(t=>t.kind==='payment'&&bankMovement(t));
- return [...manuals,...s.transactions.filter(t=>t.kind==='cardPayment'&&C.effective(t)&&!manuals.some(m=>m.matchCandidates?.includes(t.id)||t.matchCandidates?.includes(m.id)))];
+ const manualIds=new Set(manuals.map(t=>t.id));
+ const candidates=new Set(manuals.flatMap(t=>t.matchCandidates??[]));
+ return [...manuals,...s.transactions.filter(t=>t.kind==='cardPayment'&&C.effective(t)&&
+  !candidates.has(t.id)&&!t.matchCandidates?.some(id=>manualIds.has(id)))];
 }
 
-function periodFigures(s,period,account){
+export function periodFigures(s,period,account){
  const rows=C.rowsForPeriod(s,period).filter(t=>!account||t.account===account.id);
- const cats=new Map(),incomeCats=new Map();let income=0,spent=0,refunds=0,cashIn=0,cashOut=0,transfers=0;
+ const accountTypes=new Map(s.accounts.map(a=>[a.id,a.type]));
+ const cats=new Map(),incomeCats=new Map();let income=0,spent=0,refunds=0,cardSpent=0,cashIn=0,cashOut=0,cardCashPayments=0,transfers=0;
  for(const t of rows){
   if(t.kind==='income'){income=C.addCents(income,t.amount);incomeCats.set(t.category,C.addCents(incomeCats.get(t.category)||0,t.amount));}
-  if(t.kind==='expense'||t.kind==='refund'){const n=t.kind==='refund'?-t.amount:t.amount;cats.set(t.category,C.addCents(cats.get(t.category)||0,n));if(t.kind==='refund')refunds=C.addCents(refunds,t.amount);else spent=C.addCents(spent,t.amount);}
+  if(t.kind!=='expense'&&t.kind!=='refund')continue;
+  const category=cats.get(t.category)??{name:t.category,spent:0,refunds:0};
+  if(t.kind==='refund'){
+   refunds=C.addCents(refunds,t.amount);
+   category.refunds=C.addCents(category.refunds,t.amount);
+  }else{
+   spent=C.addCents(spent,t.amount);
+   category.spent=C.addCents(category.spent,t.amount);
+   if(accountTypes.get(t.account)==='card')cardSpent=C.addCents(cardSpent,t.amount);
+  }
+  cats.set(t.category,category);
  }
  for(const t of s.transactions.filter(t=>bankMovement(t)&&t.date.slice(0,7)===period)){
   if(t.kind==='transfer'){
@@ -34,15 +48,21 @@ function periodFigures(s,period,account){
    if(account&&t.target===account.id)cashIn=C.addCents(cashIn,t.amount);
    continue;
   }
-  const a=s.accounts.find(a=>a.id===t.account);
-  if(a?.type==='card'||(account&&t.account!==account.id))continue;
+  const type=accountTypes.get(t.account);
+  // The target card can show the payment while the cash outflow stays on the source account.
+  if(t.kind==='payment'&&(type==='bank'||type==='cash')&&(!account||t.target===account.id||t.account===account.id)){
+   cardCashPayments=C.addCents(cardCashPayments,t.amount);
+  }
+  if(type==='card'||(account&&t.account!==account.id))continue;
   if(t.kind==='income'||t.kind==='refund')cashIn=C.addCents(cashIn,t.amount);
   else if(t.kind==='expense'||t.kind==='payment')cashOut=C.addCents(cashOut,t.amount);
  }
  const payments=paymentRows(s).filter(t=>t.date.slice(0,7)===period&&(!account||(account.type==='card'?cardId(t)===account.id:t.account===account.id)));
  const plannedIncome=total((s.incomePlans||[]).filter(p=>p.next.slice(0,7)===period&&(!account||p.account===account.id)));
  const netExpense=C.addCents(spent,-refunds);
- return {income,spent,refunds,netExpense,margin:C.addCents(income,-netExpense),cashIn,cashOut,cardPayments:total(payments),transfers,incomeByCategory:pairs(incomeCats),categories:pairs(cats),plannedIncome};
+ const categoryBreakdown=[...cats.values()].map(category=>({...category,net:C.addCents(category.spent,-category.refunds)}));
+ const categories=pairs(categoryBreakdown.map(({name,net})=>[name,net]));
+ return {income,spent,refunds,netExpense,margin:C.addCents(income,-netExpense),cashIn,cashOut,cardPayments:total(payments),cardCashPayments,cardSpent,transfers,incomeByCategory:pairs(incomeCats),categories,categoryBreakdown,plannedIncome};
 }
 
 export function overview(s,period){

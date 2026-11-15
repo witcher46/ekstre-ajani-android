@@ -17,6 +17,7 @@ let importDraft;
 let pdfRequest=null;
 let actionTrigger=null,csvOpener=null;
 let state=W.normalizeWallet(C.empty()),detailId=null,expenseCategory=null,page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,toastTimer,loadFailed=false;
+const reportFilters={months:6,accountId:'',category:null,reveal:false};
 function notice(message,{error=false}={}){
  const live=$(error?'error-announcement':'status-announcement');
  live.textContent=message;
@@ -106,10 +107,11 @@ function render(){
   $('nav').innerHTML=renderBottomNavigation(page);
  const filteredExpenses=page==='transactions'&&expenseCategory!==null;
  const mode=!filteredExpenses&&['transactions','reports'].includes(page)?periodMode:'calendar';
- const s=C.summary(state,period,mode),rows=C.rowsForPeriod(state,period,mode),periodControl=`<input class="period" id="period" aria-label="Takvim ayı / ekstre dönemi" type="month" value="${period}">`;
+ const periodLabel=page==='reports'?'Bitiş ayı':'Takvim ayı / ekstre dönemi';
+ const s=C.summary(state,period,mode),rows=C.rowsForPeriod(state,period,mode),periodControl=`<input class="period" id="period" aria-label="${periodLabel}" type="month" max="9999-12" value="${period}">`;
  const modeControl=select('view-mode','Rapor kapsamı',options([['calendar','Takvim ayı · işlem tarihine göre'],['statement','Ekstre dönemi · yalnız kartlar']],periodMode));
  let html='';
- const ctx={state,period,periodMode,fmt,esc,transactionList,periodControl,dateStatus,importCategoryOption,listLimit,importDraft};
+ const ctx={state,period,periodMode,fmt,esc,transactionList,periodControl,dateStatus,importCategoryOption,listLimit,importDraft,reportFilters};
  if(page==='home'){html=V.homeView(ctx);
  }else if(page==='wallet'){html=V.walletView(ctx);
  }else if(page==='account'){html=V.accountView(ctx,detailId);
@@ -131,8 +133,21 @@ function render(){
  $('main').innerHTML=html;
  $('main').querySelector('h1')?.setAttribute('tabindex','-1');
  for(const [id,key] of [['view-mode','mode'],['kind-filter','kind'],['account-filter','account']])$('f-'+id)?.addEventListener('change',e=>{if(key==='mode')periodMode=e.target.value;else if(key==='kind')kindFilter=e.target.value;else accountFilter=e.target.value;render();$('f-'+id)?.focus({preventScroll:true});});
+ for(const [id,update] of [
+  ['f-report-range',value=>{reportFilters.months=Number(value);}],
+  ['f-report-account',value=>{reportFilters.accountId=value;reportFilters.category=null;}],
+  ['f-report-category',value=>{reportFilters.category=value?value.slice('category:'.length):null;}],
+ ])$(id)?.addEventListener('change',e=>{update(e.target.value);render();$(id)?.focus({preventScroll:true});});
  requestAnimationFrame(fitLayout);
- $('period')?.addEventListener('change',e=>{if(e.target.value){period=e.target.value;render();$('period')?.focus({preventScroll:true});}});
+ $('period')?.addEventListener('change',e=>{
+  if(!e.target.value)return;
+  if(!C.validDate(e.target.value+'-01')){
+   e.target.value=period;
+   errorNotice('Geçerli bir takvim ayı seç.');
+   return;
+  }
+  period=e.target.value;render();$('period')?.focus({preventScroll:true});
+ });
  $('search')?.addEventListener('input',e=>{const pos=e.target.selectionStart;query=e.target.value;render();$('search').focus();$('search').setSelectionRange(pos,pos);});
 }
 function accountForm(existing,{fromImport=false}={}){modal(existing?'Hesabı düzenle':fromImport?'Kredi kartı ekle':'Hesap / kart ekle',field('name','Hesap adı',existing?.name||'','text','required maxlength="80"')+select('type','Hesap türü',options(fromImport?[['card','Kredi kartı']]:[['bank','Banka'],['cash','Nakit'],['card','Kredi kartı']],fromImport?'card':existing?.type||'bank'))+field('opening','Başlangıç bakiyesi / kart borcu (TL)',(existing?.opening||0)/100,'text','inputmode="decimal" required')+'<p class="notice">Ekstre aktaracaksan başlangıç borcuna aynı işlemleri ikinci kez ekleme.</p>',f=>{const next=copy(),a={id:existing?.id||C.id(),name:f.get('name').trim(),type:f.get('type'),opening:C.money(f.get('opening'))};if(existing){if(existing.type!==a.type&&state.transactions.some(t=>t.account===a.id||t.target===a.id))throw Error('Hareketi olan hesabın türü değiştirilemez.');Object.assign(next.accounts.find(x=>x.id===a.id),a);}else next.accounts.push(a);
@@ -287,7 +302,16 @@ const actions={
  back:()=>{if(!window.handleBack())go('import');},
  clearExpenseCategory:()=>{expenseCategory=null;render();focusMain();},
  addImportCard:()=>accountForm(null,{fromImport:true}),
- more:()=>{listLimit+=150;render();},
+ more:()=>{
+  const list=actionTrigger?.closest('#report-category-transactions,#report-movements');
+  const shown=list?.querySelectorAll('[data-edit]').length;
+  listLimit+=150;render();
+  if(list)$(list.id)?.querySelectorAll('[data-edit]')[shown]?.focus();
+ },
+ toggleReportMovements:()=>{
+  reportFilters.reveal=!reportFilters.reveal;
+  render();$('report-movements-toggle')?.focus({preventScroll:true});
+ },
  recover:()=>{const raw=window.Android&&Android.recovery?Android.recovery():localStorage.getItem(key+'-recovery');if(!raw)throw Error('Geri yükleme öncesine ait kurtarma kopyası yok.');const prior=C.readBackup(raw);if(confirm('Geri yükleme öncesindeki cüzdan geri getirilsin mi?'))commit(prior);},
  merchantRule:()=>merchantRuleForm(),
  cancelCategoryRemoval:closeModal,

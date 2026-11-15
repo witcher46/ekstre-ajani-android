@@ -1,5 +1,7 @@
 import * as C from './core.mjs';
 import * as W from './wallet.mjs';
+import {advancedReports,reportRows} from './reports.mjs';
+import {options,select} from './ui/form-controls.mjs';
 
 const kindNames = {expense:'Harcama',income:'Gelir',refund:'İade',payment:'Hesaptan kart ödemesi',cardPayment:'Ekstre kart ödemesi',transfer:'Transfer'};
 const statementFields = {previousDebt:'Önceki dönem borcu',statementDebt:'Dönem borcu',expectedDebt:'Beklenen dönem borcu',cut:'Hesap kesim tarihi',due:'Son ödeme tarihi'};
@@ -148,16 +150,90 @@ function categoryPanel(ctx,title,values,empty) {
   return `<section class="panel"><h2>${ctx.esc(title)}</h2>${rows.map(([category,value]) => `<div class="chart-label"><span>${ctx.esc(category)}</span><b>${amount(ctx,value)}</b></div><progress class="bar" max="${ctx.esc(maximum)}" value="${ctx.esc(C.absCents(value))}" aria-label="${ctx.esc(category)}"></progress>`).join('') || noRows(empty)}</section>`;
 }
 
+const reportMetrics = [['income','Gelir'],['spent','Toplam harcama'],['refunds','İadeler'],['netExpense','Net gider'],['margin','Gelir − net gider']];
+const reportMonthFormat = new Intl.DateTimeFormat('tr-TR',{month:'long',year:'numeric',timeZone:'UTC'});
+const reportMonthLabel = month => reportMonthFormat.format(new Date(month+'-01T12:00:00Z'));
+
+function monthlyChart(ctx,months) {
+  const max = months.reduce((largest,m) => [m.income,m.spent].reduce((a,b) => C.compareCents(a,b)>=0?a:b,largest),1);
+  return `<section class="panel"><h2>Aylık gelir ve harcama</h2>
+    <div class="report-grid">${months.map(m => `<article class="report-chart-month"><h3>${ctx.esc(reportMonthLabel(m.month))}</h3>
+      <div class="report-bars" aria-hidden="true"><progress max="${max}" value="${m.income}"></progress><progress max="${max}" value="${m.spent}"></progress></div>
+      <dl class="report-values">${detail(ctx,'Gelir',m.income,true)}${detail(ctx,'Harcama',m.spent,true)}</dl>
+    </article>`).join('')}</div></section>`;
+}
+
+function reportTransactionList(ctx,rows) {
+  return ctx.transactionList(newest(rows))+(rows.length>ctx.listLimit?'<button type="button" data-action="more">Daha fazla göster</button>':'');
+}
+
+function reportCategories(ctx,report,accountId) {
+  const {state,esc,reportFilters} = ctx;
+  const rows = report.categories;
+  const category = rows.find(row => row.name===reportFilters.category);
+  const maximum = rows.reduce((max,row) => C.compareCents(row.spent,max)>0?row.spent:max,1);
+  const selection = select('report-category','Aylık değişimini ve işlemlerini görmek istediğin kategori',
+    options([['','Kategori seç'],...rows.map(row=>['category:'+row.name,row.name||'Kategorisiz'])],category?'category:'+category.name:''));
+  return `<section class="panel"><h2>Kategori dağılımı</h2>
+    ${rows.length ? `<p class="notice">Seçilen aralık · toplam harcamaya göre sıralı</p>
+      <div class="report-grid">${rows.map(row=>`<article class="report-category"><h3>${esc(row.name||'Kategorisiz')}</h3>
+        <progress class="bar" max="${maximum}" value="${row.spent}" aria-hidden="true"></progress>
+        <dl class="report-values">${detail(ctx,'Harcama',row.spent,true)}${detail(ctx,'İade',row.refunds,true)}${detail(ctx,'Net gider',row.net,true)}</dl>
+      </article>`).join('')}</div>${selection}` : noRows('Bu aralıkta kaydedilmiş gider veya iade yok.')}
+    ${category ? `<h3>${esc(category.name||'Kategorisiz')} · aylık değişim</h3>
+      <div class="report-grid">${report.months.map(m=>{
+        const entry=m.categoryBreakdown.find(row=>row.name===category.name);
+        return `<article class="report-category-month"><h4>${esc(reportMonthLabel(m.month))}</h4>
+          <dl class="report-values">${detail(ctx,'Harcama',entry?.spent??0,true)}${detail(ctx,'İade',entry?.refunds??0,true)}${detail(ctx,'Net gider',entry?.net??0,true)}</dl></article>`;
+      }).join('')}</div>
+      <h3>Kategori işlemleri</h3><div id="report-category-transactions">${reportTransactionList(ctx,reportRows(state,report.months.map(m=>m.month),{accountId,category:category.name}))}</div>` : ''}
+  </section>`;
+}
+
 export function reportsView(ctx) {
-  const {state,esc,periodControl} = ctx;
-  const overview = W.overview(state,ctx.period);
-  const periods = [...new Set([ctx.period,...state.transactions.filter(C.effective).map(C.calendarPeriods(state))])].sort().reverse();
-  return shell(`<h1>Raporlar</h1><p class="lead">Aylık gelir ve gideri, hesaba giren ve çıkan paradan ayrı oku.</p><p class="notice">Takvim ayı · taksitler ait oldukları ayda</p><div class="toolbar">${periodControl}</div>
-    <section class="panel"><h2>Gelir ve gider</h2><div class="summary-grid">${metric(ctx,'income','Gelir',overview.income)}${metric(ctx,'netExpense','Net gider',overview.netExpense)}${metric(ctx,'margin','Gelir − gider',overview.margin)}</div><dl class="card-details">${detail(ctx,'Kaydedilmiş harcamalar',overview.spent,true)}${detail(ctx,'İadeler',overview.refunds,true)}</dl><p class="notice">Kartla harcama giderdir. Kart borcu ödemeleri, transferler ve açılış bakiyeleri gelir veya gider yaratmaz.</p></section>
-    <section class="panel"><h2>Banka ve nakit akışı</h2><div class="summary-grid">${metric(ctx,'cashIn','Hesaplara giren para',overview.cashIn)}${metric(ctx,'cashOut','Hesaplardan çıkan para',overview.cashOut)}${metric(ctx,'cardPayments','Kart borcu ödemeleri',overview.cardPayments)}${metric(ctx,'transfers','Hesaplar arası transferler',overview.transfers)}</div><p class="notice">Nakit akışı banka ve nakit hareketlerini gösterir. Kaynak hesabı bilinen kart ödemeleri para çıkışına dahildir. Hesapların arasındaki transferler toplam giriş ve çıkışa tekrar eklenmez. Kart ödemeleri ve transferler aylık gider sayılmaz.</p></section>
-    ${categoryPanel(ctx,'Kategori dağılımı',overview.categories,'Bu ay kaydedilmiş gider yok.')}${categoryPanel(ctx,'Gelir kategorileri',overview.incomeByCategory,'Bu ay kaydedilmiş gelir yok.')}
-    <section class="panel"><h2>Aylık karşılaştırma</h2>${periods.map(period => { const month = W.overview(state,period); return `<article class="month-comparison"><h3>${esc(period)}</h3><dl class="comparison-values"><div><dt>Gelir</dt><dd>${amount(ctx,month.income)}</dd></div><div><dt>Net gider</dt><dd>${amount(ctx,month.netExpense)}</dd></div><div><dt>Gelir − gider</dt><dd>${amount(ctx,month.margin)}</dd></div></dl></article>`; }).join('')}</section>
-    ${reviewWarning(ctx)}${sourceWarning(ctx)}`);
+  const {state,esc,periodControl,reportFilters} = ctx;
+  const selectedAccount = state.accounts.find(account => account.id===reportFilters.accountId);
+  const accountId = selectedAccount?.id??'';
+  const report = advancedReports(state,ctx.period,{months:reportFilters.months,accountId});
+  const {current,previous,totals,changes} = report;
+  const periodSelect = select('report-range','Rapor aralığı',options([['6','Son 6 ay'],['12','Son 12 ay']],String(reportFilters.months)));
+  const accountSelect = select('report-account','Rapor hesabı',options([['','Tüm hesaplar'],...state.accounts.map(a=>[a.id,a.name])],accountId));
+  return shell(`<div class="advanced-reports"><h1>Raporlar</h1>
+    <p class="lead">Takvim ayı · taksitler ait oldukları ayda</p>
+    <div class="report-grid report-controls"><div><label for="period">Bitiş ayı</label>${periodControl}</div><div>${periodSelect}</div><div>${accountSelect}</div></div>
+    <section class="panel"><h2>${reportFilters.months} aylık toplam</h2>
+      <p class="notice">${esc(reportMonthLabel(report.months[0].month))} – ${esc(reportMonthLabel(current.month))}</p>
+      <div class="summary-grid">${reportMetrics.map(([key,label])=>metric(ctx,'range-'+key,label,totals[key])).join('')}</div></section>
+    ${monthlyChart(ctx,report.months)}
+    ${reportCategories(ctx,report,accountId)}
+    <section class="panel"><h2>Gelir ve gider · ${esc(reportMonthLabel(current.month))}</h2>
+      <div class="summary-grid">${reportMetrics.map(([key,label])=>metric(ctx,key,label,current[key])).join('')}</div>
+      <h3>${esc(reportMonthLabel(previous.month))} ayına göre değişim</h3>
+      <dl class="comparison-values">${reportMetrics.map(([key,label])=>detail(ctx,label,changes[key],true)).join('')}</dl>
+      <p class="notice">Kartla harcama giderdir. Kart borcu ödemeleri, transferler ve açılış bakiyeleri gelir veya gider yaratmaz.</p>
+    </section>
+    <section class="panel"><h2>Aylık karşılaştırma</h2>
+      ${[...report.months].reverse().map(m=>`<article class="month-comparison" data-report-month="${m.month}"><h3>${esc(reportMonthLabel(m.month))}</h3>
+        <dl class="comparison-values">${reportMetrics.map(([key,label])=>detail(ctx,label,m[key],true)).join('')}</dl>
+        <p class="notice">Önceki aya göre</p><dl class="comparison-values">
+          ${reportMetrics.map(([key,label])=>detail(ctx,label,m.changes[key],true)).join('')}</dl></article>`).join('')}
+    </section>
+    <section class="panel"><h2>Banka ve nakit akışı · ${esc(reportMonthLabel(current.month))}</h2>
+      <div class="summary-grid">${metric(ctx,'cashIn','Hesaplara giren para',current.cashIn)}${metric(ctx,'cashOut','Hesaplardan çıkan para',current.cashOut)}
+        ${metric(ctx,'cardCashPayments','Banka veya nakitten kart ödemesi',current.cardCashPayments)}${metric(ctx,'cardPayments','Kayıtlarda görünen kart ödemeleri',current.cardPayments)}
+        ${metric(ctx,'cardSpent','Kartla yapılan harcama',current.cardSpent)}${metric(ctx,'transfers','Hesaplar arası transferler',current.transfers)}</div>
+      <p class="notice">${selectedAccount?.type==='card'?'Kart bir nakit hesabı değildir. Bu karta yapılan kaynaklı ödemeler ayrı gösterilir.':
+        accountId?'Seçili hesaba gelen ve hesaptan giden transferler bu hesabın nakit akışında görünür.':
+        'Hesaplar arası transfer, tüm hesapların toplam giriş ve çıkışına eklenmez.'} Kaynak hesabı bilinen kart ödemesi gider oluşturmaz.</p>
+      <h3>${reportFilters.months} aylık hareket toplamı</h3>
+      <dl class="comparison-values">${detail(ctx,'Hesaplardan çıkan para',totals.cashOut,true)}
+        ${detail(ctx,'Banka veya nakitten kart ödemesi',totals.cardCashPayments,true)}
+        ${detail(ctx,'Kartla yapılan harcama',totals.cardSpent,true)}</dl>
+      <button type="button" id="report-movements-toggle" aria-expanded="${reportFilters.reveal}" aria-controls="report-movements" data-action="toggleReportMovements">Ayın işlem kayıtları</button>
+      <div id="report-movements" ${reportFilters.reveal?'':'hidden'}>${reportFilters.reveal?reportTransactionList(ctx,reportRows(state,[current.month],{accountId})):''}</div>
+    </section>
+    ${categoryPanel(ctx,'Gelir kategorileri',current.incomeByCategory,'Bu ay kaydedilmiş gelir yok.')}
+    ${reviewWarning(ctx)}${sourceWarning(ctx)}</div>`);
 }
 
 function reconciliationPreview(ctx,pending) {
