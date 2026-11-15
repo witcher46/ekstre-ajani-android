@@ -138,3 +138,25 @@
 .wallet-v2 .expense-category-setting>.left{flex-basis:8rem}
 .wallet-v2 .category-rule-choices{min-width:0;margin:0 0 12px;padding:0 12px 8px;border:1px solid var(--line);border-radius:10px;overflow-wrap:anywhere}
 .wallet-v2 .category-rule-choices input[type=radio]{width:1.25rem;min-height:24px;padding:0;vertical-align:middle;accent-color:var(--mint)}
+
+/* Card-detail hierarchy: recorded bank amounts, estimated debt and future plans remain distinct. */
+.wallet-v2 .card-section-heading{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px 12px}
+.wallet-v2 .card-section-heading h2{margin:0;flex:1 1 12rem}
+.wallet-v2 .card-source-label{background:#293b36;border:1px solid #4b685a;border-radius:9px;color:#bde6d3;font-size:.83rem;font-weight:600;padding:6px 10px;line-height:1.45}
+.wallet-v2 .card-balance-board .summary-grid{margin-bottom:12px}
+.wallet-v2 .card-source-note{font-size:.88rem;color:#cbded5;margin-bottom:0;overflow-wrap:anywhere}
+.wallet-v2 .card-balance-board .warning{margin-bottom:0}
+.wallet-v2 .card-statement-summary .card-details{margin:12px 0}
+.wallet-v2 .card-statement-summary .card-details .card-remaining{background:#152a25;border:1px solid #365b4b;border-radius:12px;padding:12px;margin:14px 0}
+.wallet-v2 .card-statement-summary .card-remaining dt{font-weight:650;color:#c1ead7}
+.wallet-v2 .card-statement-summary .card-remaining dd{font-size:1.25rem;font-variant-numeric:tabular-nums}
+.wallet-v2 .card-statement-link{width:100%;background:#223530;border-color:#3f5e51;color:#b9edd6;margin-top:12px}
+.wallet-v2 .card-future-intro{margin:26px 0 0}
+.wallet-v2 .card-future-intro h2{margin-bottom:6px}
+.wallet-v2 .card-future-intro p{margin:0}
+.wallet-v2 .card-after-cut .summary-grid{margin:8px 0 12px}
+@media(max-width:350px){
+ .wallet-v2 .card-section-heading{display:block}
+ .wallet-v2 .card-source-label{display:inline-block;max-width:100%;margin:6px 0 0}
+ .wallet-v2 .card-statement-summary .card-remaining dd{font-size:1.1rem;overflow-wrap:anywhere}
+}
