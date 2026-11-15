@@ -130,7 +130,26 @@ async function quickAddJourney(page) {
   assert.equal((await wallet()).transactions.length,3);
   await source.selectOption('quick-bank');
   await page.locator('#f-amount').fill('40');
+  await page.evaluate(() => {
+    window.quickPaymentClicks = [];
+    const trace = event => {
+      const b = event.target.closest('button');
+      window.quickPaymentClicks.push({button:b?.id,action:b?.dataset.action,
+        page:b?.dataset.page,detail:event.detail,text:b?.textContent.trim().slice(0,80)});
+      if(window.quickPaymentClicks.length===2)document.removeEventListener('click',trace,true);
+    };
+    document.addEventListener('click',trace,true);
+  });
   await page.locator('#submit').dblclick();
+  const outcome = await page.evaluate(() => ({
+    heading:document.querySelector('#main h1')?.textContent,
+    dialog:document.querySelector('dialog[open] #dialog-title')?.textContent,
+    error:document.querySelector('#form-error')?.textContent,
+    clicks:window.quickPaymentClicks
+  }));
+  assert.equal((await wallet()).transactions.length,4,JSON.stringify(outcome));
+  assert.equal(outcome.dialog,undefined,JSON.stringify(outcome));
+  assert.equal(outcome.heading,'Sentetik kart B',JSON.stringify(outcome));
   assert.equal(await page.locator('[data-stat=cardDebt]').innerText(),'₺210,00');
   assert.deepEqual((await wallet()).transactions.map(({kind,amount}) => [kind,amount]),
     [['expense',2000],['income',5000],['transfer',1000],['payment',4000]]);
