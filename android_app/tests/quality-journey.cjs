@@ -148,6 +148,58 @@ async function quickAddJourney(page) {
   console.log('Quick Add: all four existing forms, 320px, focus, and one save per action passed');
 }
 
+async function reviewCenterJourney(page) {
+  const wallet=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')));
+  await page.evaluate(async()=>{
+    const C=await import('/core.mjs');
+    const s=C.empty();
+    s.accounts=[
+      {id:'review-bank',name:'Sentetik banka',type:'bank',opening:100000},
+      {id:'review-card',name:'Sentetik kart',type:'card',opening:0},
+    ];
+    const manual={
+      id:'review-manual',source:'manual',kind:'expense',account:'review-card',
+      date:'2026-11-10',period:'2026-11',amount:12345,desc:'Sentetik market',
+      category:'Market / Gıda',note:'',
+    };
+    const pdf={...manual,id:'review-pdf',source:'pdf',
+      matchStatus:'pending',matchCandidates:['review-manual']};
+    s.transactions=[manual,pdf];
+    localStorage.setItem('ekstre-android-v1',C.backupText(s));
+  });
+  await page.reload();
+  await page.locator('nav [data-page=transactions]').click();
+  await page.getByRole('button',{name:'İnceleme Merkezi'}).click();
+  assert.equal(await page.locator('nav button[aria-current=page]').getAttribute('data-page'),'transactions');
+  assert.equal(await page.locator('.review-item').count(),1);
+  assert.match(await page.locator('.review-item').innerText(),/Olası eşleşme/);
+  assert.match(await page.locator('.review-item').innerText(),/ikinci kez|ayrıca finansal/);
+  const original=await wallet();
+  await page.getByRole('button',{name:'Sonra incele'}).click();
+  assert.deepEqual(await wallet(),original);
+  await page.getByRole('button',{name:'İnceleme Merkezi'}).click();
+  await page.getByRole('button',{name:'Aynı işlem'}).click();
+  await page.waitForFunction(()=>{
+    const s=JSON.parse(localStorage.getItem('ekstre-android-v1'));
+    return s.transactions.some(t=>t.id==='review-pdf'&&t.linkedTo==='review-manual');
+  });
+  const linked=await wallet();
+  assert.equal(linked.transactions.filter(t=>t.linkedTo).length,1);
+  assert.equal(linked.transactions.filter(t=>t.matchStatus==='pending').length,0);
+  await page.locator('details.review-history').evaluate(d=>d.open=true);
+  assert.equal(await page.getByRole('button',{name:'Yeniden incele'}).count(),1);
+  assert.equal(await page.locator('.review-item').count(),0);
+  await page.evaluate(async()=>{
+    const C=await import('/core.mjs');
+    const s=JSON.parse(localStorage.getItem('ekstre-android-v1'));
+    const m=C.summary(s,'2026-11');
+    if(m.net!==12345)throw new Error('Review linking changed the expense total');
+    localStorage.removeItem('ekstre-android-v1');
+  });
+  await page.reload();
+  console.log('Review Center: pending, postpone, linking, report and navigation passed');
+}
+
 (async () => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.CHROME_PATH || undefined});
   try {
@@ -170,6 +222,7 @@ async function quickAddJourney(page) {
     });
     await page.goto('https://wallet.test/');
     await quickAddJourney(page);
+    await reviewCenterJourney(page);
     await page.locator('nav [data-page=wallet]').focus();
     await page.keyboard.press('Enter');
     assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Cüzdanım');
@@ -410,7 +463,9 @@ async function quickAddJourney(page) {
     assert.equal(csvRows.filter(t=>t.matchStatus==='pending').length,1);
     await page.locator('#settings').click();
     await page.getByRole('button',{name:'İnceleme ve kaynak bağlantıları'}).click();
-    const csvReview=page.locator('section').filter({hasText:'CSV satırı daha önceki bir kayda benziyor'});
+    const pendingCsvId=csvRows.find(t=>t.matchStatus==='pending')?.id;
+    assert.ok(pendingCsvId);
+    const csvReview=page.locator('.review-item').filter({has:page.locator('button[data-distinct="'+pendingCsvId+'"]')});
     await csvReview.waitFor();
     assert.equal(await csvReview.getByRole('button',{name:'Aynı işlem',exact:true}).count(),0);
     await csvReview.getByRole('button',{name:'Ayrı gerçek işlem'}).click();
