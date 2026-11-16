@@ -1,4 +1,4 @@
-import {addCents,balanceAt,cashBalanceMovementEffect,sourceOf,validDate} from './core.mjs';
+import {addCents,balanceAt,cashBalanceMovementEffect,paymentDatesWithinMatchWindow,sourceOf,validDate} from './core.mjs';
 
 const evidenceVersion = 1;
 const evidencePolicy = 'cash-end-of-day-v1';
@@ -8,6 +8,8 @@ const unavailable = reason => ({status:'unavailable',reason});
 const insufficient = reason => ({status:'insufficient',reason});
 const inWindow = (date,from,through) => from<date&&date<=through;
 const candidates = row => row.matchStatus==='pending'?row.matchCandidates:[];
+const previousMatch = (row,connected) => row.matchStatus==='pending'&&row.previousLinkedTo!==row.id&&
+  connected.has(row.previousLinkedTo)?row.previousLinkedTo:null;
 
 function validClosing(closing){
   if(closing?.boundary!=='end-of-day'||typeof closing.timeZone!=='string'||
@@ -31,21 +33,43 @@ function reviewedAnchor(review,anchor,account){
     review.sourceKind===anchor.sourceKind&&review.sourceType===sourceType&&validRef(review.sourceRef);
 }
 
+function orphanedPaymentInScope(row,connected,paymentDates,from,through){
+  if(row.kind!=='cardPayment'||row.matchStatus!=='pending'||connected.get(row.id).length||
+     !['pdf','csv'].includes(sourceOf(row)))return false;
+  const dates = paymentDates.get(row.account);
+  if(!dates)return false;
+  const nearest = row.date<=from?dates.first:dates.last;
+  return inWindow(row.date,from,through)||paymentDatesWithinMatchWindow(row.date,nearest);
+}
+
 function movementEvidence({transactions:rows,accounts},account,from,through){
   const accountIds = new Set(accounts.map(row=>row.id));
   const connected = new Map(rows.map(row=>[row.id,[]]));
   const relevant = [];
+  const paymentDates = new Map();
   for(const row of rows){
     if((row.account===account.id||row.target===account.id)&&inWindow(row.date,from,through)){
       relevant.push(row.id);
+      if(row.account===account.id&&row.kind==='payment'){
+        const dates = paymentDates.get(row.target)??{first:row.date,last:row.date};
+        if(row.date<dates.first)dates.first=row.date;
+        if(row.date>dates.last)dates.last=row.date;
+        paymentDates.set(row.target,dates);
+      }
     }
     const peers = [...candidates(row)];
     if(row.linkedTo)peers.push(row.linkedTo);
+    const previous = previousMatch(row,connected);
+    if(previous!==null&&!peers.includes(previous))peers.push(previous);
     for(const peer of peers){
       if(!connected.has(peer))continue;
       connected.get(row.id).push(peer);
       connected.get(peer).push(row.id);
     }
+  }
+  // An edited bank payment can lose its candidate IDs before its source is resolved.
+  for(const row of rows){
+    if(orphanedPaymentInScope(row,connected,paymentDates,from,through))relevant.push(row.id);
   }
   const scoped = new Set(relevant);
   for(let i=0;i<relevant.length;i++){
@@ -71,6 +95,7 @@ function movementEvidence({transactions:rows,accounts},account,from,through){
       effectCents:effect===null?null:String(effect),
       matchStatus:row.matchStatus??null,
       linkedTo:row.linkedTo??null,
+      previousLinkedTo:previousMatch(row,connected),
       matchCandidates:[...candidates(row)].sort(),
     };
   });

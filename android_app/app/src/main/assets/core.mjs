@@ -258,12 +258,15 @@ const cardAccount=t=>t.kind==='payment'?t.target:t.account;
 const effectKind=t=>['payment','cardPayment'].includes(t.kind)?'cardPayment':t.kind;
 const sameTerms=(a,b)=>cardAccount(a)===cardAccount(b)&&effectKind(a)===effectKind(b)&&a.amount===b.amount&&(!a.installment||!b.installment||a.installment===b.installment);
 const installmentMonth=t=>t.statement&&t.installment?t.period:t.date.slice(0,7);
+export function paymentDatesWithinMatchWindow(first,second){
+ return Math.abs(Date.parse(first)-Date.parse(second))<=3*86400000;
+}
 function sameEconomic(a,b){
  if(!sameTerms(a,b))return false;
  if((a.installmentPlan||b.installmentPlan)&&a.installment&&b.installment){
   return installmentMonth(a)===installmentMonth(b);
  }
- return a.date===b.date||(effectKind(a)==='cardPayment'&&Math.abs(Date.parse(a.date)-Date.parse(b.date))<=3*86400000);
+ return a.date===b.date||(effectKind(a)==='cardPayment'&&paymentDatesWithinMatchWindow(a.date,b.date));
 }
 function incompatibleStatementPeriods(a,b){
  const x=sourceOf(a),y=sourceOf(b);

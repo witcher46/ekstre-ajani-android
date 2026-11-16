@@ -189,6 +189,52 @@ test('PDF and CSV matching changes evidence without duplicating the bank debit a
   assert.deepEqual(f.compare({coverageReview},C.importCsv(C.importStatement(linked,pdf,'card'),csv,'card')).evidence,linkedResult.evidence);
 });
 
+test('an edited payment keeps an unresolved formerly linked PDF in scope even after the card target changes', () => {
+  const anotherCard = {...card,id:'other-card'};
+  const state = {...wallet(),accounts:[...wallet().accounts,anotherCard]};
+  const bankPayment = movement(state,'pay',{kind:'payment',target:'card',amount:10000});
+  const pdf = parseStatement('QNB\nHesap Kesim Tarihi: 30/11/2026\n09/11/2026 ODEME 100.00');
+  const pending = C.importStatement(bankPayment,pdf,'card');
+  const sourceId = pending.transactions.find(row=>row.source==='pdf').id;
+  const detached = C.resolveCandidate(C.resolveCandidate(pending,sourceId,'link','pay'),sourceId,'unlink');
+  const edited = C.updateTransaction(detached,{...detached.transactions.find(row=>row.id==='pay'),target:'other-card',amount:11000});
+  const orphan = edited.transactions.find(row=>row.id===sourceId);
+  assert.equal(orphan.matchStatus,'pending');
+  assert.deepEqual(orphan.matchCandidates,[]);
+  assert.equal(orphan.previousLinkedTo,'pay');
+  const coverageReview = review([sourceRow('pay',-11000)]);
+  const f = fixture({state:edited,observedAmount:989000});
+  const result = f.compare({coverageReview});
+  assert.equal(result.differenceCents,0);
+  assert.deepEqual(result.coverage,{status:'insufficient',reason:'pending-match'});
+  assert.equal(result.evidence.movements.find(row=>row.id===sourceId).previousLinkedTo,'pay');
+  const dismissed = C.resolveCandidate(f.state,sourceId,'distinct');
+  assert.equal(f.compare({coverageReview},dismissed).coverage.status,'source-supported');
+});
+
+test('orphaned PDF or CSV review near a same-card bank payment blocks only the relevant account', () => {
+  const bankDate = '2026-11-02', cardDate = '2026-10-31';
+  const base = movement(wallet(),'pay',{kind:'payment',target:'card',date:bankDate,amount:10000});
+  const pdf = parseStatement('QNB\nHesap Kesim Tarihi: 30/11/2026\n31/10/2026 ODEME 100.00');
+  const csv = parseStatementCsv('period,date,desc,amount_cents,category,tur,bank,kart\n2026-11,2026-10-31,ODEME,10000,Kart ödemesi,odeme,QNB,Sentetik\n');
+  for(const pending of [C.importStatement(base,pdf,'card'),C.importCsv(base,csv,'card')]){
+    const edited = C.updateTransaction(pending,{...pending.transactions.find(row=>row.id==='pay'),amount:11000});
+    const orphan = edited.transactions.find(row=>row.id!=='pay');
+    assert.equal(orphan.date,cardDate);
+    assert.equal(orphan.matchStatus,'pending');
+    assert.deepEqual(orphan.matchCandidates,[]);
+    assert.equal(orphan.previousLinkedTo,undefined);
+
+    const coverageReview = review([sourceRow('pay',-11000,bankDate)]);
+    const result = fixture({state:edited,observedAmount:989000}).compare({coverageReview});
+    assert.equal(result.differenceCents,0);
+    assert.deepEqual(result.coverage,{status:'insufficient',reason:'pending-match'});
+
+    const unrelated = fixture({state:edited,accountId:'other-bank',observedAmount:1000000});
+    assert.equal(unrelated.compare({coverageReview:review([],{accountId:'other-bank'})}).coverage.status,'source-supported');
+  }
+});
+
 test('refund credits exact cents on its movement date and can leave a negative cash balance', () => {
   let state = movement(wallet(),'cash-cost',{account:'cash',amount:300});
   state = movement(state,'cash-refund',{account:'cash',kind:'refund',date:observedDate,amount:20});
