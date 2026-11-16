@@ -403,6 +403,68 @@ public class WalletJourneyTest {
    assertMigratedWallet(a,expected);
   }
  }
+ @Test public void exportBalanceObservationForCompatibility()throws Exception{
+  assumeTrue("Requires the 7 to 8 emulator test",InstrumentationRegistry.getArguments().containsKey("observationCompatibility"));
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+   js(a,"import('./core.mjs').then(C=>{const current=C.readBackup(Android.load());"
+    +"const next=C.addBalanceObservation(current,{accountId:'synthetic-bank',observedDate:'2026-11-14',"
+    +"observedAmountCents:-9007199254740991,sourceKind:'manualBank',note:'<b>Sentetik</b>'});"
+    +"if(Android.save(C.backupText(next)))window.syntheticObservationBackup=C.backupText(C.readBackup(Android.load()));})");
+   waitJs(a,"typeof window.syntheticObservationBackup==='string'");
+   String backup=new JSONArray("["+js(a,"window.syntheticObservationBackup")+"]").getString(0);
+   JSONObject parsed=new JSONObject(backup);
+   assertEquals(2,parsed.getInt("version"));
+   assertEquals(1,parsed.getJSONObject("balanceReconciliation").getJSONArray("observations").length());
+   try(FileOutputStream out=context.openFileOutput("synthetic-observation-backup.json",Context.MODE_PRIVATE)){
+    out.write(backup.getBytes(StandardCharsets.UTF_8));
+   }
+  }
+ }
+ @Test public void oldWalletRejectsObservationBackupAndCanStillSave()throws Exception{
+  String path=InstrumentationRegistry.getArguments().getString("observationBackup");
+  assumeTrue("Requires the old APK on the disposable emulator",path!=null);
+  String raw=device.executeShellCommand("cat "+path);
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String name="synthetic-observation-for-old.apk-test.json";
+  Uri file=document(name,"application/json",raw.getBytes(StandardCharsets.UTF_8));
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=addAccount]')");
+   account(a,"Sentetik eski banka","bank");
+   String before=js(a,"Android.load()");
+   String recovery=js(a,"Android.recovery()");
+   openBackupPicker(a);
+   selectDownload(name);
+   waitJs(a,"document.querySelector('#toast').textContent.includes('Bu dosya Android cüzdan yedeği değil.')");
+   assertEquals(before,js(a,"Android.load()"));
+   assertEquals(recovery,js(a,"Android.recovery()"));
+   assertEquals("false",js(a,"Android.restore("+JSONObject.quote(raw)+")"));
+   assertEquals(before,js(a,"Android.load()"));
+   click(a,"nav [data-page=wallet]");
+   account(a,"Sentetik yeniden kayıt","cash");
+   waitJs(a,"JSON.parse(Android.load()).version===1 && JSON.parse(Android.load()).accounts.length===2");
+  }finally{context.getContentResolver().delete(file,null,null);}
+ }
+ @Test public void newWalletRestoresOriginalObservationBackup()throws Exception{
+  String path=InstrumentationRegistry.getArguments().getString("observationBackup");
+  assumeTrue("Requires the observation backup from the disposable emulator",path!=null);
+  String raw=device.executeShellCommand("cat "+path);
+  JSONObject expected=new JSONObject(raw);
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String name="synthetic-observation-for-new.apk-test.json";
+  Uri file=document(name,"application/json",raw.getBytes(StandardCharsets.UTF_8));
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   restoreDownload(a,name);
+   waitJs(a,"JSON.parse(Android.load()).version===2");
+   a.recreate();
+   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+   JSONObject restored=new JSONObject(new JSONArray("["+js(a,"Android.load()")+"]").getString(0));
+   for(String key:new String[]{"accounts","transactions","balanceReconciliation"}){
+    assertEquals(expected.get(key).toString(),restored.get(key).toString());
+   }
+  }finally{context.getContentResolver().delete(file,null,null);}
+ }
  private void assertMigratedWallet(ActivityScenario<MainActivity> a,JSONObject expected)throws Exception{
   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
   AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();

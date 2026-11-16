@@ -96,6 +96,24 @@ adb exec-out run-as "$permanent" cat databases/wallet.db > "$work/after-process-
 cmp "$work/before.db" "$work/after-process-restart.db"
 echo 'After a fresh process launch, wallet.db bytes and rendered report totals matched.'
 
+if [[ $baseline_code == 7 && $candidate_code == 8 ]] &&
+  grep -Fxq 'previousSourceCommit=f4fc0ec18e63309f546747e28043f910fb1b377a' android_app/distribution.properties; then
+  # This compatibility probe uses only the disposable emulator and synthetic wallets.
+  # Preserve the original exported file outside the app before opening the old APK.
+  observation_path=/data/local/tmp/ekstre-observation-synthetic.json
+  run_case exportBalanceObservationForCompatibility -e preserveWallet true -e observationCompatibility true
+  adb exec-out run-as "$permanent" cat files/synthetic-observation-backup.json > "$work/observation-backup.json"
+  adb push "$work/observation-backup.json" "$observation_path"
+  adb shell pm clear "$permanent" | tr -d '\r' | grep -Fx Success
+  adb install -r -d "$work/baseline.apk"
+  run_case oldWalletRejectsObservationBackupAndCanStillSave -e observationBackup "$observation_path"
+  adb exec-out cat "$observation_path" > "$work/observation-after-old.json"
+  cmp "$work/observation-backup.json" "$work/observation-after-old.json"
+  adb install -r "$work/candidate.apk"
+  run_case newWalletRestoresOriginalObservationBackup -e preserveWallet true -e observationBackup "$observation_path"
+  echo 'Android 0.4.0 rejected the v2 backup before writing. Its v1 save succeeded and the candidate restored every original observation field.'
+fi
+
 if [[ -f $legacy_apk ]]; then
   adb exec-out run-as "$legacy" cat databases/wallet.db > "$work/legacy-after.db"
   cmp "$work/legacy-before.db" "$work/legacy-after.db"

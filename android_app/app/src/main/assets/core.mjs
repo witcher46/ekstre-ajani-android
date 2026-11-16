@@ -47,11 +47,42 @@ export const validDate=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Nu
 export const empty=()=>({format:'ekstre-android',version:1,accounts:[],transactions:[],statements:[],budgets:{},subscriptions:[],categories:[...categories]});
 const text=(s,n=200)=>typeof s==='string'&&s.length<=n;
 const cents=n=>Number.isSafeInteger(n)&&Math.abs(n)<=1e12;
+const observationFields=['observedDate','observedAmountCents','sourceKind','note'];
+const observationSources={bank:['bankDocument','manualBank'],cash:['cashCount']};
+const observationTimestamp=value=>typeof value==='string'&&
+ /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)&&
+ Number.isFinite(Date.parse(value))&&new Date(value).toISOString()===value;
+
+function validateBalanceReconciliation(state){
+ const section=state.balanceReconciliation;
+ if(!section||!Array.isArray(section.observations)||section.observations.length>50000){
+  throw Error('Bakiye gözlemleri bölümü eksik veya geçersiz.');
+ }
+ const types=new Map(state.accounts.map(a=>[a.id,a.type]));
+ const ids=new Set();
+ for(const row of section.observations){
+  if(!row||!text(row.id)||!row.id||/[^A-Za-z0-9_-]/.test(row.id)||ids.has(row.id)||
+     !['anchor','observation'].includes(row.role)||
+     !observationSources[types.get(row.accountId)]?.includes(row.sourceKind)||
+     !validDate(row.observedDate)||!Number.isSafeInteger(row.observedAmountCents)||
+     (row.note!==undefined&&!text(row.note,2000))){
+   throw Error('Bakiye gözlemi veya bağlı hesap geçersiz.');
+  }
+  if(!observationTimestamp(row.createdAt)||!observationTimestamp(row.updatedAt)||
+     row.updatedAt<row.createdAt){
+   throw Error('Bakiye gözleminin kayıt zamanı geçersiz.');
+  }
+  ids.add(row.id);
+ }
+}
+
 export function validate(s){
- if(!s||s.format!=='ekstre-android'||s.version!==1)throw Error('Bu dosya Android cüzdan yedeği değil.');
+ if(!s||s.format!=='ekstre-android')throw Error('Bu dosya Android cüzdan yedeği değil.');
+ if(s.version!==1&&s.version!==2)throw Error('Bu Android cüzdan yedeği sürümü desteklenmiyor.');
  for(const k of ['accounts','transactions','statements','subscriptions','categories'])if(!Array.isArray(s[k])||s[k].length>50000)throw Error('Yedek yapısı veya boyutu geçersiz.');
  if(!s.budgets||typeof s.budgets!=='object'||Array.isArray(s.budgets))throw Error('Bütçe verisi geçersiz.');
  const ids=new Set();for(const a of s.accounts){if(!text(a.id)||ids.has(a.id)||!text(a.name)||!a.name.trim()||!['card','bank','cash'].includes(a.type)||!cents(a.opening))throw Error('Hesap kaydı geçersiz.');ids.add(a.id);}
+ if(s.version===2)validateBalanceReconciliation(s);
  const txids=new Set();for(const t of s.transactions){if(!text(t.id)||txids.has(t.id)||!ids.has(t.account)||!validDate(t.date)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(t.period)||!text(t.desc,500)||!text(t.category)||!text(t.note??'',2000)||!cents(t.amount)||t.amount<0||!['expense','income','refund','cardPayment','payment','transfer'].includes(t.kind))throw Error('İşlem kaydı geçersiz.');if(['payment','transfer'].includes(t.kind)&&(!ids.has(t.target)||t.target===t.account))throw Error('Hedef hesap geçersiz.');if(t.installment&&!/^\d{1,3}\/\d{1,3}$/.test(t.installment))throw Error('Taksit geçersiz.');txids.add(t.id);}
  for(const st of s.statements)if(!text(st.id)||!ids.has(st.account)||!validDate(st.cut)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(st.period)||!(st.debt===null||cents(st.debt))||!(st.due===null||validDate(st.due)))throw Error('Ekstre kaydı geçersiz.');
  for(const [k,v] of Object.entries(s.budgets))if(!/^\d{4}-(0[1-9]|1[0-2])\|.{1,200}$/.test(k)||!cents(v)||v<0)throw Error('Bütçe kaydı geçersiz.');
@@ -704,6 +735,39 @@ export function importCsv(s,rows,account){
  }
  return validate(next);
 }
+function withBalanceObservations(state,observations){
+ return validate({...state,version:2,balanceReconciliation:{...state.balanceReconciliation,observations}});
+}
+
+export function addBalanceObservation(state,input,{now=new Date().toISOString()}={}){
+ if(state.version===1&&Object.hasOwn(state,'balanceReconciliation')){
+  throw Error('Eski yedekteki balanceReconciliation alanı korunuyor. Bu cüzdana gözlem eklenemedi.');
+ }
+ const {accountId,role='observation',observedDate,observedAmountCents,sourceKind,note}=input;
+ const row={id:id(),accountId,role,observedDate,observedAmountCents,sourceKind,createdAt:now,updatedAt:now};
+ if(note!==undefined)row.note=note;
+ validate(state);
+ return withBalanceObservations(state,[...(state.balanceReconciliation?.observations??[]),row]);
+}
+
+export function updateBalanceObservation(state,observationId,changes,{now=new Date().toISOString()}={}){
+ const rows=state.version===2?state.balanceReconciliation.observations:[];
+ const row=rows.find(item=>item.id===observationId);
+ if(!row)throw Error('Bakiye gözlemi bulunamadı.');
+ if(!observationTimestamp(now)||now<row.updatedAt)throw Error('Bakiye gözleminin düzenleme zamanı geçersiz.');
+ if(Object.keys(changes).some(key=>!observationFields.includes(key))){
+  throw Error('Gözlemin kimliği, hesabı, amacı veya oluşturulma zamanı değiştirilemez.');
+ }
+ return withBalanceObservations(state,rows.map(item=>item===row?{...item,...changes,updatedAt:now}:item));
+}
+
+export function removeBalanceObservation(state,observationId){
+ const rows=state.version===2?state.balanceReconciliation.observations:[];
+ const remaining=rows.filter(item=>item.id!==observationId);
+ if(remaining.length===rows.length)throw Error('Bakiye gözlemi bulunamadı.');
+ return withBalanceObservations(state,remaining);
+}
+
 export const BACKUP_LIMIT=32000000;
 export function backupText(s){validate(s);const raw=JSON.stringify(sanitizePdfSources(s));if(new TextEncoder().encode(raw).length>BACKUP_LIMIT)throw Error('Cüzdan yedeği 32 MB sınırını aşıyor. Mevcut kayıtlar korunuyor.');return raw;}
 export function readBackup(raw){if(new TextEncoder().encode(raw).length>BACKUP_LIMIT)throw Error('Yedek en fazla 32 MB olabilir.');return sanitizePdfSources(validate(JSON.parse(raw)));}

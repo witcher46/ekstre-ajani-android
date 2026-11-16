@@ -137,6 +137,7 @@ jobs:
               'failedFinalSqliteWriteRollsBackWalletPreviousAndRecovery',
               'failedFinalSqliteSaveRollsBackThePreviousSnapshot',
               'malformedRestoreDoesNotReplaceWalletOrRecovery',
+              'observationSnapshotsSurviveRestoreAndWriteFailure',
           }
           results = Path('android_app/app/build/outputs/androidTest-results/connected')
           passed = set()
