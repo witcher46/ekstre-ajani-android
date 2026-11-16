@@ -80,6 +80,11 @@ public class WalletJourneyTest {
    click(a,"nav [data-page=plan]");click(a,"[data-action=budget]");value(a,"amount","5000");submit(a);assertEquals("1",js(a,"Object.keys(JSON.parse(Android.load()).budgets).length"));
    click(a,"[data-action=subscription]");value(a,"name","Sentetik abonelik");value(a,"amount","50");value(a,"next","2026-10-15");submit(a);click(a,"[data-pay]");value(a,"paidOn","2026-10-20");submit(a);assertEquals("\"2026-10-20\"",js(a,"JSON.parse(Android.load()).transactions.at(-1).date"));
    click(a,"nav [data-page=home]");click(a,"[data-page=reports]");waitJs(a,"document.body.innerText.includes('Kategori dağılımı')");
+   waitJs(a,"document.querySelectorAll('[data-report-month]').length===6");
+   value(a,"report-range","12");
+   waitJs(a,"document.querySelectorAll('[data-report-month]').length===12 && document.activeElement.id==='f-report-range'");
+   device.pressBack();
+   waitJs(a,"document.activeElement.matches('button[data-page=reports]')");
    // Verify a real Android file picker can open and cancel, then exercise actual ContentResolver PDF bytes.
    click(a,"nav [data-page=import]");click(a,"[data-action=pdf]");waitPicker();evidence("pdf-picker");assertTrue("PDF picker package="+device.getCurrentPackageName()+" "+systemLabels(),device.getCurrentPackageName().contains("documentsui"));device.pressBack();
    Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();PDFBoxResourceLoader.init(context);byte[] pdfBytes;
@@ -171,7 +176,16 @@ public class WalletJourneyTest {
      for(String page:new String[]{"wallet","transactions","plan","reports","import","settings","bankDetail","cardDetail","incomePlans","importPreview","transactionModal","paymentModal","quickAddModal"}){
       js(a,"if(document.querySelector('dialog[open]'))window.handleBack()");
       if(page.equals("settings"))click(a,"#settings");
-      else if(page.equals("reports")){click(a,"nav [data-page=home]");click(a,"[data-page=reports]");}
+      else if(page.equals("reports")){
+       click(a,"nav [data-page=home]");click(a,"[data-page=reports]");
+       if(width==320){
+        value(a,"report-range","12");
+        js(a,"(()=>{const select=document.getElementById('f-report-category');select.selectedIndex=1;select.dispatchEvent(new Event('change',{bubbles:true}));})();");
+        click(a,"#report-movements-toggle");
+        waitJs(a,"!!document.querySelector('#report-category-transactions button[data-edit]') && !!document.querySelector('#report-movements button[data-edit]')");
+       }
+       waitJs(a,"document.querySelectorAll('[data-report-month]').length==="+(width==320?12:6));
+      }
       else if(page.equals("bankDetail")||page.equals("cardDetail")){click(a,"nav [data-page=wallet]");click(a,page.equals("cardDetail")?"[data-card-view]":"[data-account-view]");}
       else if(page.equals("incomePlans")){click(a,"nav [data-page=home]");click(a,"[data-page=incomePlans]");}
       else if(page.equals("importPreview"))js(a,"window.onPdfText('QNB\\nHesap Kesim Tarihi: 05/10/2026\\n04/10/2026 SENTETIK MAGAZA PEN 4.ndirim 9999999999.99')");
