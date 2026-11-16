@@ -430,7 +430,29 @@ export function cardStatus(s,account,{asOf=today()}={}){
  const paidAfterCut=anchored?rows.filter(t=>dateOf(t)>latest.cut&&cardAccount(t)===a.id&&effectKind(t)==='cardPayment').reduce((n,t)=>addCents(n,t.amount),0):0;
  return {current,statementDebt:latest?.debt??null,statementRemaining:anchored?positiveCents(addCents(latest.debt,-paidAfterCut)):null,paidAfterCut,latest:latest||null,currentAnchor:currentAnchor||null,pending:s.transactions.filter(t=>t.matchStatus==='pending'&&cardAccount(t)===a.id).length};
 }
-export function balance(s,a){return a.type==='card'?cardStatus(s,a).current:s.transactions.filter(t=>effective(t)||(t.matchStatus==='pending'&&t.kind==='payment'&&!t.linkedTo)).reduce((n,t)=>addCents(n,ledgerEffect(t,a)),a.opening);}
+const countsForCashBalance=t=>effective(t)||(t.matchStatus==='pending'&&t.kind==='payment'&&!t.linkedTo);
+export function balance(s,a){return a.type==='card'?cardStatus(s,a).current:s.transactions.filter(countsForCashBalance).reduce((n,t)=>addCents(n,ledgerEffect(t,a)),a.opening);}
+
+// Reconstruct from an independently established end-of-day balance and the current ledger.
+export function balanceAt(state,accountId,date,{anchor}={}){
+ if(!validDate(date))throw Error('Geçerli bir bakiye tarihi seç.');
+ const account=state.accounts.find(a=>a.id===accountId);
+ if(!account||!['bank','cash'].includes(account.type))throw Error('Tarihli bakiye için banka veya nakit hesabı seç.');
+ if(anchor===undefined)return {status:'unavailable',reason:'missing-anchor'};
+ if(!anchor||anchor.accountId!==accountId||!validDate(anchor.date)||!Number.isSafeInteger(anchor.amountCents)){
+  throw Error('Bakiye dayanağının hesabını, tarihini ve kuruş tutarını kontrol et.');
+ }
+ if(date<anchor.date)return {status:'unavailable',reason:'before-anchor'};
+
+ let amountCents=anchor.amountCents;
+ for(const row of state.transactions){
+  // The anchor already includes its closing day. Use the cash movement date.
+  if(row.date>anchor.date&&row.date<=date&&countsForCashBalance(row)){
+   amountCents=addCents(amountCents,ledgerEffect(row,account));
+  }
+ }
+ return {status:'calculated',amountCents};
+}
 export function isCardTransaction(s,t){return s.accounts.find(a=>a.id===cardAccount(t))?.type==='card';}
 export function reportPeriod(s,t){const group=[t,...s.transactions.filter(r=>r.linkedTo===t.id)],pdf=group.find(r=>sourceOf(r)==='pdf'),csv=group.find(r=>sourceOf(r)==='csv');return pdf?.period??csv?.period??t.period;}
 export function calendarPeriods(s){
