@@ -403,25 +403,6 @@ public class WalletJourneyTest {
    assertMigratedWallet(a,expected);
   }
  }
- @Test public void exportBalanceObservationForCompatibility()throws Exception{
-  assumeTrue("Requires the 7 to 8 emulator test",InstrumentationRegistry.getArguments().containsKey("observationCompatibility"));
-  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
-  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
-   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
-   js(a,"import('./core.mjs').then(C=>{const current=C.readBackup(Android.load());"
-    +"const next=C.addBalanceObservation(current,{accountId:'synthetic-bank',observedDate:'2026-11-14',"
-    +"observedAmountCents:-9007199254740991,sourceKind:'manualBank',note:'<b>Sentetik</b>'});"
-    +"if(Android.save(C.backupText(next)))window.syntheticObservationBackup=C.backupText(C.readBackup(Android.load()));})");
-   waitJs(a,"typeof window.syntheticObservationBackup==='string'");
-   String backup=new JSONArray("["+js(a,"window.syntheticObservationBackup")+"]").getString(0);
-   JSONObject parsed=new JSONObject(backup);
-   assertEquals(2,parsed.getInt("version"));
-   assertEquals(1,parsed.getJSONObject("balanceReconciliation").getJSONArray("observations").length());
-   try(FileOutputStream out=context.openFileOutput("synthetic-observation-backup.json",Context.MODE_PRIVATE)){
-    out.write(backup.getBytes(StandardCharsets.UTF_8));
-   }
-  }
- }
  @Test public void oldWalletRejectsObservationBackupAndCanStillSave()throws Exception{
   String path=InstrumentationRegistry.getArguments().getString("observationBackup");
   assumeTrue("Requires the old APK on the disposable emulator",path!=null);
@@ -455,13 +436,20 @@ public class WalletJourneyTest {
   String name="synthetic-observation-for-new.apk-test.json";
   Uri file=document(name,"application/json",raw.getBytes(StandardCharsets.UTF_8));
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+   String before=js(a,"Android.load()");
    restoreDownload(a,name);
    waitJs(a,"JSON.parse(Android.load()).version===2");
+   assertEquals(before,js(a,"Android.recovery()"));
    a.recreate();
    waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
-   JSONObject restored=new JSONObject(new JSONArray("["+js(a,"Android.load()")+"]").getString(0));
+   String saved=new JSONArray("["+js(a,"Android.load()")+"]").getString(0);
+   JSONObject restored=new JSONObject(saved);
    for(String key:new String[]{"accounts","transactions","balanceReconciliation"}){
     assertEquals(expected.get(key).toString(),restored.get(key).toString());
+   }
+   try(FileOutputStream out=context.openFileOutput("synthetic-observation-backup.json",Context.MODE_PRIVATE)){
+    out.write(saved.getBytes(StandardCharsets.UTF_8));
    }
   }finally{context.getContentResolver().delete(file,null,null);}
  }

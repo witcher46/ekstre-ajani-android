@@ -101,7 +101,21 @@ if [[ $baseline_code == 7 && $candidate_code == 8 ]] &&
   # This compatibility probe uses only the disposable emulator and synthetic wallets.
   # Preserve the original exported file outside the app before opening the old APK.
   observation_path=/data/local/tmp/ekstre-observation-synthetic.json
-  run_case exportBalanceObservationForCompatibility -e preserveWallet true -e observationCompatibility true
+  node --input-type=module - "$work/backup.json" "$work/observation-seed.json" <<'JS'
+import {webcrypto} from 'node:crypto';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {addBalanceObservation,backupText,readBackup} from './android_app/app/src/main/assets/core.mjs';
+globalThis.crypto ??= webcrypto;
+const [input,output]=process.argv.slice(2);
+const wallet=readBackup(readFileSync(input,'utf8'));
+const observed=addBalanceObservation(wallet,{
+  accountId:'synthetic-bank', observedDate:'2026-11-14',
+  observedAmountCents:-9007199254740991, sourceKind:'manualBank', note:'<b>Sentetik</b>',
+});
+writeFileSync(output,backupText(observed));
+JS
+  adb push "$work/observation-seed.json" "$observation_path"
+  run_case newWalletRestoresOriginalObservationBackup -e preserveWallet true -e observationBackup "$observation_path"
   adb exec-out run-as "$permanent" cat files/synthetic-observation-backup.json > "$work/observation-backup.json"
   adb push "$work/observation-backup.json" "$observation_path"
   adb shell pm clear "$permanent" | tr -d '\r' | grep -Fx Success
