@@ -9,6 +9,9 @@ import android.net.Uri;
 import android.view.*;
 import android.webkit.*;
 import androidx.webkit.WebViewAssetLoader;
+import com.google.gson.Strictness;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.text.PDFTextStripper;
@@ -86,17 +89,29 @@ public class MainActivity extends Activity {
   if(version!=1&&version!=2)return false;
   for(String name:new String[]{"accounts","transactions","statements","subscriptions","categories"})wallet.getJSONArray(name);
   wallet.getJSONObject("budgets");
-  return version==1||validBalanceObservations(wallet);
+  if(version==1)return true;
+  for(String name:new String[]{"transactions","statements","subscriptions"}){
+   JSONArray rows=wallet.getJSONArray(name);
+   if(rows.length()>50000)return false;
+   for(int i=0;i<rows.length();i++)rows.getJSONObject(i);
+  }
+  return validBalanceObservations(wallet);
  }
  private boolean validBalanceObservations(JSONObject wallet)throws JSONException{
   JSONArray accounts=wallet.getJSONArray("accounts");
   JSONArray observations=wallet.getJSONObject("balanceReconciliation").getJSONArray("observations");
-  if(observations.length()>50000)return false;
+  if(accounts.length()>50000||observations.length()>50000)return false;
   HashMap<String,String> types=new HashMap<>();
   for(int i=0;i<accounts.length();i++){
    JSONObject account=accounts.getJSONObject(i);
-   if(!(account.opt("id") instanceof String id)||!(account.opt("type") instanceof String type)||
-     types.putIfAbsent(id,type)!=null)return false;
+   if(!(account.opt("id") instanceof String id)||id.length()>200||
+     !(account.opt("type") instanceof String type)||
+     !("bank".equals(type)||"cash".equals(type)||"card".equals(type))||
+     !(account.opt("name") instanceof String name)||name.length()>200||
+     name.matches("[\\s\\p{Z}\\uFEFF]*")||
+     !(account.opt("opening") instanceof Number opening))return false;
+   double cents=opening.doubleValue();
+   if(Math.abs(cents)>1e12||cents!=Math.rint(cents)||types.putIfAbsent(id,type)!=null)return false;
   }
   HashSet<String> ids=new HashSet<>();
   var timestampFormat=new DateTimeFormatterBuilder().appendInstant(3).toFormatter();
@@ -123,9 +138,18 @@ public class MainActivity extends Activity {
   }
   return true;
  }
+ private boolean isJsonDocument(String content)throws IOException{
+  // JSONObject accepts a permissive prefix. Snapshots must be readable by JSON.parse.
+  try(JsonReader reader=new JsonReader(new StringReader(content))){
+   reader.setStrictness(Strictness.STRICT);
+   if(reader.peek()!=JsonToken.BEGIN_OBJECT)return false;
+   reader.skipValue();
+   return reader.peek()==JsonToken.END_DOCUMENT;
+  }
+ }
  private synchronized boolean writeSnapshot(String content,boolean restore){
   if(content==null||content.getBytes(StandardCharsets.UTF_8).length>BACKUP_LIMIT)return false;
-  try{if(!supportsSnapshot(new JSONObject(content)))return false;
+  try{if(!isJsonDocument(content)||!supportsSnapshot(new JSONObject(content)))return false;
    db.beginTransaction();try{if(restore)db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 3,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 2,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});db.setTransactionSuccessful();}finally{db.endTransaction();}return true;
   }catch(Exception e){return false;}
  }

@@ -71,6 +71,11 @@ public class SnapshotAtomicityTest {
    assertFalse(bridge.restore(edited.replace("\"opening\":0}]","\"opening\":0},{\"id\":\"bank\",\"type\":\"bank\"}]")));
    assertFalse(bridge.restore(edited.replace("2026-11-14\"","2026-02-30\"")));
    assertFalse(bridge.restore(edited.replace("-9007199254740991","-9007199254740992")));
+   assertFalse(bridge.restore(edited+" trailing"));
+   assertFalse(bridge.restore(edited.replace("\"version\"","'version'")));
+   assertFalse(bridge.restore(edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"\\q")));
+   assertFalse(bridge.restore(edited.replace("\"transactions\":[]","\"transactions\":[null]")));
+   assertFalse(bridge.restore(edited.replace("\"opening\":0","\"opening\":\"bad\"")));
    try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
     assertEquals(edited,snapshot(database,1));
     assertEquals(original,snapshot(database,2));
@@ -96,6 +101,38 @@ public class SnapshotAtomicityTest {
    assertTrue(reopened.save(reopened.recovery()));
    scenario.recreate();
    assertEquals(edited,bridge(scenario).load());
+  }
+ }
+
+ @Test public void largeObservationBackupSurvivesAndOversizeRestoreIsRejected() {
+  String small=observedWallet("large");
+  int start=small.indexOf("{\"id\":\"observation-large\"");
+  int end=small.indexOf("}]",start)+1;
+  String row=small.substring(start,end);
+  StringBuilder rows=new StringBuilder();
+  for(int i=0;i<5000;i++){
+   if(i>0)rows.append(',');
+   rows.append(row.replace("observation-large","observation-"+i));
+  }
+  String large=small.substring(0,start)+rows+small.substring(end);
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(bridge.save(small));
+   assertTrue(bridge.restore(large));
+   assertEquals(large,bridge.load());
+   assertEquals(small,bridge.recovery());
+
+   // Two UTF-8 bytes per character, with a character count below the byte limit.
+   String prefix=small.substring(0,small.length()-1)+",\"padding\":\"";
+   String suffix="\"}";
+   int remaining=32_000_000-(prefix+suffix).getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+   char[] padding=new char[remaining/2];
+   java.util.Arrays.fill(padding,'ü');
+   String atLimit=prefix+new String(padding)+(remaining%2==1?"a":"")+suffix;
+   assertTrue(bridge.save(atLimit));
+   assertFalse(bridge.restore(atLimit+" "));
+   assertEquals(atLimit,bridge.load());
+   assertEquals(small,bridge.recovery());
   }
  }
 

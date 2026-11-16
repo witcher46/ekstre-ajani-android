@@ -127,3 +127,26 @@ test('ordinary wallet edits and normalization preserve observations in the saved
   assert.deepEqual(observations(reopened),observations(next));
   assert.equal(reopened.transactions.length,next.transactions.length+1);
 });
+
+test('v2 accepts 50,000 observations and rejects the next observation before writing', () => {
+  const state = add(legacy());
+  const seed = observations(state)[0];
+  state.balanceReconciliation.observations = Array.from({length:50000},(_,index)=>({...seed,id:'observation-'+index}));
+  const roundTrip = C.readBackup(C.backupText(state));
+  assert.equal(observations(roundTrip).length,50000);
+  assert.deepEqual(observations(roundTrip).at(-1),{...seed,id:'observation-49999'});
+  assert.throws(()=>add(roundTrip),/gözlemleri bölümü/);
+  assert.equal(observations(roundTrip).length,50000);
+});
+
+test('v2 read and write use the exact UTF-8 backup limit', () => {
+  const state = {...add(legacy()),padding:''};
+  const remaining = C.BACKUP_LIMIT-Buffer.byteLength(C.backupText(state));
+  state.padding = 'ü'.repeat(Math.floor(remaining/2))+'a'.repeat(remaining%2);
+  const allowed = C.backupText(state);
+  assert.equal(Buffer.byteLength(allowed),32000000);
+  assert.deepEqual(observations(C.readBackup(allowed)),observations(state));
+  state.padding += 'a';
+  assert.throws(()=>C.backupText(state),/32 MB/);
+  assert.throws(()=>C.readBackup(allowed+' '),/32 MB/);
+});
