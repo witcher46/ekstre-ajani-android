@@ -115,18 +115,86 @@ function cardView(ctx,account) {
   const card = W.cardDetail(state,account.id);
   const statements = state.statements.filter(st => st.account === account.id).sort((a,b) => b.cut.localeCompare(a.cut));
   const unassigned = card.unassignedPayments || [];
-  return `<div class="detail-heading"><div><h1>${esc(account.name)}</h1><p class="lead">Kredi kartı · belge ve kayıtlara göre</p></div><button class="primary" data-pay-card="${esc(account.id)}">Bu kartın borcunu öde</button></div>
-    <section class="hero panel"><div class="summary-grid">${metric(ctx,'cardDebt','Güncel borç tahmini',card.debt)}${metric(ctx,'cardCredit','Kart artı bakiyesi',card.credit)}</div><p class="notice">Bilinen son ekstre borcu veya açılış borcu ile sonraki kayıtlar kullanılır. Son belgenin borcu okunamadıysa önceki bilinen tutar tahmine temel olur. Bankanın canlı bakiyesi değildir; gelecek taksitler eklenmez.</p></section>
-    <section class="panel"><h2>Son ekstre ve ödeme durumu</h2><dl class="card-details">${detail(ctx,'Ekstre dönemi',card.latest?.period || 'Henüz ekstre yok')}${detail(ctx,'Hesap kesim tarihi',card.latest?.cut)}${detail(ctx,'Son ödeme tarihi',card.latest?.due)}${detail(ctx,'Belgedeki son ekstre borcu',card.statementDebt,true)}${detail(ctx,'Kesim sonrası kaydedilmiş ödemeler',card.paidAfterCut,true)}${detail(ctx,'Ödemelere göre kalan ekstre borcu',card.statementRemaining,true)}</dl><p class="notice">Kalan ekstre borcundan yalnızca kaydedilmiş ödemeler düşer. İadeler aşağıda ayrı gösterilir. Bankanın iadeyi son ödeme yükümlülüğüne saydığı varsayılmaz.</p></section>
-    <section class="panel"><h2>Kesim sonrası hareketler</h2><div class="summary-grid">${metric(ctx,'postCutExpenses','Yeni harcamalar',card.postCutExpenses)}${metric(ctx,'postCutRefunds','İadeler',card.postCutRefunds)}</div><p class="notice">İade güncel borç tahminini etkileyebilir; ekstre ödeme yükümlülüğünü tek başına doğrulamaz.</p></section>
-    ${reviewWarning(ctx,state.transactions.filter(t => t.account === account.id || t.target === account.id))}
-    <details class="panel optional-detail" ${unassigned.length ? 'open' : ''}><summary>Ödeme kaynakları${unassigned.length ? ` · ${esc(unassigned.length)} hesap bağlanmalı` : ' · Bekleyen yok'}</summary><p class="notice">Ekstrede görünen ödemenin hangi banka veya nakit hesabından çıktığını bağla. Kart ödemesi gider sayılmaz; aynı işlem ikinci kez kaydedilmez.</p>${unassigned.map(t => `<div class="row"><div class="left"><strong>${esc(t.desc)}</strong><small>${esc(t.date)} · Kaynak hesap bilinmiyor</small></div><b>${amount(ctx,t.amount)}</b><button data-bind-payment="${esc(t.id)}">Kaynak hesabı bağla</button></div>`).join('') || noRows('Kaynak hesabı bağlanmayı bekleyen ekstre ödemesi yok.')}</details>
-    ${installmentPanel(ctx,card.installments)}
-    <details class="panel optional-detail"><summary>Ekstre geçmişi · ${esc(statements.length)} ekstre</summary>${statements.map(st => `<div class="row"><div class="left"><strong>${esc(st.period)}</strong><small>Kesim ${esc(st.cut)} · Son ödeme ${esc(st.due || 'Bilinmiyor')}<br>${esc(st.bank || '')}</small></div><b>${amount(ctx,st.debt)}</b></div>`).join('') || noRows('Henüz ekstre aktarılmadı.')}</details>
-    <section class="panel"><h2>Kart hareketleri</h2>${transactionList(newest(card.movements || []))}</section>
-    <div class="actions"><button data-page="import">Ekstre aktar</button><button data-account="${esc(account.id)}">Kartı düzenle</button></div>`;
-}
+  const latest = card.latest;
+  const knownStatement = Boolean(latest && card.statementDebt !== null);
+  const anchor = card.currentAnchor;
+  const staleAnchor = Boolean(latest && anchor && latest.id !== anchor.id);
+  const anchorText = anchor
+    ? 'Tahminin dayanağı: bilinen ' + anchor.period + ' ekstresi (kesim ' + anchor.cut + ') ve sonraki kayıtlar.'
+    : 'Tahminin dayanağı: kartın kayıtlı açılış borcu ve işlem hareketleri.';
 
+  let html = '<div class="detail-heading"><div><h1>' + esc(account.name) +
+    '</h1><p class="lead">Kredi kartı · belgelere ve yerel kayıtlara göre</p></div>' +
+    '<button class="primary" data-pay-card="' + esc(account.id) + '">Bu kartın borcunu öde</button></div>';
+  html += '<section class="hero panel card-balance-board" aria-labelledby="card-current-heading">' +
+    '<div class="card-section-heading"><h2 id="card-current-heading">Güncel kart durumu</h2>' +
+    '<span class="card-source-label">Kayıtlara göre tahmin</span></div>' +
+    '<div class="summary-grid">' +
+    metric(ctx,'cardDebt','Güncel borç tahmini',card.debt) +
+    metric(ctx,'cardCredit','Kart artı bakiyesi',card.credit) +
+    '</div><p class="notice">Bu rakamlar bankanın canlı borç veya kullanılabilir limit bilgisi değildir. Gelecek taksitler mevcut borca peşinen eklenmez.</p>' +
+    '<p class="card-source-note">' + esc(anchorText) + '</p>' +
+    (staleAnchor ? '<p class="warning" role="status">En son ekstre borcu okunamadı. Güncel tahmin, önceki bilinen ekstreye dayanıyor; son dönemin ödeme yükümlülüğü bilinmiyor.</p>' : '') +
+    (card.pending ? '<p class="notice">' + esc(card.pending) + ' hareket eşleşme incelemesinde. Kesinleşmeyen işlemler tahminin doğruluğunu etkileyebilir.</p>' : '') +
+    '</section>';
+
+  html += '<section class="panel card-statement-summary" aria-labelledby="card-statement-heading">' +
+    '<div class="card-section-heading"><h2 id="card-statement-heading">Son ekstre ve ödeme durumu</h2>' +
+    '<span class="card-source-label">' + (latest ? 'Ekstre: ' + esc(latest.period) : 'Ekstre yok') + '</span></div>';
+  if(latest){
+    const {rowsByStatement,underReview} = statementGroups(state);
+    const status = statementStatus(latest,underReview.has(latest.id),rowsByStatement.get(latest.id)?.length ?? 0);
+    const label = status.tone === 'verified' ? 'Ekstre toplamları doğrulandı' : status.label;
+    const reconciliation = status.reason ? label + ' · ' + status.reason : label;
+    html += '<p class="notice">' + esc(latest.bank || 'Banka bilinmiyor') + ' · ' + esc(reconciliation) + '</p>' +
+      '<dl class="card-details">' +
+      detail(ctx,'Hesap kesim tarihi',latest.cut) +
+      detail(ctx,'Son ödeme tarihi',latest.due) +
+      '<div><dt>Belgedeki dönem borcu</dt><dd data-stat="cardStatementDebt">' + amount(ctx,card.statementDebt) + '</dd></div>' +
+      '<div><dt>Kesim sonrası kaydedilmiş ödemeler</dt><dd data-stat="cardPaidAfterCut">' + amount(ctx,knownStatement ? card.paidAfterCut : null) + '</dd></div>' +
+      '<div class="card-remaining"><dt>Ödemelere göre kalan dönem borcu</dt><dd data-stat="cardStatementRemaining">' + amount(ctx,card.statementRemaining) + '</dd></div>' +
+      '</dl>';
+    if(!knownStatement)html += '<p class="warning">Son ekstrede dönem borcu okunamadı. Kalan dönem borcu hesaplanamaz; sıfır kabul edilmez.</p>';
+    html += '<p class="notice">Kalan dönem borcundan yalnızca kaydedilmiş ödemeler düşülür. İadeler burada otomatik ödeme sayılmaz; banka onayı olmadan asgari ödeme veya kalan yükümlülük kesinleştirilmez.</p>';
+    html += '<button class="card-statement-link" data-statement-view="' + esc(latest.id) + '">Son ekstre ayrıntısını aç</button>';
+  }else{
+    html += '<p class="empty-note">Henüz ekstre aktarılmadı. Dönem borcu, kalan ekstre borcu ve son ödeme tarihi bilinmiyor.</p>' +
+      '<p class="notice">Güncel tahmin yalnızca kart açılış bilgisi ve kaydedilmiş hareketlere dayanır.</p>';
+  }
+  html += '</section>';
+
+  html += '<section class="panel card-after-cut" aria-labelledby="card-after-cut-heading">' +
+    '<h2 id="card-after-cut-heading">Son kesim sonrası hareketler</h2>';
+  if(latest){
+    html += '<div class="summary-grid">' +
+      metric(ctx,'postCutExpenses','Yeni harcamalar',card.postCutExpenses) +
+      metric(ctx,'postCutRefunds','Gerçekleşen iadeler',card.postCutRefunds) +
+      '</div><p class="notice">Yalnızca son ekstre kesiminden sonra kaydedilmiş hareketler. İadeler güncel borç tahminini azaltabilir; dönem borcunun ödenmiş sayılacağı anlamına gelmez.</p>';
+  }else{
+    html += '<p class="empty-note">Son ekstre kesim tarihi olmadığı için kesim sonrası hareket toplamı gösterilemiyor.</p>';
+  }
+  html += '</section>';
+  html += reviewWarning(ctx,state.transactions.filter(t => t.account === account.id || t.target === account.id));
+  html += '<details class="panel optional-detail" ' + (unassigned.length ? 'open' : '') + '><summary>Ödeme kaynakları' +
+    (unassigned.length ? ' · ' + esc(unassigned.length) + ' hesap bağlanmalı' : ' · Bekleyen yok') +
+    '</summary><p class="notice">Ekstrede görünen ödemenin hangi banka veya nakit hesabından çıktığını bağla. Kart ödemesi gider sayılmaz; aynı işlem ikinci kez kaydedilmez.</p>' +
+    unassigned.map(t => '<div class="row"><div class="left"><strong>' + esc(t.desc) +
+      '</strong><small>' + esc(t.date) + ' · Kaynak hesap bilinmiyor</small></div><b>' +
+      amount(ctx,t.amount) + '</b><button data-bind-payment="' + esc(t.id) + '">Kaynak hesabı bağla</button></div>').join('') +
+    (unassigned.length ? '' : noRows('Kaynak hesabı bağlanmayı bekleyen ekstre ödemesi yok.')) + '</details>';
+  html += '<div class="card-future-intro"><h2>Gelecek taksitler</h2><p class="notice">Gelecek ayların taksitleri güncel kart borcuna veya bugünkü gidere ikinci kez eklenmez. Ekstrelerden çıkarılan taksitler tahmin, manuel planlar kayıtlı plan olarak etiketlenir.</p></div>';
+  html += installmentPanel(ctx,card.installments);
+  html += '<details class="panel optional-detail"><summary>Ekstre geçmişi · ' + esc(statements.length) + ' ekstre</summary>' +
+    (statements.map(st => '<div class="row"><div class="left"><strong>' + esc(st.period) +
+      '</strong><small>Kesim ' + esc(st.cut) + ' · Son ödeme ' + esc(st.due || 'Bilinmiyor') +
+      '<br>' + esc(st.bank || 'Banka bilinmiyor') + '</small></div><b>' + amount(ctx,st.debt) +
+      '</b><button data-statement-view="' + esc(st.id) + '">Detayı aç</button></div>').join('') ||
+      noRows('Henüz ekstre aktarılmadı.')) + '</details>';
+  html += '<section class="panel"><h2>Kart hareketleri</h2>' + transactionList(newest(card.movements || [])) + '</section>' +
+    '<div class="actions"><button data-page="import">Ekstre aktar</button>' +
+    '<button data-account="' + esc(account.id) + '">Kartı düzenle</button></div>';
+  return html;
+}
 export function accountView(ctx,accountId) {
   const {state,esc,transactionList,periodControl} = ctx;
   const account = state.accounts.find(a => a.id === accountId);
