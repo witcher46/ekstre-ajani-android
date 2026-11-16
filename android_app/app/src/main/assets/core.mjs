@@ -462,6 +462,12 @@ export function cardStatus(s,account,{asOf=today()}={}){
  return {current,statementDebt:latest?.debt??null,statementRemaining:anchored?positiveCents(addCents(latest.debt,-paidAfterCut)):null,paidAfterCut,latest:latest||null,currentAnchor:currentAnchor||null,pending:s.transactions.filter(t=>t.matchStatus==='pending'&&cardAccount(t)===a.id).length};
 }
 const countsForCashBalance=t=>effective(t)||(t.matchStatus==='pending'&&t.kind==='payment'&&!t.linkedTo);
+
+export function cashBalanceMovementEffect(row,account){
+ if((row.account!==account.id&&row.target!==account.id)||!countsForCashBalance(row))return null;
+ return ledgerEffect(row,account);
+}
+
 export function balance(s,a){return a.type==='card'?cardStatus(s,a).current:s.transactions.filter(countsForCashBalance).reduce((n,t)=>addCents(n,ledgerEffect(t,a)),a.opening);}
 
 // Reconstruct from an independently established end-of-day balance and the current ledger.
