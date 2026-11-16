@@ -108,7 +108,7 @@ public class MainActivity extends Activity {
      !(account.opt("type") instanceof String type)||
      !("bank".equals(type)||"cash".equals(type)||"card".equals(type))||
      !(account.opt("name") instanceof String name)||name.length()>200||
-     name.matches("[\\s\\p{Z}\\uFEFF]*")||
+     name.matches("[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*")||
      !(account.opt("opening") instanceof Number opening))return false;
    double cents=opening.doubleValue();
    if(Math.abs(cents)>1e12||cents!=Math.rint(cents)||types.putIfAbsent(id,type)!=null)return false;
@@ -140,8 +140,21 @@ public class MainActivity extends Activity {
  }
  private boolean isJsonDocument(String content)throws IOException{
   // JSONObject accepts a permissive prefix. Snapshots must be readable by JSON.parse.
+  if(content.startsWith("\uFEFF"))return false;
+  // Gson's skipValue does not check raw control characters in quoted strings.
+  boolean quoted=false;
+  for(int i=0;i<content.length();i++){
+   char c=content.charAt(i);
+   if(quoted&&c<' ')return false;
+   if(quoted&&c=='\\'){
+    if(++i>=content.length()||content.charAt(i)<' ')return false;
+   }else if(c=='"')quoted=!quoted;
+  }
   try(JsonReader reader=new JsonReader(new StringReader(content))){
    reader.setStrictness(Strictness.STRICT);
+   // The existing JSONObject parser already read this document. Keep its depth
+   // behavior for unknown legacy fields instead of imposing Gson's lower default.
+   reader.setNestingLimit(Integer.MAX_VALUE);
    if(reader.peek()!=JsonToken.BEGIN_OBJECT)return false;
    reader.skipValue();
    return reader.peek()==JsonToken.END_DOCUMENT;
@@ -149,7 +162,9 @@ public class MainActivity extends Activity {
  }
  private synchronized boolean writeSnapshot(String content,boolean restore){
   if(content==null||content.getBytes(StandardCharsets.UTF_8).length>BACKUP_LIMIT)return false;
-  try{if(!isJsonDocument(content)||!supportsSnapshot(new JSONObject(content)))return false;
+  try{if(!supportsSnapshot(new JSONObject(content))||!isJsonDocument(content))return false;
+  }catch(Exception|StackOverflowError e){return false;}
+  try{
    db.beginTransaction();try{if(restore)db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 3,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 2,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});db.setTransactionSuccessful();}finally{db.endTransaction();}return true;
   }catch(Exception e){return false;}
  }

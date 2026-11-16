@@ -60,9 +60,14 @@ public class SnapshotAtomicityTest {
 
  @Test public void observationSnapshotsSurviveRestoreAndWriteFailure() {
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
-  String original=observedWallet("original"),edited=observedWallet("edited"),legacy=wallet("legacy");
+  String original=observedWallet("original"),edited=observedWallet("edited");
+  String nested="0";
+  for(int i=0;i<300;i++)nested="["+nested+"]";
+  String legacy=wallet("legacy").replace("\"accounts\":[]","\"accounts\":[],\"extra\":"+nested);
+  String unicodeName=edited.replace("\"name\":\"Synthetic\"","\"name\":\"\u0085\"");
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(bridge.save(unicodeName));
    assertTrue(bridge.save(original));
    assertTrue(bridge.restore(edited));
    assertFalse(bridge.restore(edited.replace("\"accountId\":\"bank\"","\"accountId\":\"missing\"")));
@@ -74,6 +79,9 @@ public class SnapshotAtomicityTest {
    assertFalse(bridge.restore(edited+" trailing"));
    assertFalse(bridge.restore(edited.replace("\"version\"","'version'")));
    assertFalse(bridge.restore(edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"\\q")));
+   assertFalse(bridge.restore(edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"line\nbreak")));
+   assertFalse(bridge.restore(edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"zero"+(char)0)));
+   assertFalse(bridge.restore("\uFEFF"+edited));
    assertFalse(bridge.restore(edited.replace("\"transactions\":[]","\"transactions\":[null]")));
    assertFalse(bridge.restore(edited.replace("\"opening\":0","\"opening\":\"bad\"")));
    try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
