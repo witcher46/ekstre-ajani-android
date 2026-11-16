@@ -9,12 +9,22 @@ import android.net.Uri;
 import android.view.*;
 import android.webkit.*;
 import androidx.webkit.WebViewAssetLoader;
+import com.google.gson.Strictness;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.text.PDFTextStripper;
+import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.Instant;
+import java.time.format.DateTimeFormatterBuilder;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
@@ -73,10 +83,88 @@ public class MainActivity extends Activity {
   for(int start=1;start<=length;start+=100000){try(Cursor c=db.rawQuery("SELECT substr(content,?,100000) FROM snapshots WHERE id=?",new String[]{String.valueOf(start),String.valueOf(id)})){if(c.moveToFirst())content.append(c.getString(0));}}
   return content.toString();
  }
+ private boolean supportsSnapshot(JSONObject wallet)throws JSONException{
+  if(!"ekstre-android".equals(wallet.opt("format"))||!(wallet.opt("version") instanceof Number))return false;
+  double version=wallet.getDouble("version");
+  if(version!=1&&version!=2)return false;
+  for(String name:new String[]{"accounts","transactions","statements","subscriptions","categories"})wallet.getJSONArray(name);
+  wallet.getJSONObject("budgets");
+  if(version==1)return true;
+  for(String name:new String[]{"transactions","statements","subscriptions"}){
+   JSONArray rows=wallet.getJSONArray(name);
+   if(rows.length()>50000)return false;
+   for(int i=0;i<rows.length();i++)rows.getJSONObject(i);
+  }
+  return validBalanceObservations(wallet);
+ }
+ private boolean validBalanceObservations(JSONObject wallet)throws JSONException{
+  JSONArray accounts=wallet.getJSONArray("accounts");
+  JSONArray observations=wallet.getJSONObject("balanceReconciliation").getJSONArray("observations");
+  if(accounts.length()>50000||observations.length()>50000)return false;
+  HashMap<String,String> types=new HashMap<>();
+  for(int i=0;i<accounts.length();i++){
+   JSONObject account=accounts.getJSONObject(i);
+   if(!(account.opt("id") instanceof String id)||id.length()>200||
+     !(account.opt("type") instanceof String type)||
+     !("bank".equals(type)||"cash".equals(type)||"card".equals(type))||
+     !(account.opt("name") instanceof String name)||name.length()>200||
+     name.matches("[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*")||
+     !(account.opt("opening") instanceof Number opening))return false;
+   double cents=opening.doubleValue();
+   if(Math.abs(cents)>1e12||cents!=Math.rint(cents)||types.putIfAbsent(id,type)!=null)return false;
+  }
+  HashSet<String> ids=new HashSet<>();
+  var timestampFormat=new DateTimeFormatterBuilder().appendInstant(3).toFormatter();
+  for(int i=0;i<observations.length();i++){
+   JSONObject row=observations.getJSONObject(i);
+   if(!(row.opt("id") instanceof String id)||!id.matches("[A-Za-z0-9_-]{1,200}")||!ids.add(id))return false;
+   if(!(row.opt("accountId") instanceof String accountId))return false;
+   Object source=row.opt("sourceKind");
+   String type=types.get(accountId);
+   boolean validSource="bank".equals(type)&&("bankDocument".equals(source)||"manualBank".equals(source))
+     ||"cash".equals(type)&&"cashCount".equals(source);
+   Object role=row.opt("role");
+   if(!validSource||!("anchor".equals(role)||"observation".equals(role)))return false;
+   if(!(row.opt("observedAmountCents") instanceof Number amount))return false;
+   double cents=amount.doubleValue();
+   if(Math.abs(cents)>9007199254740991d||cents!=Math.rint(cents))return false;
+   if(row.has("note")&&(!(row.opt("note") instanceof String note)||note.length()>2000))return false;
+   if(!(row.opt("observedDate") instanceof String date)||date.length()!=10||
+     !LocalDate.parse(date).toString().equals(date))return false;
+   if(!(row.opt("createdAt") instanceof String created)||!(row.opt("updatedAt") instanceof String updated)||
+     created.length()!=24||updated.length()!=24||updated.compareTo(created)<0||
+     !timestampFormat.format(Instant.parse(created)).equals(created)||
+     !timestampFormat.format(Instant.parse(updated)).equals(updated))return false;
+  }
+  return true;
+ }
+ private boolean isJsonDocument(String content)throws IOException{
+  // JSONObject accepts a permissive prefix. Snapshots must be readable by JSON.parse.
+  if(content.startsWith("\uFEFF"))return false;
+  // Gson's skipValue does not check raw control characters in quoted strings.
+  boolean quoted=false;
+  for(int i=0;i<content.length();i++){
+   char c=content.charAt(i);
+   if(quoted&&c<' ')return false;
+   if(quoted&&c=='\\'){
+    if(++i>=content.length()||content.charAt(i)<' ')return false;
+   }else if(c=='"')quoted=!quoted;
+  }
+  try(JsonReader reader=new JsonReader(new StringReader(content))){
+   reader.setStrictness(Strictness.STRICT);
+   // The existing JSONObject parser already read this document. Keep its depth
+   // behavior for unknown legacy fields instead of imposing Gson's lower default.
+   reader.setNestingLimit(Integer.MAX_VALUE);
+   if(reader.peek()!=JsonToken.BEGIN_OBJECT)return false;
+   reader.skipValue();
+   return reader.peek()==JsonToken.END_DOCUMENT;
+  }
+ }
  private synchronized boolean writeSnapshot(String content,boolean restore){
   if(content==null||content.getBytes(StandardCharsets.UTF_8).length>BACKUP_LIMIT)return false;
-  try{JSONObject v=new JSONObject(content);if(!v.optString("format").equals("ekstre-android")||v.optInt("version")!=1)return false;
-   for(String name:new String[]{"accounts","transactions","statements","subscriptions","categories"})v.getJSONArray(name);v.getJSONObject("budgets");
+  try{if(!supportsSnapshot(new JSONObject(content))||!isJsonDocument(content))return false;
+  }catch(Exception|StackOverflowError e){return false;}
+  try{
    db.beginTransaction();try{if(restore)db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 3,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 2,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});db.setTransactionSuccessful();}finally{db.endTransaction();}return true;
   }catch(Exception e){return false;}
  }

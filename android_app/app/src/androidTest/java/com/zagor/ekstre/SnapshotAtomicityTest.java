@@ -49,6 +49,101 @@ public class SnapshotAtomicityTest {
   }
  }
 
+ private String observedWallet(String marker) {
+  return wallet(marker).replace("\"version\":1","\"version\":2")
+   .replace("\"accounts\":[]","\"accounts\":[{\"id\":\"bank\",\"name\":\"Synthetic\",\"type\":\"bank\",\"opening\":0}]")
+   .replace("\"transactions\":[]","\"transactions\":[],\"balanceReconciliation\":{\"observations\":[{"
+    + "\"id\":\"observation-" + marker + "\",\"accountId\":\"bank\",\"role\":\"observation\","
+    + "\"observedDate\":\"2026-11-14\",\"observedAmountCents\":-9007199254740991,\"sourceKind\":\"bankDocument\","
+    + "\"createdAt\":\"2026-11-14T10:00:00.000Z\",\"updatedAt\":\"2026-11-15T11:00:00.000Z\"}]}");
+ }
+
+ @Test public void observationSnapshotsSurviveRestoreAndWriteFailure() {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String original=observedWallet("original"),edited=observedWallet("edited");
+  String nested="0";
+  for(int i=0;i<300;i++)nested="["+nested+"]";
+  String legacy=wallet("legacy").replace("\"accounts\":[]","\"accounts\":[],\"extra\":"+nested);
+  String unicodeName=edited.replace("\"name\":\"Synthetic\"","\"name\":\"\u0085\"");
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(bridge.save(unicodeName));
+   assertTrue(bridge.save(original));
+   assertTrue(bridge.restore(edited));
+   assertFalse(bridge.restore(edited.replace("\"accountId\":\"bank\"","\"accountId\":\"missing\"")));
+   assertFalse(bridge.restore(edited.replace("\"id\":\"bank\"","\"id\":123")
+    .replace("\"accountId\":\"bank\"","\"accountId\":\"123\"")));
+   assertFalse(bridge.restore(edited.replace("\"opening\":0}]","\"opening\":0},{\"id\":\"bank\",\"type\":\"bank\"}]")));
+   assertFalse(bridge.restore(edited.replace("2026-11-14\"","2026-02-30\"")));
+   assertFalse(bridge.restore(edited.replace("-9007199254740991","-9007199254740992")));
+   assertFalse(bridge.restore(edited+" trailing"));
+   assertFalse(bridge.restore(edited.replace("\"version\"","'version'")));
+   assertFalse(bridge.restore(edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"\\q")));
+   assertFalse(bridge.restore(edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"line\nbreak")));
+   assertFalse(bridge.restore(edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"zero"+(char)0)));
+   assertFalse(bridge.restore("\uFEFF"+edited));
+   assertFalse(bridge.restore(edited.replace("\"transactions\":[]","\"transactions\":[null]")));
+   assertFalse(bridge.restore(edited.replace("\"opening\":0","\"opening\":\"bad\"")));
+   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
+    assertEquals(edited,snapshot(database,1));
+    assertEquals(original,snapshot(database,2));
+    assertEquals(original,snapshot(database,3));
+    database.execSQL("CREATE TRIGGER "+TRIGGER+" BEFORE INSERT ON snapshots WHEN NEW.id=1"
+     +" BEGIN SELECT RAISE(ABORT, 'synthetic-observation-write-failure'); END");
+    try{
+     assertFalse(bridge.restore(legacy));
+     assertEquals(edited,snapshot(database,1));
+     assertEquals(original,snapshot(database,2));
+     assertEquals(original,snapshot(database,3));
+    } finally {
+     database.execSQL("DROP TRIGGER IF EXISTS "+TRIGGER);
+    }
+    assertTrue(bridge.restore(legacy));
+    assertEquals(legacy,snapshot(database,1));
+    assertEquals(edited,snapshot(database,2));
+    assertEquals(edited,snapshot(database,3));
+   }
+   scenario.recreate();
+   MainActivity.Bridge reopened=bridge(scenario);
+   assertEquals(edited,reopened.recovery());
+   assertTrue(reopened.save(reopened.recovery()));
+   scenario.recreate();
+   assertEquals(edited,bridge(scenario).load());
+  }
+ }
+
+ @Test public void largeObservationBackupSurvivesAndOversizeRestoreIsRejected() {
+  String small=observedWallet("large");
+  int start=small.indexOf("{\"id\":\"observation-large\"");
+  int end=small.indexOf("}]",start)+1;
+  String row=small.substring(start,end);
+  StringBuilder rows=new StringBuilder();
+  for(int i=0;i<5000;i++){
+   if(i>0)rows.append(',');
+   rows.append(row.replace("observation-large","observation-"+i));
+  }
+  String large=small.substring(0,start)+rows+small.substring(end);
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(bridge.save(small));
+   assertTrue(bridge.restore(large));
+   assertEquals(large,bridge.load());
+   assertEquals(small,bridge.recovery());
+
+   // Two UTF-8 bytes per character, with a character count below the byte limit.
+   String prefix=small.substring(0,small.length()-1)+",\"padding\":\"";
+   String suffix="\"}";
+   int remaining=32_000_000-(prefix+suffix).getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+   char[] padding=new char[remaining/2];
+   java.util.Arrays.fill(padding,'ü');
+   String atLimit=prefix+new String(padding)+(remaining%2==1?"a":"")+suffix;
+   assertTrue(bridge.save(atLimit));
+   assertFalse(bridge.restore(atLimit+" "));
+   assertEquals(atLimit,bridge.load());
+   assertEquals(small,bridge.recovery());
+  }
+ }
+
  @Test public void failedFinalSqliteWriteRollsBackWalletPreviousAndRecovery() {
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
   String first=wallet("first"),current=wallet("current"),candidate=wallet("candidate");
@@ -135,9 +230,10 @@ public class SnapshotAtomicityTest {
    assertTrue(bridge.save(first));
    assertTrue(bridge.restore(current));
 
-   String invalidVersion=wallet("unsupported").replace("\"version\":1","\"version\":2");
+   String invalidVersion=wallet("unsupported").replace("\"version\":1","\"version\":3");
+   String missingObservations=wallet("incomplete").replace("\"version\":1","\"version\":2");
    String missingArray=wallet("broken").replace("\"transactions\":[]","\"transactions\":null");
-   for(String invalid:new String[]{"{invalid JSON",invalidVersion,missingArray}) {
+   for(String invalid:new String[]{"{invalid JSON",invalidVersion,missingObservations,missingArray}) {
     assertFalse("Malformed/unsupported native restore must fail",bridge.restore(invalid));
     assertEquals(current,bridge.load());
     assertEquals(first,bridge.recovery());

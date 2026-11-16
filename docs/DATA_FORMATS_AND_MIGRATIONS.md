@@ -5,7 +5,7 @@ Her uygulama kendi yerel deposuna sahiptir. Bunlar otomatik eşitlenmez; taşım
 | Platform | Yerel şema/depo | Yedek biçimi | Mevcut taşıma sınırı |
 |---|---|---|---|
 | Windows masaüstü | SQLite `PRAGMA user_version=4`; dosya kullanıcı profilinin yerel uygulama veri klasöründedir | SQLite veritabanı ve yerel kurtarma kopyaları | Bu depodaki masaüstü şeması `db.py` içinde sürümlenir. Web aktarımı yalnızca doğrulanmış SQLite v4 dosyasını salt okunur işler; parola/kimlik bilgileri aktarılmaz. |
-| Android | Uygulamaya özel yerel SQLite | JSON `format="ekstre-android"`, `version=1` | Android v1 kayıtları korunur; yeni alanlar geriye uyumlu/isteğe bağlı tutulur. Web v1 Android yedeğini önizleyerek içe alabilir. Otomatik senkronizasyon yoktur. |
+| Android | Uygulamaya özel yerel SQLite | JSON `format="ekstre-android"`, `version=1` veya `version=2` | Eski v1 kayıtlar korunur. İlk bakiye gözlemi Android yedeğini v2 yapar. Eski Android ve v1 web aktarımı için [gözlemli yedek geçiş sözleşmesine](ANDROID_ACCOUNT_BALANCE_RECONCILIATION_PHASE_2_STORAGE.md) bak. Otomatik senkronizasyon yoktur. |
 | Web | Tarayıcı IndexedDB veritabanı sürüm 2 | Web JSON yedeği `version=2` | IndexedDB v1→v2 göçü ve eski web JSON v1 geri yüklemesi desteklenir. Android JSON v1 ve masaüstü SQLite v4 aktarımı önizleme ile yapılır. |
 
 ## Güvenli taşıma ilkeleri
