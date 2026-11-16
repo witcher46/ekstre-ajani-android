@@ -32,6 +32,7 @@ function fixture({state=wallet(), accountId='bank', anchorAmount=1000000, observ
   const options = {anchorId:anchor.id,observationClosing:closing,anchorReview:{
     anchorId:anchor.id, accountId, date:anchor.observedDate, amountCents:anchor.observedAmountCents,
     sourceKind:info.sourceKind, sourceRef:'synthetic-opening', closing,
+    sourceType:accountId==='cash'?'cashCountRecord':'bankClosingRecord',
   }};
   return {state,options,anchor,observation,compare:(changes={},current=state)=>
     R.compareBalanceObservation(current,observation.id,{...options,...changes})};
@@ -135,6 +136,16 @@ test('intraday, different or invalid closing calendars make a comparison unavail
     assert.equal(result.reason,'closing-mismatch');
     assert.equal(result.differenceCents,undefined);
   }
+});
+
+test('manual bank anchor review explicitly identifies an independent balance source type', () => {
+  const f = fixture();
+  const state = C.updateBalanceObservation(f.state,f.anchor.id,{sourceKind:'manualBank'},{now});
+  const anchorReview = {...f.options.anchorReview,sourceKind:'manualBank'};
+  for(const sourceType of [undefined,'walletCalculation','cashCountRecord']){
+    assert.equal(f.compare({anchorReview:{...anchorReview,sourceType}},state).reason,'unconfirmed-anchor');
+  }
+  assert.equal(f.compare({anchorReview},state).calculatedCents,1000000);
 });
 
 test('a transfer uses a different signed effect on each account and a credit card payment debits once', () => {
@@ -281,6 +292,10 @@ test('previous evidence requires review after a transfer destination changes eve
   assert.equal(impression.coverage.status,'source-supported');
   assert.equal(evaluate(changed).status,'review-required');
   assert.equal(evaluate(changed).reason,'comparison-changed');
-  assert.equal(evaluate(f.state,{...previous,version:50}).reason,'unsupported-evidence');
-  assert.equal(evaluate(f.state,f.compare().evidence).reason,'insufficient-previous-coverage');
+  const unknown = evaluate(f.state,{...previous,version:50});
+  assert.equal(unknown.reason,'unsupported-evidence');
+  assert.equal(unknown.comparison.differenceCents,-175000);
+  const missing = evaluate(f.state,f.compare().evidence);
+  assert.equal(missing.reason,'insufficient-previous-coverage');
+  assert.equal(missing.comparison.differenceCents,-175000);
 });

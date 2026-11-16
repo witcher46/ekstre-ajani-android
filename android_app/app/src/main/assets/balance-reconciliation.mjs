@@ -24,10 +24,11 @@ function sameClosing(expected,actual){
   return actual?.boundary===expected.boundary&&actual.timeZone===expected.timeZone;
 }
 
-function reviewedAnchor(review,anchor){
+function reviewedAnchor(review,anchor,account){
+  const sourceType = account.type==='bank'?'bankClosingRecord':'cashCountRecord';
   return review?.anchorId===anchor.id&&review.accountId===anchor.accountId&&
     review.date===anchor.observedDate&&review.amountCents===anchor.observedAmountCents&&
-    review.sourceKind===anchor.sourceKind&&validRef(review.sourceRef);
+    review.sourceKind===anchor.sourceKind&&review.sourceType===sourceType&&validRef(review.sourceRef);
 }
 
 function movementEvidence({transactions:rows,accounts},account,from,through){
@@ -125,7 +126,7 @@ export function compareBalanceObservation(state,observationId,{
      !validDate(anchor.observedDate)||anchor.observedDate>=observation.observedDate){
     return unavailable('invalid-anchor');
   }
-  if(!reviewedAnchor(anchorReview,anchor))return unavailable('unconfirmed-anchor');
+  if(!reviewedAnchor(anchorReview,anchor,account))return unavailable('unconfirmed-anchor');
   if(!validClosing(observationClosing)||!sameClosing(observationClosing,anchorReview.closing)){
     return unavailable('closing-mismatch');
   }
@@ -144,7 +145,7 @@ export function compareBalanceObservation(state,observationId,{
     policy:evidencePolicy,
     accountId:account.id,
     accountType:account.type,
-    anchor:{...observationEvidence(anchor),sourceRef:anchorReview.sourceRef},
+    anchor:{...observationEvidence(anchor),sourceType:anchorReview.sourceType,sourceRef:anchorReview.sourceRef},
     observation:observationEvidence(observation),
     interval:{fromExclusive:from,throughInclusive:through,boundary:observationClosing.boundary,timeZone:observationClosing.timeZone},
     calculatedCents:String(calculatedCents),
@@ -156,13 +157,13 @@ export function compareBalanceObservation(state,observationId,{
 }
 
 export function evaluateBalanceComparisonEvidence(state,observationId,previous,options){
+  const comparison = compareBalanceObservation(state,observationId,options);
   if(previous?.version!==evidenceVersion||previous.policy!==evidencePolicy){
-    return {status:'review-required',reason:'unsupported-evidence'};
+    return {status:'review-required',reason:'unsupported-evidence',comparison};
   }
   if(previous.coverage?.status!=='source-supported'){
-    return {status:'review-required',reason:'insufficient-previous-coverage'};
+    return {status:'review-required',reason:'insufficient-previous-coverage',comparison};
   }
-  const comparison = compareBalanceObservation(state,observationId,options);
   if(comparison.status!=='calculated'||comparison.coverage.status!=='source-supported'){
     return {status:'review-required',reason:'comparison-changed',comparison};
   }
