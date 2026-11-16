@@ -33,8 +33,8 @@ function reviewedAnchor(review,anchor,account){
     review.sourceKind===anchor.sourceKind&&review.sourceType===sourceType&&validRef(review.sourceRef);
 }
 
-function orphanedPaymentInScope(row,connected,paymentDates,from,through){
-  if(row.kind!=='cardPayment'||row.matchStatus!=='pending'||connected.get(row.id).length||
+function pendingCardPaymentInScope(row,paymentDates,from,through){
+  if(row.kind!=='cardPayment'||row.matchStatus!=='pending'||
      !['pdf','csv'].includes(sourceOf(row)))return false;
   const dates = paymentDates.get(row.account);
   if(!dates)return false;
@@ -67,10 +67,6 @@ function movementEvidence({transactions:rows,accounts},account,from,through){
       connected.get(peer).push(row.id);
     }
   }
-  // An edited bank payment can lose its candidate IDs before its source is resolved.
-  for(const row of rows){
-    if(orphanedPaymentInScope(row,connected,paymentDates,from,through))relevant.push(row.id);
-  }
   const scoped = new Set(relevant);
   for(let i=0;i<relevant.length;i++){
     for(const peer of connected.get(relevant[i])){
@@ -78,6 +74,11 @@ function movementEvidence({transactions:rows,accounts},account,from,through){
       scoped.add(peer);
       relevant.push(peer);
     }
+  }
+  // An edited payment can lose its connection while another bank's candidate remains.
+  // Include the unresolved source without pulling that bank's movements into scope.
+  for(const row of rows){
+    if(!scoped.has(row.id)&&pendingCardPaymentInScope(row,paymentDates,from,through))scoped.add(row.id);
   }
 
   return rows.filter(row=>scoped.has(row.id)).sort(byId).map(row=>{

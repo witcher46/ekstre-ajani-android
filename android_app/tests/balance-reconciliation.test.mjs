@@ -235,6 +235,68 @@ test('orphaned PDF or CSV review near a same-card bank payment blocks only the r
   }
 });
 
+const multiBankPaymentDate = '2026-11-02';
+function reviewWithTwoBankCandidates(source){
+  const additionalCard = {...card,id:'other-card'};
+  const base = {...wallet(),accounts:[...wallet().accounts,additionalCard]};
+  const payment = {kind:'payment',target:'card',date:multiBankPaymentDate,amount:10000};
+  const state = movement(movement(base,'pay',payment),'other-pay',{...payment,account:'other-bank'});
+  if(source==='pdf'){
+    const pdf = parseStatement('QNB\nHesap Kesim Tarihi: 30/11/2026\n31/10/2026 ODEME 100.00');
+    return C.importStatement(state,pdf,'card');
+  }
+  const csv = parseStatementCsv('period,date,desc,amount_cents,category,tur,bank,kart\n2026-11,2026-10-31,ODEME,10000,Kart ödemesi,odeme,QNB,Sentetik\n');
+  return C.importCsv(state,csv,'card');
+}
+
+for(const source of ['pdf','csv']){
+  test('pending '+source+' still blocks reviewed bank coverage when only the other bank candidate survives', () => {
+    const pending = reviewWithTwoBankCandidates(source);
+    const imported = pending.transactions.find(row=>row.source===source);
+    assert.equal(imported.matchStatus,'pending');
+    assert.deepEqual([...imported.matchCandidates].sort(),['other-pay','pay']);
+    const edited = C.updateTransaction(pending,{...pending.transactions.find(row=>row.id==='pay'),amount:11000});
+    const remaining = edited.transactions.find(row=>row.id===imported.id);
+    assert.equal(remaining.matchStatus,'pending');
+    assert.deepEqual(remaining.matchCandidates,['other-pay']);
+    const f = fixture({state:edited,observedAmount:989000});
+    const previousWallet = C.backupText(f.state);
+    const coverageReview = review([sourceRow('pay',-11000,multiBankPaymentDate)]);
+    const result = f.compare({coverageReview});
+    assert.equal(result.calculatedCents,989000);
+    assert.equal(result.differenceCents,0);
+    assert.deepEqual(result.coverage,{status:'insufficient',reason:'pending-match'});
+    assert.deepEqual(result.evidence.movements.map(row=>row.id).sort(),[imported.id,'pay'].sort());
+    assert.equal(C.balance(f.state,bank),112456);
+    assert.equal(C.balance(f.state,otherBank),-10000);
+    assert.equal(C.cardStatus(f.state,'card').current,-21000);
+    assert.equal(C.backupText(f.state),previousWallet);
+
+    const other = fixture({state:edited,accountId:'other-bank',observedAmount:990000});
+    assert.equal(other.compare({coverageReview:review([sourceRow('other-pay',-10000,multiBankPaymentDate)],{
+      accountId:'other-bank',
+    })}).coverage.reason,'pending-match');
+    const unrelated = fixture({state:edited,accountId:'cash',observedAmount:1000000});
+    assert.equal(unrelated.compare({coverageReview:review([],{accountId:'cash',sourceKind:'cashJournal'})}).coverage.status,'source-supported');
+
+    const resolved = C.resolveCandidate(f.state,imported.id,'link','other-pay');
+    assert.equal(f.compare({coverageReview},resolved).coverage.status,'source-supported');
+  });
+}
+
+test('source review connected only to another bank stays out of scope for a different card or distant date', () => {
+  const pending = reviewWithTwoBankCandidates('pdf');
+  for(const changes of [{target:'other-card'},{date:'2026-11-10'}]){
+    const editedPayment = {...pending.transactions.find(row=>row.id==='pay'),...changes};
+    const state = C.updateTransaction(pending,editedPayment);
+    assert.deepEqual(state.transactions.find(row=>row.source==='pdf').matchCandidates,['other-pay']);
+    const f = fixture({state,observedAmount:990000});
+    const result = f.compare({coverageReview:review([sourceRow('pay',-10000,editedPayment.date)])});
+    assert.equal(result.coverage.status,'source-supported');
+    assert.deepEqual(result.evidence.movements.map(row=>row.id),['pay']);
+  }
+});
+
 test('refund credits exact cents on its movement date and can leave a negative cash balance', () => {
   let state = movement(wallet(),'cash-cost',{account:'cash',amount:300});
   state = movement(state,'cash-refund',{account:'cash',kind:'refund',date:observedDate,amount:20});
