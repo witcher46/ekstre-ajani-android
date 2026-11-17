@@ -453,6 +453,56 @@ public class WalletJourneyTest {
    }
   }finally{context.getContentResolver().delete(file,null,null);}
  }
+ @Test public void previousV2WalletRejectsV3BackupAndCanStillSave() throws Exception {
+  String path=InstrumentationRegistry.getArguments().getString("approvalBackup");
+  String previousPath=InstrumentationRegistry.getArguments().getString("previousV2Backup");
+  assumeTrue("Requires the previous v2-capable APK on the disposable emulator",path!=null&&previousPath!=null);
+  String raw=device.executeShellCommand("cat "+path);
+  String oldBackup=device.executeShellCommand("cat "+previousPath);
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String name="synthetic-v3-for-previous-android.json";
+  Uri file=document(name,"application/json",raw.getBytes(StandardCharsets.UTF_8));
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=addAccount]')");
+   assertEquals("true",js(a,"Android.restore("+JSONObject.quote(oldBackup)+")"));
+   a.recreate();
+   waitJs(a,"JSON.parse(Android.load()).version===2");
+   String before=js(a,"Android.load()"),recovery=js(a,"Android.recovery()");
+   openBackupPicker(a);
+   selectDownload(name);
+   waitJs(a,"document.querySelector('#toast').textContent.includes('Bu Android cüzdan yedeği sürümü desteklenmiyor.')");
+   assertEquals("false",js(a,"Android.restore("+JSONObject.quote(raw)+")"));
+   assertEquals(before,js(a,"Android.load()"));
+   assertEquals(recovery,js(a,"Android.recovery()"));
+   click(a,"nav [data-page=wallet]");
+   account(a,"Sentetik yeniden kayıt","cash");
+   waitJs(a,"JSON.parse(Android.load()).version===2 && JSON.parse(Android.load()).accounts.length===2");
+  }finally{context.getContentResolver().delete(file,null,null);}
+ }
+
+ @Test public void newWalletRestoresV3ApprovalBackup() throws Exception {
+  String path=InstrumentationRegistry.getArguments().getString("approvalBackup");
+  assumeTrue("Requires a synthetic v3 backup on the disposable upgrade emulator",path!=null);
+  String raw=device.executeShellCommand("cat "+path);
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String name="synthetic-v3-for-candidate-android.json";
+  Uri file=document(name,"application/json",raw.getBytes(StandardCharsets.UTF_8));
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+   String before=js(a,"Android.load()");
+   assertEquals("2",js(a,"JSON.parse(Android.load()).version"));
+   restoreDownload(a,name);
+   waitJs(a,"JSON.parse(Android.load()).version===3");
+   assertEquals(before,js(a,"Android.recovery()"));
+   a.recreate();
+   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+   String saved=new JSONArray("["+js(a,"Android.load()")+"]").getString(0);
+   JSONObject expected=new JSONObject(raw),restored=new JSONObject(saved);
+   assertEquals(expected.getJSONObject("balanceReconciliation").toString(),
+    restored.getJSONObject("balanceReconciliation").toString());
+  }finally{context.getContentResolver().delete(file,null,null);}
+ }
+
  private void assertMigratedWallet(ActivityScenario<MainActivity> a,JSONObject expected)throws Exception{
   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
   AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();

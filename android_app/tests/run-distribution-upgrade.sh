@@ -126,6 +126,32 @@ JS
   adb install -r "$work/candidate.apk"
   run_case newWalletRestoresOriginalObservationBackup -e preserveWallet true -e observationBackup "$observation_path"
   echo 'Android 0.4.0 rejected the v2 backup before writing. Its v1 save succeeded and the candidate restored every original observation field.'
+
+  test "$(version_code "$work/previous-v2.apk")" = 7
+  test "$(cert "$work/previous-v2.apk")" = "$baseline_cert"
+  approval_path=/data/local/tmp/ekstre-approval-synthetic.json
+  previous_v2_path=/data/local/tmp/ekstre-previous-v2-synthetic.json
+  approval_fixture=android_app/app/src/androidTest/assets/synthetic-reconciliation-v3.json
+  python3 - "$approval_fixture" "$work/previous-v2.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+wallet=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+wallet["version"]=2
+del wallet["balanceReconciliation"]["approvals"]
+Path(sys.argv[2]).write_text(json.dumps(wallet, ensure_ascii=False), encoding="utf-8")
+PY
+  adb push "$approval_fixture" "$approval_path"
+  adb push "$work/previous-v2.json" "$previous_v2_path"
+  run_case newWalletRestoresV3ApprovalBackup -e preserveWallet true -e approvalBackup "$approval_path"
+  adb shell pm clear "$permanent" | tr -d '\r' | grep -Fx Success
+  adb install -r -d "$work/previous-v2.apk"
+  run_case previousV2WalletRejectsV3BackupAndCanStillSave -e approvalBackup "$approval_path" -e previousV2Backup "$previous_v2_path"
+  adb exec-out cat "$approval_path" > "$work/approval-after-old.json"
+  cmp "$approval_fixture" "$work/approval-after-old.json"
+  adb install -r "$work/candidate.apk"
+  run_case newWalletRestoresV3ApprovalBackup -e preserveWallet true -e approvalBackup "$approval_path"
+  echo 'The v2-capable APK rejected the v3 backup before writing. Its v2 save succeeded and the candidate restored the original approval history.'
 fi
 
 if [[ -f $legacy_apk ]]; then

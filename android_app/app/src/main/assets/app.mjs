@@ -1,3 +1,4 @@
+import {sha256} from './sha256.mjs';
 import * as C from './core.mjs';
 import * as W from './wallet.mjs';
 import * as V from './views.mjs';
@@ -28,7 +29,7 @@ function notice(message,{error=false}={}){
 }
 const errorNotice=message=>notice(message,{error:true});
 try{const raw=window.Android?Android.load():localStorage.getItem(key);if(raw)state=W.normalizeWallet(C.reviewLegacy(C.readBackup(raw)));}catch(e){loadFailed=true;errorNotice('Kayıtlar okunamadı. Mevcut verilerin üzerine yazılmayacak. '+e.message);}
-function commit(next,{restore=false}={}){if(loadFailed)throw Error('Kayıtlar okunamadığı için yazma kapalı. Önce geçerli bir yedek yükle.');next=W.normalizeWallet(next);const raw=C.backupText(next);if(window.Android){if(!(restore&&Android.restore?Android.restore(raw):Android.save(raw)))throw Error('Kayıt kaydedilemedi; değişiklik uygulanmadı.');}else {if(restore)localStorage.setItem(key+'-recovery',localStorage.getItem(key)||'');localStorage.setItem(key,raw);}state=next;render();}
+function commit(next,{restore=false,recoveryRaw}={}){if(loadFailed)throw Error('Kayıtlar okunamadığı için yazma kapalı. Önce geçerli bir yedek yükle.');next=W.normalizeWallet(next);const raw=C.backupText(next);if(window.Android){if(!(recoveryRaw!==undefined&&Android.recoverSaved?Android.recoverSaved(sha256(recoveryRaw),raw):restore&&Android.restore?Android.restore(raw):Android.save(raw)))throw Error('Kayıt kaydedilemedi; değişiklik uygulanmadı.');}else {if(restore)localStorage.setItem(key+'-recovery',localStorage.getItem(key)||'');localStorage.setItem(key,raw);}state=next;render();}
 const copy=()=>structuredClone(state),accountName=id=>state.accounts.find(a=>a.id===id)?.name||'Hesap';
 const accountOptions=(filter=()=>true,selected)=>options(state.accounts.filter(filter).map(a=>[a.id,a.name]),selected);
 const categoryOptions=(kind,selected)=>options([...new Set([...(kind==='income'?state.incomeCategories:state.categories),...(selected?[selected]:[])])].map(c=>[c,c]),selected);
@@ -312,7 +313,7 @@ const actions={
   reportFilters.reveal=!reportFilters.reveal;
   render();$('report-movements-toggle')?.focus({preventScroll:true});
  },
- recover:()=>{const raw=window.Android&&Android.recovery?Android.recovery():localStorage.getItem(key+'-recovery');if(!raw)throw Error('Geri yükleme öncesine ait kurtarma kopyası yok.');const prior=C.readBackup(raw);if(confirm('Geri yükleme öncesindeki cüzdan geri getirilsin mi?'))commit(prior);},
+ recover:()=>{const raw=window.Android&&Android.recovery?Android.recovery():localStorage.getItem(key+'-recovery');if(!raw)throw Error('Geri yükleme öncesine ait kurtarma kopyası yok.');const prior=C.readBackup(raw);if(confirm('Geri yükleme öncesindeki cüzdan geri getirilsin mi?'))commit(prior,{recoveryRaw:raw});},
  merchantRule:()=>merchantRuleForm(),
  cancelCategoryRemoval:closeModal,
  addAccount:()=>accountForm(),addTransaction:()=>transactionForm(),addIncome:()=>transactionForm(null,'income'),transfer:()=>transactionForm(null,'transfer'),payCard:()=>payCardForm(),incomePlan:()=>incomePlanForm(),
