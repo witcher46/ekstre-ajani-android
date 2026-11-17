@@ -258,12 +258,15 @@ const cardAccount=t=>t.kind==='payment'?t.target:t.account;
 const effectKind=t=>['payment','cardPayment'].includes(t.kind)?'cardPayment':t.kind;
 const sameTerms=(a,b)=>cardAccount(a)===cardAccount(b)&&effectKind(a)===effectKind(b)&&a.amount===b.amount&&(!a.installment||!b.installment||a.installment===b.installment);
 const installmentMonth=t=>t.statement&&t.installment?t.period:t.date.slice(0,7);
+export function paymentDatesWithinMatchWindow(first,second){
+ return Math.abs(Date.parse(first)-Date.parse(second))<=3*86400000;
+}
 function sameEconomic(a,b){
  if(!sameTerms(a,b))return false;
  if((a.installmentPlan||b.installmentPlan)&&a.installment&&b.installment){
   return installmentMonth(a)===installmentMonth(b);
  }
- return a.date===b.date||(effectKind(a)==='cardPayment'&&Math.abs(Date.parse(a.date)-Date.parse(b.date))<=3*86400000);
+ return a.date===b.date||(effectKind(a)==='cardPayment'&&paymentDatesWithinMatchWindow(a.date,b.date));
 }
 function incompatibleStatementPeriods(a,b){
  const x=sourceOf(a),y=sourceOf(b);
@@ -462,6 +465,12 @@ export function cardStatus(s,account,{asOf=today()}={}){
  return {current,statementDebt:latest?.debt??null,statementRemaining:anchored?positiveCents(addCents(latest.debt,-paidAfterCut)):null,paidAfterCut,latest:latest||null,currentAnchor:currentAnchor||null,pending:s.transactions.filter(t=>t.matchStatus==='pending'&&cardAccount(t)===a.id).length};
 }
 const countsForCashBalance=t=>effective(t)||(t.matchStatus==='pending'&&t.kind==='payment'&&!t.linkedTo);
+
+export function cashBalanceMovementEffect(row,account){
+ if((row.account!==account.id&&row.target!==account.id)||!countsForCashBalance(row))return null;
+ return ledgerEffect(row,account);
+}
+
 export function balance(s,a){return a.type==='card'?cardStatus(s,a).current:s.transactions.filter(countsForCashBalance).reduce((n,t)=>addCents(n,ledgerEffect(t,a)),a.opening);}
 
 // Reconstruct from an independently established end-of-day balance and the current ledger.
