@@ -58,11 +58,20 @@ function validHistoricalEffect(row,evidence){
   const outgoing = debitOrCredit?(['income','refund'].includes(row.kind)?amount:-amount):0n;
   return BigInt(row.effectCents)===outgoing+(receiving?amount:0n);
 }
+function validHistoricalLinks(movements){
+  const rows = new Map(movements.map(row=>[row.id,row]));
+  return movements.every(row=>{
+    if(row.linkedTo===null)return row.matchStatus!=='linked';
+    const target = rows.get(row.linkedTo);
+    return row.linkedTo!==''&&(row.matchStatus===null||row.matchStatus==='linked')&&
+      target&&target!==row&&target.linkedTo===null;
+  });
+}
 function validCoverage(evidence,bank){
   const {coverage,movements} = evidence;
   if(!fields(coverage,'status sourceKind sourceRef matches')||coverage.status!=='source-supported'||
      coverage.sourceKind!==(bank?'bankStatement':'cashJournal')||!ref(coverage.sourceRef)||!list(coverage.matches)||
-     !list(movements)||!movements.every(row=>validMovement(row)&&validHistoricalEffect(row,evidence))||!ordinalList(movements,'id'))return false;
+     !list(movements)||!movements.every(row=>validMovement(row)&&validHistoricalEffect(row,evidence))||!ordinalList(movements,'id')||!validHistoricalLinks(movements))return false;
   const included = movements.filter(row=>row.included);
   const matches = coverage.matches;
   if(matches.length!==included.length||!matches.every((row,i)=>

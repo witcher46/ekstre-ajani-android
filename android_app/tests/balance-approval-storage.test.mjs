@@ -3,6 +3,8 @@ import {createHash} from 'node:crypto';
 import {test} from 'node:test';
 import {readFileSync} from 'node:fs';
 import * as C from '../app/src/main/assets/core.mjs';
+import {parseStatement} from '../app/src/main/assets/parser.mjs';
+import {parseStatementCsv} from '../app/src/main/assets/csv.mjs';
 import {compareBalanceObservation,evaluateBalanceComparisonEvidence} from '../app/src/main/assets/balance-reconciliation.mjs';
 
 const closing = {boundary:'end-of-day',timeZone:'Europe/Istanbul'};
@@ -83,7 +85,7 @@ test('approval history rejects damaged evidence and invalid links',()=>{
     [{...approval,...seal({...comparison.evidence,differenceCents:'-01'})}],
     [{...approval,...seal({...comparison.evidence,coverage:{status:'unverified'}})}],
     [{...approval,...seal({...comparison.evidence,interval:{...comparison.evidence.interval,timeZone:'Imaginary/Unknown'}})}],
-    ...[{date:'2000-01-01'},{accountId:'unrelated'},{kind:'expense'}].map(changes=>{
+    ...[{date:'2000-01-01'},{accountId:'unrelated'},{kind:'expense'},{matchStatus:'linked'}].map(changes=>{
       const movements = comparison.evidence.movements.map(row=>row.id==='income'?{...row,...changes}:row);
       return [{...approval,...seal({...comparison.evidence,movements})}];
     }),
@@ -113,4 +115,32 @@ test('recomputing approved evidence detects offsetting writes, edits and removal
 test('native synthetic v3 fixture is valid in the JavaScript backup reader',()=>{
   const raw = readFileSync(new URL('../app/src/androidTest/assets/synthetic-reconciliation-v3.json',import.meta.url),'utf8');
   assert.equal(C.backupText(C.readBackup(raw)),raw);
+});
+
+test('stored proof survives reopened PDF and CSV matches',()=>{
+  const {v2,approval,observation,options} = fixture();
+  const state = C.addTransaction({...v2,accounts:[...v2.accounts,{id:'card',name:'Sentetik kart',type:'card',opening:0}]},{
+    id:'pay',account:'bank',target:'card',date,kind:'payment',amount:10000,desc:'Sentetik ödeme',category:'Diğer',
+  });
+  options.coverageReview.rows.push({sourceRowId:'pay-source',movementId:'pay',date,effectCents:-10000});
+  const pdf = parseStatement('QNB\nHesap Kesim Tarihi: 30/11/2026\n09/11/2026 ODEME 100.00');
+  const withPdf = C.importStatement(state,pdf,'card');
+  const pdfId = withPdf.transactions.find(row=>row.source==='pdf').id;
+  const linkedPdf = C.resolveCandidate(withPdf,pdfId,'link','pay');
+  const csv = parseStatementCsv('period,date,desc,amount_cents,category,tur,bank,kart\n2026-11,2026-11-09,ODEME,10000,Kart ödemesi,odeme,QNB,Sentetik\n');
+  const withCsv = C.importCsv(linkedPdf,csv,'card');
+  const csvId = withCsv.transactions.find(row=>row.source==='csv').id;
+  const linked = C.resolveCandidate(withCsv,csvId,'link','pay');
+  const reviewed = compareBalanceObservation(linked,observation.id,options);
+  assert.equal(reviewed.coverage.status,'source-supported');
+  const stored = {...approval,...seal(reviewed.evidence)};
+  const restored = C.readBackup(C.backupText(replaceApprovals({...linked,version:3},[stored])));
+  for(const id of [pdfId,csvId]){
+    const changed = C.resolveCandidate(restored,id,'unlink');
+    const result = evaluateBalanceComparisonEvidence(changed,observation.id,JSON.parse(stored.evidenceJson),options);
+    assert.equal(result.status,'review-required');
+    assert.deepEqual(result.comparison.coverage,{status:'insufficient',reason:'pending-match'});
+    assert.equal(result.comparison.calculatedCents,reviewed.calculatedCents);
+    assert.deepEqual(changed.balanceReconciliation.approvals,[stored]);
+  }
 });

@@ -101,6 +101,7 @@ final class BalanceApprovalStorage {
   JSONArray matches = coverage.getJSONArray("matches"), movements = e.getJSONArray("movements");
   if (movements.length() > 50000 || matches.length() > movements.length()) return false;
   var sourceIds = new HashSet<String>();
+  var rows = new HashMap<String, JSONObject>();
   String lastId = null;
   int matched = 0;
   BigInteger total = amount(anchor,"amountCents");
@@ -110,6 +111,7 @@ final class BalanceApprovalStorage {
    String rowId = row.getString("id");
    if (lastId != null && lastId.compareTo(rowId) >= 0) return false;
    lastId = rowId;
+   rows.put(rowId,row);
    if (row.getBoolean("included")) {
     JSONObject match = matches.getJSONObject(matched++);
     if (!fields(match,"id sourceRowId") || !rowId.equals(match.get("id")) ||
@@ -117,10 +119,23 @@ final class BalanceApprovalStorage {
     total = total.add(amount(row,"effectCents"));
    }
   }
-  return matched == matches.length() && total.equals(amount(e,"calculatedCents")) &&
+  return matched == matches.length() && validHistoricalLinks(rows) && total.equals(amount(e,"calculatedCents")) &&
    amount(observation,"amountCents").subtract(total).equals(amount(e,"differenceCents"));
  }
 
+ private static boolean validHistoricalLinks(HashMap<String, JSONObject> rows) throws JSONException {
+  for (JSONObject row : rows.values()) {
+   if (row.isNull("linkedTo")) {
+    if ("linked".equals(row.get("matchStatus"))) return false;
+   } else {
+    String linkedTo = row.getString("linkedTo");
+    JSONObject target = rows.get(linkedTo);
+    if (linkedTo.isEmpty() || target == null || target == row || !target.isNull("linkedTo") ||
+        (!row.isNull("matchStatus") && !"linked".equals(row.get("matchStatus")))) return false;
+   }
+  }
+  return true;
+ }
  private static boolean supportedZone(Object value) {
   if (!(value instanceof String zone) || zone.length() > 200 || !zone.matches("[A-Za-z][A-Za-z0-9_+/-]*")) return false;
   boolean[] systemId = new boolean[1];

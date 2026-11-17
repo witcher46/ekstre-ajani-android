@@ -340,7 +340,8 @@ public class SnapshotAtomicityTest {
     canonical.replace("Europe/Istanbul","Imaginary/Unknown"),
     canonical.replace("Europe/Istanbul","GMT+5"),
     canonical.replace("\"date\":\"2026-11-10\"","\"date\":\"2000-01-01\""),
-    canonical.replace("\"kind\":\"income\"","\"kind\":\"expense\"")
+    canonical.replace("\"kind\":\"income\"","\"kind\":\"expense\""),
+    canonical.replace("\"matchStatus\":null","\"matchStatus\":\"linked\"")
    }){
     assertNotEquals(canonical,invalid);
     proof.put("evidenceJson",invalid);
