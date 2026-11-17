@@ -33,13 +33,23 @@ function reviewedAnchor(review,anchor,account){
     review.sourceKind===anchor.sourceKind&&review.sourceType===sourceType&&validRef(review.sourceRef);
 }
 
-function pendingCardPaymentInScope(row,paymentDates,from,through){
+function hasPaymentNearDate(dates,date){
+  let start = 0;
+  let end = dates.length;
+  while(start<end){
+    const mid = Math.floor((start+end)/2);
+    if(dates[mid]<date)start=mid+1;
+    else end=mid;
+  }
+  return (start<dates.length&&paymentDatesWithinMatchWindow(dates[start],date))||
+    (start>0&&paymentDatesWithinMatchWindow(dates[start-1],date));
+}
+
+function pendingCardPaymentInScope(row,paymentDates){
   if(row.kind!=='cardPayment'||row.matchStatus!=='pending'||
      !['pdf','csv'].includes(sourceOf(row)))return false;
   const dates = paymentDates.get(row.account);
-  if(!dates)return false;
-  const nearest = row.date<=from?dates.first:dates.last;
-  return inWindow(row.date,from,through)||paymentDatesWithinMatchWindow(row.date,nearest);
+  return dates!==undefined&&hasPaymentNearDate(dates,row.date);
 }
 
 function movementEvidence({transactions:rows,accounts},account,from,through){
@@ -51,9 +61,8 @@ function movementEvidence({transactions:rows,accounts},account,from,through){
     if((row.account===account.id||row.target===account.id)&&inWindow(row.date,from,through)){
       relevant.push(row.id);
       if(row.account===account.id&&row.kind==='payment'){
-        const dates = paymentDates.get(row.target)??{first:row.date,last:row.date};
-        if(row.date<dates.first)dates.first=row.date;
-        if(row.date>dates.last)dates.last=row.date;
+        const dates = paymentDates.get(row.target)??[];
+        dates.push(row.date);
         paymentDates.set(row.target,dates);
       }
     }
@@ -77,8 +86,9 @@ function movementEvidence({transactions:rows,accounts},account,from,through){
   }
   // An edited payment can lose its connection while another bank's candidate remains.
   // Include the unresolved source without pulling that bank's movements into scope.
+  for(const dates of paymentDates.values())dates.sort();
   for(const row of rows){
-    if(!scoped.has(row.id)&&pendingCardPaymentInScope(row,paymentDates,from,through))scoped.add(row.id);
+    if(!scoped.has(row.id)&&pendingCardPaymentInScope(row,paymentDates))scoped.add(row.id);
   }
 
   return rows.filter(row=>scoped.has(row.id)).sort(byId).map(row=>{

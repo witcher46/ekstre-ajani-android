@@ -236,16 +236,17 @@ test('orphaned PDF or CSV review near a same-card bank payment blocks only the r
 });
 
 const multiBankPaymentDate = '2026-11-02';
-function reviewWithTwoBankCandidates(source){
+function reviewWithTwoBankCandidates(source,otherDate=multiBankPaymentDate,sourceDate='2026-10-31'){
   const additionalCard = {...card,id:'other-card'};
   const base = {...wallet(),accounts:[...wallet().accounts,additionalCard]};
   const payment = {kind:'payment',target:'card',date:multiBankPaymentDate,amount:10000};
-  const state = movement(movement(base,'pay',payment),'other-pay',{...payment,account:'other-bank'});
+  const state = movement(movement(base,'pay',payment),'other-pay',{...payment,account:'other-bank',date:otherDate});
   if(source==='pdf'){
-    const pdf = parseStatement('QNB\nHesap Kesim Tarihi: 30/11/2026\n31/10/2026 ODEME 100.00');
+    const date = sourceDate.split('-').reverse().join('/');
+    const pdf = parseStatement('QNB\nHesap Kesim Tarihi: 30/11/2026\n'+date+' ODEME 100.00');
     return C.importStatement(state,pdf,'card');
   }
-  const csv = parseStatementCsv('period,date,desc,amount_cents,category,tur,bank,kart\n2026-11,2026-10-31,ODEME,10000,Kart ödemesi,odeme,QNB,Sentetik\n');
+  const csv = parseStatementCsv('period,date,desc,amount_cents,category,tur,bank,kart\n2026-11,'+sourceDate+',ODEME,10000,Kart ödemesi,odeme,QNB,Sentetik\n');
   return C.importCsv(state,csv,'card');
 }
 
@@ -282,6 +283,19 @@ for(const source of ['pdf','csv']){
     const resolved = C.resolveCandidate(f.state,imported.id,'link','other-pay');
     assert.equal(f.compare({coverageReview},resolved).coverage.status,'source-supported');
   });
+
+  test('distant '+source+' review for the same card stays outside the bank scope even inside the period', () => {
+    const sourceDate = '2026-11-14';
+    const state = reviewWithTwoBankCandidates(source,sourceDate,sourceDate);
+    const pending = state.transactions.find(row=>row.source===source);
+    assert.equal(pending.matchStatus,'pending');
+    assert.deepEqual(pending.matchCandidates,['other-pay']);
+    const f = fixture({state,observedAmount:990000});
+    const result = f.compare({coverageReview:review([sourceRow('pay',-10000,multiBankPaymentDate)])});
+    assert.equal(result.differenceCents,0);
+    assert.equal(result.coverage.status,'source-supported');
+    assert.deepEqual(result.evidence.movements.map(row=>row.id),['pay']);
+  });
 }
 
 test('source review connected only to another bank stays out of scope for a different card or distant date', () => {
@@ -295,6 +309,25 @@ test('source review connected only to another bank stays out of scope for a diff
     assert.equal(result.coverage.status,'source-supported');
     assert.deepEqual(result.evidence.movements.map(row=>row.id),['pay']);
   }
+});
+
+test('a same-card payment between other dates keeps a pending source in scope at the three-day boundary', () => {
+  const sourceDate = '2026-11-08';
+  const pending = reviewWithTwoBankCandidates('pdf',sourceDate,sourceDate);
+  const later = movement(pending,'end-pay',{kind:'payment',target:'card',date:observedDate,amount:12000});
+  const state = movement(later,'mid-pay',{kind:'payment',target:'card',date:'2026-11-05',amount:11000});
+  const imported = state.transactions.find(row=>row.source==='pdf');
+  assert.deepEqual(imported.matchCandidates,['other-pay']);
+  const f = fixture({state,observedAmount:967000});
+  const coverageReview = review([
+    sourceRow('pay',-10000,multiBankPaymentDate),sourceRow('mid-pay',-11000,'2026-11-05'),
+    sourceRow('end-pay',-12000,observedDate),
+  ]);
+  const result = f.compare({coverageReview});
+  assert.equal(result.differenceCents,0);
+  assert.deepEqual(result.coverage,{status:'insufficient',reason:'pending-match'});
+  assert.equal(result.evidence.movements.some(row=>row.id==='other-pay'),false);
+  assert.equal(result.evidence.movements.find(row=>row.id===imported.id).included,false);
 });
 
 test('refund credits exact cents on its movement date and can leave a negative cash balance', () => {
