@@ -338,6 +338,7 @@ public class SnapshotAtomicityTest {
    for(String invalid:new String[]{
     canonical.replace("\"version\":1","\"version\":2"),
     canonical.replace("Europe/Istanbul","Imaginary/Unknown"),
+    canonical.replace("Europe/Istanbul","GMT+5"),
     canonical.replace("\"date\":\"2026-11-10\"","\"date\":\"2000-01-01\""),
     canonical.replace("\"kind\":\"income\"","\"kind\":\"expense\"")
    }){
@@ -362,6 +363,10 @@ public class SnapshotAtomicityTest {
    try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
     assertEquals(raw,snapshot(database,2));
    }
+   String alternateCase=canonical.replace("Europe/Istanbul","europe/istanbul");
+   proof.put("evidenceJson",alternateCase);
+   proof.put("evidenceSha256",BalanceApprovalStorage.sha256(alternateCase));
+   assertTrue(reopened.restore(forged.toString()));
   }
  }
 

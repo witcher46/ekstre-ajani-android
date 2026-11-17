@@ -73,6 +73,8 @@ test('historical evidence does not require the live observation or movement to r
 test('approval history rejects damaged evidence and invalid links',()=>{
   const {v3,approval,comparison} = fixture();
   const next = {...approval,id:'approval-2',previousApprovalId:approval.id};
+  const differentlyCased = seal({...comparison.evidence,interval:{...comparison.evidence.interval,timeZone:'europe/istanbul'}});
+  assert.doesNotThrow(()=>C.readBackup(JSON.stringify(replaceApprovals(v3,[{...approval,...differentlyCased}]))));
   assert.deepEqual(C.readBackup(JSON.stringify(replaceApprovals(v3,[approval,next]))).balanceReconciliation.approvals,[approval,next]);
   const broken = [
     [{...approval,evidenceSha256:'0'.repeat(64)}],

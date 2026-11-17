@@ -125,7 +125,11 @@ final class BalanceApprovalStorage {
   if (!(value instanceof String zone) || zone.length() > 200 || !zone.matches("[A-Za-z][A-Za-z0-9_+/-]*")) return false;
   boolean[] systemId = new boolean[1];
   android.icu.util.TimeZone.getCanonicalID(zone,systemId);
-  return systemId[0];
+  if (systemId[0]) return true;
+  for (String known : android.icu.util.TimeZone.getAvailableIDs()) {
+   if (known.equalsIgnoreCase(zone)) return true;
+  }
+  return false;
  } private static boolean validHistoricalEffect(JSONObject row, JSONObject evidence, JSONObject interval) throws JSONException {
   String account = evidence.getString("accountId"), date = row.getString("date");
   boolean debitOrCredit = account.equals(row.get("accountId")), receiving = account.equals(row.get("targetId"));
