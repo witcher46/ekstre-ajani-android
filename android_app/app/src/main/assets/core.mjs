@@ -5,17 +5,19 @@ export const merchantKey=value=>String(value??'').normalize('NFKD').replace(/\p{
 export const categories=['Market / Gıda','Dışarıda yeme','Akaryakıt','Fatura / İnternet','Abonelik','Oyun / Dijital','Online alışveriş','Ulaşım','Sağlık','Giyim','Ev / Kira','Eğitim','Faiz / Ücret','Diğer'];
 export const id=()=>crypto.randomUUID();
 export const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
-export function money(input){
+export function money(input,{wide=false}={}){
  const value=String(input).trim();
- const plain=/^([+-]?)(\d{1,10})(?:[,.](\d{1,2}))?$/.exec(value);
+ const plain=(wide?/^([+-]?)(\d{1,14})(?:[,.](\d{1,2}))?$/:/^([+-]?)(\d{1,10})(?:[,.](\d{1,2}))?$/).exec(value);
  const turkish=/^([+-]?)(\d{1,3}(?:\.\d{3})+),(\d{1,2})$/.exec(value);
  const english=/^([+-]?)(\d{1,3}(?:,\d{3})+)\.(\d{1,2})$/.exec(value);
  const match=plain||turkish||english;
  if(!match)throw Error('Tutarın ayraçlarını kontrol et. Örneğin 1234,56 yaz ve en fazla iki ondalık basamak kullan.');
  const [,sign,whole,fraction='']=match;
  const digits=whole.replace(/[.,]/g,'');
- if(digits.length>10)throw Error('Tutar en fazla 10 tam basamak içerebilir.');
+ const maxDigits=wide?14:10;
+ if(digits.length>maxDigits)throw Error(`Tutar en fazla ${maxDigits} tam basamak içerebilir.`);
  const amount=Number(digits+fraction.padEnd(2,'0'));
+ if(!Number.isSafeInteger(amount))throw Error('Tutar güvenli kuruş sınırını aşıyor.');
  return sign==='-'&&amount!==0?-amount:amount;
 }
 // Keep ordinary totals as numbers and widen only when the exact sum needs it.

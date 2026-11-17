@@ -2,6 +2,7 @@ import * as C from './core.mjs';
 import * as W from './wallet.mjs';
 import {advancedReports,reportRows} from './reports.mjs';
 import {options,select} from './ui/form-controls.mjs';
+import {renderBalanceAccount} from './ui/balance-review.mjs';
 
 const kindNames = {expense:'Harcama',income:'Gelir',refund:'İade',payment:'Hesaptan kart ödemesi',cardPayment:'Ekstre kart ödemesi',transfer:'Transfer'};
 const statementFields = {previousDebt:'Önceki dönem borcu',statementDebt:'Dönem borcu',expectedDebt:'Beklenen dönem borcu',cut:'Hesap kesim tarihi',due:'Son ödeme tarihi'};
@@ -208,6 +209,7 @@ export function accountView(ctx,accountId) {
   return shell(`<button class="back-link" data-page="wallet">← Cüzdanım</button><h1>${esc(account.name)}</h1><p class="lead">${account.type === 'cash' ? 'Nakit hesabı' : 'Banka hesabı'}</p>
     <section class="hero panel"><small>KAYDEDİLMİŞ KULLANILABİLİR BAKİYE</small><div class="big" data-stat="accountBalance">${amount(ctx,C.balance(state,account))}</div><p class="notice">Açılış bakiyesi gelir sayılmaz. Bakiye kaydedilmiş hareketlere dayanır.</p></section>
     <div class="toolbar"><button class="primary" data-action="addIncome">Gelir ekle</button><button data-action="transfer">Transfer</button><button data-account="${esc(account.id)}">Hesabı düzenle</button></div>
+    ${renderBalanceAccount(state,account)}
     <h2 class="divider">Aylık hesap hareketleri</h2><div class="toolbar">${periodControl}</div><div class="summary-grid">${metric(ctx,'income','Hesaba kaydedilmiş gelir',overview.income)}${metric(ctx,'netExpense','Hesaptan net gider',overview.netExpense)}</div><p class="notice">Gelen transferler gelir, giden transferler ve kart borcu ödemeleri gider sayılmaz.</p>
     ${reviewWarning(ctx,movements)}<section class="panel"><h2>Seçilen aydaki hareketler</h2>${transactionList(newest(monthly))}</section><section class="panel"><h2>Hesap geçmişi</h2><p class="notice">Bu hesabın kaynak veya hedef olduğu tüm hareketler.</p>${transactionList(newest(movements))}</section>`);
 }

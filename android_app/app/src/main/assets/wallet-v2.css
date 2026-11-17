@@ -55,6 +55,17 @@
 .wallet-v2 .comparison-values>div{min-width:0}
 .wallet-v2 .comparison-values dt{font-size:.85rem;color:var(--muted)}
 .wallet-v2 .comparison-values dd{margin:5px 0 0;font-weight:650;min-width:0;max-width:100%}
+.balance-review form>button{margin-top:16px}
+.balance-review .balance-check{display:flex;gap:12px;align-items:flex-start;min-height:48px;line-height:1.5;padding:10px 0;cursor:pointer}
+.balance-review .balance-check input{flex:0 0 24px;min-height:24px;margin:0}
+.balance-review .balance-check span{flex:1;min-width:0}
+.balance-review .balance-movement{min-width:0;border:1px solid var(--line);border-radius:12px;margin:16px 0;padding:12px}
+.balance-review .balance-movement legend{max-width:100%;overflow-wrap:anywhere;padding:0 6px}
+.balance-review .balance-movement h3{margin-top:0}
+.balance-review .balance-proof-rows{padding-inline-start:20px}
+.balance-review .balance-proof-rows li{margin:10px 0;overflow-wrap:anywhere}
+.balance-review .balance-proof-rows small{display:block}
+.balance-review #balance-review-error{color:#ffb6b1}
 .wallet-v2 .report-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr));gap:12px}
 .wallet-v2 .report-controls{margin:16px 0;align-items:end}
 .wallet-v2 .report-controls input,.wallet-v2 .report-controls select{width:100%}

@@ -6,7 +6,11 @@ import android.database.sqlite.SQLiteDatabase;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -306,15 +310,63 @@ public class SnapshotAtomicityTest {
   }finally{executor.shutdownNow();}
  }
 
- @Test public void approvalBackupSurvivesNativeRestoreAndRejectsTampering() throws Exception {
-  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
-  String raw;
+ private String syntheticApprovalBackup() throws Exception {
   try(var input=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("synthetic-reconciliation-v3.json");
       var output=new java.io.ByteArrayOutputStream()){
    byte[] buffer=new byte[4096];
    for(int count;(count=input.read(buffer))!=-1;)output.write(buffer,0,count);
-   raw=new String(output.toByteArray(),java.nio.charset.StandardCharsets.UTF_8);
+   return new String(output.toByteArray(),java.nio.charset.StandardCharsets.UTF_8);
   }
+ }
+
+ @Test public void onlyOneConcurrentApprovalCanAppendToTheSameSnapshot() throws Exception {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String first=syntheticApprovalBackup(),recovery=wallet("before-v2");
+  JSONObject v2=new JSONObject(first);
+  v2.put("version",2);
+  v2.getJSONObject("balanceReconciliation").remove("approvals");
+  String current=v2.toString();
+  JSONObject alternative=new JSONObject(first);
+  alternative.getJSONObject("balanceReconciliation").getJSONArray("approvals")
+   .getJSONObject(0).put("id","approval-2");
+  String second=alternative.toString();
+  var executor=Executors.newFixedThreadPool(2);
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(bridge.save(recovery));
+   assertTrue(bridge.restore(current));
+   String comparison=bridge.loadForCompare();
+   assertEquals(current,comparison.substring(65));
+   String token=comparison.substring(0,64);
+   CountDownLatch ready=new CountDownLatch(2),start=new CountDownLatch(1);
+   var saveFirst=executor.submit(()->{
+    ready.countDown();
+    assertTrue(start.await(5,TimeUnit.SECONDS));
+    return bridge.saveIfUnchanged(token,first);
+   });
+   var saveSecond=executor.submit(()->{
+    ready.countDown();
+    assertTrue(start.await(5,TimeUnit.SECONDS));
+    return bridge.saveIfUnchanged(token,second);
+   });
+   assertTrue(ready.await(5,TimeUnit.SECONDS));
+   start.countDown();
+   boolean committedFirst=saveFirst.get(10,TimeUnit.SECONDS);
+   boolean committedSecond=saveSecond.get(10,TimeUnit.SECONDS);
+   assertTrue("Exactly one valid v3 candidate must win the same v2 token",committedFirst^committedSecond);
+   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
+    assertEquals(committedFirst?first:second,snapshot(database,1));
+    assertEquals(current,snapshot(database,2));
+    assertEquals(recovery,snapshot(database,3));
+   }
+  }finally{
+   executor.shutdownNow();
+  }
+ }
+
+ @Test public void approvalBackupSurvivesNativeRestoreAndRejectsTampering() throws Exception {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String raw=syntheticApprovalBackup();
   String initial=wallet("before-evidence");
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
