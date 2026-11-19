@@ -86,7 +86,7 @@ public class MainActivity extends Activity {
  private boolean supportsSnapshot(JSONObject wallet)throws JSONException{
   if(!"ekstre-android".equals(wallet.opt("format"))||!(wallet.opt("version") instanceof Number))return false;
   double version=wallet.getDouble("version");
-  if(version!=1&&version!=2)return false;
+  if(version!=1&&version!=2&&version!=3)return false;
   for(String name:new String[]{"accounts","transactions","statements","subscriptions","categories"})wallet.getJSONArray(name);
   wallet.getJSONObject("budgets");
   if(version==1)return true;
@@ -95,7 +95,8 @@ public class MainActivity extends Activity {
    if(rows.length()>50000)return false;
    for(int i=0;i<rows.length();i++)rows.getJSONObject(i);
   }
-  return validBalanceObservations(wallet);
+  return validBalanceObservations(wallet)&& (version!=3 ||
+   BalanceApprovalStorage.validApprovals(wallet.getJSONObject("balanceReconciliation").getJSONArray("approvals")));
  }
  private boolean validBalanceObservations(JSONObject wallet)throws JSONException{
   JSONArray accounts=wallet.getJSONArray("accounts");
@@ -160,20 +161,62 @@ public class MainActivity extends Activity {
    return reader.peek()==JsonToken.END_DOCUMENT;
   }
  }
- private synchronized boolean writeSnapshot(String content,boolean restore){
-  if(content==null||content.getBytes(StandardCharsets.UTF_8).length>BACKUP_LIMIT)return false;
-  try{if(!supportsSnapshot(new JSONObject(content))||!isJsonDocument(content))return false;
-  }catch(Exception|StackOverflowError e){return false;}
-  try{
-   db.beginTransaction();try{if(restore)db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 3,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 2,content FROM snapshots WHERE id=1");db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});db.setTransactionSuccessful();}finally{db.endTransaction();}return true;
-  }catch(Exception e){return false;}
+ private synchronized String readForCompare() {
+  try {
+   db.beginTransactionNonExclusive();
+   try {
+    String content = readSnapshot(1);
+    String result = BalanceApprovalStorage.sha256(content)+"\n"+content;
+    db.setTransactionSuccessful();
+    return result;
+   } finally {
+    db.endTransaction();
+   }
+  } catch (Exception e) {
+   return null;
+  }
  }
- public class Bridge {
+ private synchronized boolean writeSnapshot(String content, boolean restore, String expectedToken, String recoveryToken) {
+  if(content==null||content.getBytes(StandardCharsets.UTF_8).length>BACKUP_LIMIT)return false;
+  try {
+   JSONObject candidate = new JSONObject(content);
+   if(!supportsSnapshot(candidate)||!isJsonDocument(content))return false;
+   db.beginTransaction();
+   try {
+    if(recoveryToken!=null) {
+     String recovery = readSnapshot(3);
+     if(recovery.isEmpty()||!recoveryToken.equals(BalanceApprovalStorage.sha256(recovery))||
+        !BalanceApprovalStorage.preservesHistory(new JSONObject(recovery),candidate,false))return false;
+    } else if(!restore) {
+     String current = readSnapshot(1);
+     if(expectedToken!=null &&
+        (!expectedToken.equals(BalanceApprovalStorage.sha256(current)) ||
+         expectedToken.equals(BalanceApprovalStorage.sha256(content))))return false;
+     if(!BalanceApprovalStorage.preservesHistory(current.isEmpty()?null:new JSONObject(current),candidate,expectedToken!=null))return false;
+    }
+    if(restore)db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 3,content FROM snapshots WHERE id=1");
+    db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 2,content FROM snapshots WHERE id=1");
+    db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});
+    db.setTransactionSuccessful();
+   } finally {
+    db.endTransaction();
+   }
+   return true;
+  } catch(Exception|StackOverflowError e) {
+   return false;
+  }
+ } public class Bridge {
   @JavascriptInterface public int textZoom(){return textZoom;}
   @JavascriptInterface public String load(){synchronized(MainActivity.this){return readSnapshot(1);}}
-  @JavascriptInterface public String recovery(){synchronized(MainActivity.this){return readSnapshot(3);}}
-  @JavascriptInterface public boolean save(String content){return writeSnapshot(content,false);}
-  @JavascriptInterface public boolean restore(String content){return writeSnapshot(content,true);}
+  @JavascriptInterface public String loadForCompare(){return readForCompare();}
+  @JavascriptInterface public boolean saveIfUnchanged(String token,String content){
+   return token!=null&&token.matches("[a-f0-9]{64}")&&writeSnapshot(content,false,token,null);
+  }
+  @JavascriptInterface public boolean recoverSaved(String token,String content){
+   return token!=null&&token.matches("[a-f0-9]{64}")&&writeSnapshot(content,false,null,token);
+  }  @JavascriptInterface public String recovery(){synchronized(MainActivity.this){return readSnapshot(3);}}
+  @JavascriptInterface public boolean save(String content){return writeSnapshot(content,false,null,null);}
+  @JavascriptInterface public boolean restore(String content){return writeSnapshot(content,true,null,null);}
   @JavascriptInterface public void pickPdf(String request){runOnUiThread(()->{
    if(request==null||request.isEmpty())return;
    if(pdfPickerRequest!=null){callback("onPdfError","PDF dosya seçici zaten açık.",request);return;}

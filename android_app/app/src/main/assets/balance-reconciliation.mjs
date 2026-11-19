@@ -1,7 +1,6 @@
 import {addCents,balanceAt,cashBalanceMovementEffect,paymentDatesWithinMatchWindow,sourceOf,validDate} from './core.mjs';
 
-const evidenceVersion = 1;
-const evidencePolicy = 'cash-end-of-day-v1';
+import {balanceEvidenceVersion as evidenceVersion,balanceEvidencePolicy as evidencePolicy} from './balance-approval-storage.mjs';
 const byId = (a,b) => a.id<b.id?-1:a.id>b.id?1:0;
 const validRef = value => typeof value==='string'&&value.length>0&&value.length<=200&&value===value.trim();
 const unavailable = reason => ({status:'unavailable',reason});
@@ -149,7 +148,7 @@ function observationEvidence(row){
 export function compareBalanceObservation(state,observationId,{
   anchorId,anchorReview,observationClosing,coverageReview,
 }={}){
-  const records = state.version===2?state.balanceReconciliation.observations:[];
+  const records = state.version>=2?state.balanceReconciliation.observations:[];
   const observation = records.find(row=>row.id===observationId);
   if(!observation)return unavailable('missing-observation');
   if(observation.role!=='observation')return unavailable('invalid-observation');

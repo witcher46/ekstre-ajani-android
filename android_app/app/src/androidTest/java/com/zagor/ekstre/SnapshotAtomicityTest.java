@@ -223,6 +223,154 @@ public class SnapshotAtomicityTest {
   }
  }
 
+ @Test public void compareAndSwapRejectsStaleSnapshotAndKeepsRecovery() throws Exception {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String first=wallet("cas-first"),current=wallet("cas-current"),candidate=wallet("cas-candidate");
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(bridge.save(first));
+   assertTrue(bridge.restore(current));
+   String read=bridge.loadForCompare();
+   assertEquals(current,read.substring(65));
+   String token=read.substring(0,64);
+
+   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
+    // Use a separate SQLite connection, bypassing the bridge's Java lock.
+    // It commits after the read but before the compare-and-swap transaction.
+    String changed=wallet("cas-external");
+    database.execSQL("UPDATE snapshots SET content=? WHERE id=1",new Object[]{changed});
+    assertFalse(bridge.saveIfUnchanged(token,candidate));
+    assertEquals(changed,snapshot(database,1));
+    assertEquals(first,snapshot(database,2));
+    assertEquals(first,snapshot(database,3));
+
+    String latest=bridge.loadForCompare().substring(0,64);
+    assertTrue(bridge.saveIfUnchanged(latest,candidate));
+    assertFalse(bridge.saveIfUnchanged(latest,wallet("cas-competing")));
+    assertEquals(candidate,snapshot(database,1));
+    assertEquals(changed,snapshot(database,2));
+    assertEquals(first,snapshot(database,3));
+   }
+  }
+ }
+
+ @Test public void compareAndSwapFinalWriteFailureRollsBackAllSnapshots() throws Exception {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String first=wallet("cas-recovery"),current=wallet("cas-current"),candidate=wallet("cas-retry");
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(bridge.save(first));
+   assertTrue(bridge.restore(current));
+   String token=bridge.loadForCompare().substring(0,64);
+   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
+    database.execSQL("CREATE TRIGGER "+TRIGGER+" BEFORE INSERT ON snapshots WHEN NEW.id=1"
+     +" BEGIN SELECT RAISE(ABORT, 'synthetic-cas-write-failure'); END");
+    try{
+     assertFalse(bridge.saveIfUnchanged(token,candidate));
+     assertEquals(current,snapshot(database,1));
+     assertEquals(first,snapshot(database,2));
+     assertEquals(first,snapshot(database,3));
+    }finally{database.execSQL("DROP TRIGGER IF EXISTS "+TRIGGER);}
+    assertTrue(bridge.saveIfUnchanged(token,candidate));
+    assertEquals(candidate,snapshot(database,1));
+   }
+   scenario.recreate();
+   assertEquals(candidate,bridge(scenario).load());
+   assertEquals(first,bridge(scenario).recovery());
+  }
+ }
+
+ @Test public void compareAndSwapChecksTokenAfterTakingSqliteWriteLock() throws Exception {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String current=wallet("cas-blocked"),changed=wallet("cas-external-commit");
+  var executor=java.util.concurrent.Executors.newSingleThreadExecutor();
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class);
+      SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(bridge.save(current));
+   String token=bridge.loadForCompare().substring(0,64);
+   java.util.concurrent.Future<Boolean> attempted;
+   database.beginTransactionNonExclusive();
+   try{
+    database.execSQL("UPDATE snapshots SET content=? WHERE id=1",new Object[]{changed});
+    attempted=executor.submit(()->bridge.saveIfUnchanged(token,wallet("cas-stale")));
+    try{
+     attempted.get(250,java.util.concurrent.TimeUnit.MILLISECONDS);
+     fail("The separate writer must still hold SQLite's write lock");
+    }catch(java.util.concurrent.TimeoutException expected){
+     database.setTransactionSuccessful();
+    }
+   }finally{database.endTransaction();}
+   assertFalse(attempted.get(5,java.util.concurrent.TimeUnit.SECONDS));
+   assertEquals(changed,snapshot(database,1));
+  }finally{executor.shutdownNow();}
+ }
+
+ @Test public void approvalBackupSurvivesNativeRestoreAndRejectsTampering() throws Exception {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String raw;
+  try(var input=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("synthetic-reconciliation-v3.json");
+      var output=new java.io.ByteArrayOutputStream()){
+   byte[] buffer=new byte[4096];
+   for(int count;(count=input.read(buffer))!=-1;)output.write(buffer,0,count);
+   raw=new String(output.toByteArray(),java.nio.charset.StandardCharsets.UTF_8);
+  }
+  String initial=wallet("before-evidence");
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(bridge.save(initial));
+   assertTrue(bridge.restore(raw));
+   assertEquals(raw,bridge.load());
+   assertEquals(initial,bridge.recovery());
+   String token=bridge.loadForCompare().substring(0,64);
+   String emptyHistory=raw.replaceFirst("\"approvals\":\\[.*\\]\\}\\}$","\"approvals\":[]}}");
+   assertNotEquals(raw,emptyHistory);
+   assertFalse(bridge.save(initial));
+   assertFalse(bridge.save(emptyHistory));
+   assertFalse(bridge.saveIfUnchanged(token,emptyHistory));
+   assertFalse(bridge.saveIfUnchanged(token,initial));
+   assertFalse(bridge.recoverSaved("0".repeat(64),initial));
+   assertFalse(bridge.restore(raw.replace("satır-1","satır-2")));
+
+   var forged=new org.json.JSONObject(raw);
+   var proof=forged.getJSONObject("balanceReconciliation").getJSONArray("approvals").getJSONObject(0);
+   String canonical=proof.getString("evidenceJson");
+   for(String invalid:new String[]{
+    canonical.replace("\"version\":1","\"version\":2"),
+    canonical.replace("Europe/Istanbul","Imaginary/Unknown"),
+    canonical.replace("Europe/Istanbul","GMT+5"),
+    canonical.replace("\"date\":\"2026-11-10\"","\"date\":\"2000-01-01\""),
+    canonical.replace("\"kind\":\"income\"","\"kind\":\"expense\""),
+    canonical.replace("\"matchStatus\":null","\"matchStatus\":\"linked\"")
+   }){
+    assertNotEquals(canonical,invalid);
+    proof.put("evidenceJson",invalid);
+    proof.put("evidenceSha256",BalanceApprovalStorage.sha256(invalid));
+    assertFalse(bridge.restore(forged.toString()));
+   }
+   assertFalse(bridge.restore(raw.replace("\"version\":3","\"version\":4")));
+
+   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
+    assertEquals(raw,snapshot(database,1));
+    assertEquals(initial,snapshot(database,2));
+    assertEquals(initial,snapshot(database,3));
+   }
+   scenario.recreate();
+   MainActivity.Bridge reopened=bridge(scenario);
+   assertEquals(raw,reopened.load());
+   assertTrue(reopened.recoverSaved(BalanceApprovalStorage.sha256(initial),initial));
+   assertEquals(initial,reopened.load());
+   assertEquals(initial,reopened.recovery());
+   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
+    assertEquals(raw,snapshot(database,2));
+   }
+   String alternateCase=canonical.replace("Europe/Istanbul","europe/istanbul");
+   proof.put("evidenceJson",alternateCase);
+   proof.put("evidenceSha256",BalanceApprovalStorage.sha256(alternateCase));
+   assertTrue(reopened.restore(forged.toString()));
+  }
+ }
+
  @Test public void malformedRestoreDoesNotReplaceWalletOrRecovery() {
   String first=wallet("first"),current=wallet("current");
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){

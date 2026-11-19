@@ -139,6 +139,10 @@ jobs:
               'malformedRestoreDoesNotReplaceWalletOrRecovery',
               'observationSnapshotsSurviveRestoreAndWriteFailure',
               'largeObservationBackupSurvivesAndOversizeRestoreIsRejected',
+              'compareAndSwapRejectsStaleSnapshotAndKeepsRecovery',
+              'compareAndSwapFinalWriteFailureRollsBackAllSnapshots',
+              'compareAndSwapChecksTokenAfterTakingSqliteWriteLock',
+              'approvalBackupSurvivesNativeRestoreAndRejectsTampering',
           }
           results = Path('android_app/app/build/outputs/androidTest-results/connected')
           passed = set()
