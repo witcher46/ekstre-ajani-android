@@ -131,6 +131,7 @@ final class BalanceApprovalStorage {
     String linkedTo = row.getString("linkedTo");
     JSONObject target = rows.get(linkedTo);
     if (linkedTo.isEmpty() || target == null || target == row || !target.isNull("linkedTo") ||
+        !row.getString("amountCents").equals(target.getString("amountCents")) ||
         (!row.isNull("matchStatus") && !"linked".equals(row.get("matchStatus")))) return false;
    }
   }

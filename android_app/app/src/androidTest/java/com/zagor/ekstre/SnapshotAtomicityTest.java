@@ -420,6 +420,27 @@ public class SnapshotAtomicityTest {
    proof.put("evidenceJson",alternateCase);
    proof.put("evidenceSha256",BalanceApprovalStorage.sha256(alternateCase));
    assertTrue(reopened.restore(forged.toString()));
+   String payment=canonical.replace("synthetic-income","synthetic-payment")
+    .replace("\"kind\":\"income\"","\"kind\":\"payment\"")
+    .replace("\"targetId\":null","\"targetId\":\"card\"")
+    .replace("\"effectCents\":\"100\"","\"effectCents\":\"-100\"")
+    .replace("9007199254741091","9007199254740891")
+    .replace("-18014398509482082","-18014398509481882");
+   String alias="{\"id\":\"synthetic-pdf\",\"date\":\"2026-11-10\",\"kind\":\"cardPayment\",\"accountId\":\"card\","
+    +"\"targetId\":null,\"amountCents\":\"100\",\"source\":\"pdf\",\"included\":false,\"effectCents\":null,"
+    +"\"matchStatus\":\"linked\",\"linkedTo\":\"synthetic-payment\",\"previousLinkedTo\":null,\"matchCandidates\":[]}";
+   String linked=payment.substring(0,payment.length()-2)+","+alias+"]}";
+   proof.put("evidenceJson",linked);
+   proof.put("evidenceSha256",BalanceApprovalStorage.sha256(linked));
+   String accepted=forged.toString();
+   assertTrue(reopened.restore(accepted));
+   String invalidLink=payment.substring(0,payment.length()-2)+","+alias.replace("\"100\"","\"101\"")+"]}";
+   proof.put("evidenceJson",invalidLink);
+   proof.put("evidenceSha256",BalanceApprovalStorage.sha256(invalidLink));
+   String recoveryBefore=reopened.recovery();
+   assertFalse(reopened.restore(forged.toString()));
+   assertEquals(accepted,reopened.load());
+   assertEquals(recoveryBefore,reopened.recovery());
   }
  }
 

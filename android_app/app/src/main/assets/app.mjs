@@ -26,6 +26,14 @@ let actionTrigger=null,csvOpener=null;
 let state=W.normalizeWallet(C.empty()),detailId=null,expenseCategory=null,page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,toastTimer,loadFailed=false;
 let balanceDraft={},balanceReviewToken=null;
 let balanceHistoryView={},balanceHistoryArchive=null,balanceHistoryLimit=20;
+window.hideBalanceApprovalDetails=()=>{
+ if(!balanceHistoryView.reveal)return;
+ balanceHistoryView.reveal=false;
+ render();
+};
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='hidden')window.hideBalanceApprovalDetails();
+});
 const reportFilters={months:6,accountId:'',category:null,reveal:false};
 function notice(message,{error=false}={}){
  const live=$(error?'error-announcement':'status-announcement');

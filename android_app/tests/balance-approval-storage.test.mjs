@@ -136,6 +136,11 @@ test('stored proof survives reopened PDF and CSV matches',()=>{
   const stored = {...approval,...seal(reviewed.evidence)};
   const restored = C.readBackup(C.backupText(replaceApprovals({...linked,version:3},[stored])));
   for(const id of [pdfId,csvId]){
+    const movements = reviewed.evidence.movements.map(row=>row.id===id?{...row,amountCents:'10001'}:row);
+    const inconsistent = {...stored,...seal({...reviewed.evidence,movements})};
+    assert.throws(()=>C.readBackup(JSON.stringify(replaceApprovals(restored,[inconsistent]))),/kanıtı geçersiz/);
+  }
+  for(const id of [pdfId,csvId]){
     const changed = C.resolveCandidate(restored,id,'unlink');
     const result = evaluateBalanceComparisonEvidence(changed,observation.id,JSON.parse(stored.evidenceJson),options);
     assert.equal(result.status,'review-required');

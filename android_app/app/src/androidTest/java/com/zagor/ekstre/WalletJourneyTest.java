@@ -767,6 +767,10 @@ public class WalletJourneyTest {
    drawn(a);
    assertEquals("true",js(a,"document.documentElement.scrollWidth<=innerWidth"));
    a.onActivity(activity->web(activity).getSettings().setTextZoom(100));
+   a.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);
+   a.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);
+   waitJs(a,"document.getElementById('balance-history-reveal')?.getAttribute('aria-pressed')==='false'");
+   assertEquals("true",js(a,"!document.getElementById('balance-approval-detail').textContent.includes('sentetik/kapanış')"));
    assertEquals(snapshots,nativeSnapshots(context));
    device.pressBack();
    waitJs(a,"!!document.getElementById('balance-approval-history')");

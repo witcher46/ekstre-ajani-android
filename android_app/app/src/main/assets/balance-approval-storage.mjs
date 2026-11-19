@@ -64,7 +64,7 @@ function validHistoricalLinks(movements){
     if(row.linkedTo===null)return row.matchStatus!=='linked';
     const target = rows.get(row.linkedTo);
     return row.linkedTo!==''&&(row.matchStatus===null||row.matchStatus==='linked')&&
-      target&&target!==row&&target.linkedTo===null;
+      target&&target!==row&&target.linkedTo===null&&row.amountCents===target.amountCents;
   });
 }
 function validCoverage(evidence,bank){

@@ -324,7 +324,19 @@ async function reconciliationJourney(browser){
     await page.screenshot({path:path.join(out,'approval-history-320-hidden.png'),fullPage:true});
     await openApproval(bankApproval.id);
     await assertHistoryPrivate();
-    await page.locator('#balance-history-reveal').click();
+    assert(await page.getByRole('heading',{name:'Onay ayrıntısı',level:1}).evaluate(heading=>heading===document.activeElement));
+    await page.keyboard.press('Tab');
+    const revealButton=page.getByRole('button',{name:'Tutar ve referansları göster'});
+    assert(await revealButton.evaluate(button=>button===document.activeElement));
+    await page.keyboard.press('Tab');
+    const refreshButton=page.getByRole('button',{name:'Güncelliği yeniden değerlendir'});
+    assert(await refreshButton.evaluate(button=>button===document.activeElement));
+    for(const control of [revealButton,refreshButton]){
+      const size=await control.boundingBox();
+      assert(size&&size.width>=48&&size.height>=48);
+    }
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Enter');
     assert.equal(await page.locator('#balance-history-reveal').getAttribute('aria-pressed'),'true');
     const revealed=await detailPage.innerText();
     for(const value of ['100,00',...privateBankValues,'bank-income','2026-10-05','50,00']){
@@ -336,6 +348,14 @@ async function reconciliationJourney(browser){
     assert(await page.locator('#balance-history-refresh').isVisible());
     await page.screenshot({path:path.join(out,'approval-detail-320-revealed-200.png'),fullPage:true});
     await page.evaluate(()=>document.documentElement.style.removeProperty('font-size'));
+    await page.evaluate(()=>{
+      Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});
+      document.dispatchEvent(new Event('visibilitychange'));
+      delete document.visibilityState;
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await assertHistoryPrivate();
+    assert.deepEqual(await writeState(),untouchedHistory);
     await page.locator('#balance-history-refresh').click();
     await assertHistoryPrivate();
     await page.evaluate(()=>window.fixture.rejectReads(true));

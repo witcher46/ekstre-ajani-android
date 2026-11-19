@@ -40,6 +40,8 @@ public class MainActivity extends Activity {
  private static final int BACKUP_LIMIT=32000000;
  @Override public void onCreate(Bundle b){
   super.onCreate(b);
+  if(Build.VERSION.SDK_INT>=33)setRecentsScreenshotEnabled(false);
+  else getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
   getWindow().setStatusBarColor(0xff11181e);getWindow().setNavigationBarColor(0xff11181e);
   db=openOrCreateDatabase("wallet.db",MODE_PRIVATE,null);
   db.execSQL("CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY, content TEXT NOT NULL)");
@@ -247,6 +249,10 @@ public class MainActivity extends Activity {
     try(PDDocument pdf=PDDocument.load(bytes.toByteArray())){if(pdf.getNumberOfPages()>100)throw new IOException("PDF en fazla 100 sayfa olabilir.");PDFTextStripper stripper=new PDFTextStripper();stripper.setSortByPosition(true);String text=stripper.getText(pdf);if(text.trim().isEmpty())throw new IOException("PDF metin içermiyor. Taranmış belgeler desteklenmiyor.");if(text.length()>3_000_000)throw new IOException("PDF metni çok büyük.");callback("onPdfText",text,request);}
    }catch(Exception e){callback("onPdfError","PDF okunamadı. Şifresiz, metin içeren banka PDF’i seç. "+(e instanceof IOException?e.getMessage():""),request);}
   });
+ }
+ @Override protected void onPause(){
+  if(web!=null)web.evaluateJavascript("window.hideBalanceApprovalDetails?.()",null);
+  super.onPause();
  }
  @Override public void onBackPressed(){web.evaluateJavascript("window.handleBack && window.handleBack()",result->{if(!"true".equals(result))super.onBackPressed();});}
  @Override protected void onDestroy(){worker.shutdown();if(chooser!=null)chooser.onReceiveValue(null);web.removeJavascriptInterface("Android");web.destroy();super.onDestroy();}
