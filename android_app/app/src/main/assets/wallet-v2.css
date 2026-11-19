@@ -66,6 +66,18 @@
 .balance-review .balance-proof-rows li{margin:10px 0;overflow-wrap:anywhere}
 .balance-review .balance-proof-rows small{display:block}
 .balance-review #balance-review-error{color:#ffb6b1}
+.balance-history .balance-history-controls{margin-block:18px}
+.balance-history .balance-history-status{border-inline-start:3px solid var(--mint);padding:10px 12px;margin-block:16px;background:#20342d}
+.balance-history [data-balance-status="review-required"]{border-color:#f1d6a1;background:#3d3424}
+.balance-history [data-balance-status="unavailable"]{border-color:#b9c4cc;background:#26343d}
+.balance-history .balance-history-status p{color:inherit;margin-block:6px 0}
+.balance-history .balance-approval-date{font-size:.9rem;overflow-wrap:anywhere}
+.balance-history .balance-history-entry>button{margin-top:20px;width:100%}
+.balance-history .balance-historical-rows{list-style:none;padding:0;margin:0}
+.balance-history .balance-historical-row{padding-block:18px;border-bottom:1px solid var(--line)}
+.balance-history .balance-historical-row:last-child{border-bottom:0}
+.balance-history .balance-historical-row h3{margin-top:0}
+.balance-history .balance-history-identifiers{margin-block:18px}
 .wallet-v2 .report-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr));gap:12px}
 .wallet-v2 .report-controls{margin:16px 0;align-items:end}
 .wallet-v2 .report-controls input,.wallet-v2 .report-controls select{width:100%}

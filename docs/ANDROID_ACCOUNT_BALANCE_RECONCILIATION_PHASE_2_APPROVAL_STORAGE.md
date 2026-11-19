@@ -1,4 +1,4 @@
-# Hesap Bakiyesi Mutabakatı Faz 2 · Kalıcı kanıt altyapısı (Dilim 3A)
+# Hesap Bakiyesi Mutabakatı Faz 2 · Kalıcı kanıt ve onay geçmişi (Dilim 3A–3C)
 
 ## Yedek sözleşmesi
 
@@ -20,6 +20,14 @@ Olağan kayıt v3 geçmişinin her kaydını aynen taşır. CAS aynı geçmişin
 - Kullanıcı hareket kaynağını ve tüm tarih aralığını beyan eder. Defterdeki her etkili hareket için bağımsız kaynaktan okuduğu satır referansını, tarihi ve işaretli tutarı girer. Hareket olmayan aralık da kapsam beyanı gerektirir. Eksik, farklı veya bekleyen eşleşme kapsam onayını engeller.
 - Son ekranda seçilen hesap ve kaynaklar, tutarlar, işaretli fark ve kapsam görünür. `source-supported` girilen kaynak satırlarıyla defterin karşılaştırmasını ifade eder. Kullanıcı bağımsız incelemeyi ayrıca onaylar. Kaynak kapsamı destekleniyorsa sıfır dışı fark da inceleme kaydında saklanabilir ve fark olarak gösterilir.
 - Kaynak incelemesi açıldığı andaki SQLite snapshot kimliği son kanıta bağlanır. Son ekrandaki onay bir kez kullanılabilir. Uygulama onay anında yeni snapshot okur, karşılaştırmayı tekrar hesaplar ve `evaluateBalanceComparisonEvidence()` ile kanonik kanıtı doğrular. İnceleme veya onay sırasında snapshot değiştiğinde kullanıcı incelemeyi yeniler. Eski PDF/CSV kayıtları mevcut eşleşme kurallarıyla incelenir. Onay yazması bu eşleşmeleri değiştirmez. Bu kontrol, kanıt şemasına girmeyen hesap adı ve hareket açıklaması değişikliklerini de kapsar.
-- Uygun onay güncel geçmişin sonuna eklenir ve aynı okumanın kimliğiyle tek CAS çağrısı yapılır. Başarısız CAS yeni inceleme gerektirir. Geçmiş ve güncellik ekranı sonraki dilime aittir.
+- Uygun onay güncel geçmişin sonuna eklenir ve aynı okumanın kimliğiyle tek CAS çağrısı yapılır. Başarısız CAS yeni inceleme gerektirir. Onay geçmişi ve güncellik ekranı Dilim 3C ile kullanılabilir.
 
+## Onay geçmişi ve güncellik (Dilim 3C)
+
+- Banka ve nakit hesabındaki Onay Geçmişi, aynı hesabın onaylarını en yeni onay tarihinden başlayarak gösterir. Aynı zaman damgasında eklenme sırası kullanılır. Ayrıntıdaki hareketler ve kaynak satırı eşleşmeleri kanonik arşivden okunur. Güncel açıklamalar tarihsel kanıta eklenmez. Tutar ve referanslar kullanıcı görünür yapana kadar DOM'a yazılmaz.
+- Güncellik girdileri yalnızca doğrulanmış tarihsel kanıttan kurulur. Dayanak kaynağı, kapanış aralığı ve kapsam referansı arşivden gelir. Arşivdeki her dahil hareketin tarihi ve kuruş etkisi, aynı kaydın kaynak satırı eşleşmesiyle birlikte kullanılır. Eksik veya geçersiz kanıt tamamlanmaz.
+- Mevcut eşleşme incelemesi uygulanmış güncel cüzdan, bu tarihsel girdilerle mevcut `evaluateBalanceComparisonEvidence()` işlevine verilir. Kanonik içerik ve kaynak kapsamı eşleşiyorsa Kayıtlarla güncel görünür. Değişen hareket kimliği, tarih, tutar, yön veya PDF/CSV bağlantısı Yeniden inceleme gerekli sonucunu üretir. Silinen gözlem/dayanak veya kullanılamayan kanıt Değerlendirilemiyor olarak gösterilir.
+- Bu değerlendirme kaydedilen kaynak incelemesine dayanır. Kullanıcı bağımsız belgeleri yeni incelemede tekrar kontrol eder. Güncellik ve SHA-256 alanı bankanın doğruluğunu onaylamaz.
+- Görüntüleme ve yenileme salt okunurdur. SQLite snapshot'ları, rapor toplamları ve JSON sürümü korunur. Arşiv kanıtı kendi geçmiş içeriğiyle kalır. Kullanıcı uygun gözlem/dayanak için 3B incelemesine geçebilir. Yeni onay ancak açık inceleme ve CAS sonrasında geçmişe eklenir.
+- Cihaz saati aynı hesap ve gözlemin önceki onayının UTC zamanından gerideyse özel saat hatası gösterilir. Kullanıcıdan cihaz tarihini ve saatini düzeltmesi istenir. Eski zaman damgası korunur ve başarısız girişim CAS yazmasına ulaşmaz.
 [Karşılaştırma sözleşmesi](ANDROID_ACCOUNT_BALANCE_RECONCILIATION_PHASE_2_COMPARISON.md) · [Gözlem saklama kararı](ANDROID_ACCOUNT_BALANCE_RECONCILIATION_PHASE_2_STORAGE.md)

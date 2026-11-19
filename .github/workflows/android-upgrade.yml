@@ -2,7 +2,7 @@ name: Android distribution regression
 on:
   workflow_call:
   pull_request:
-    branches: [main, fix/android-0.3.1-stability, build/android-permanent-signing, fix/android-0.4.0-data-integrity, feature/android-0.5.0-ui-foundation, feature/android-reconciliation-evidence-storage]
+    branches: [main, fix/android-0.3.1-stability, build/android-permanent-signing, fix/android-0.4.0-data-integrity, feature/android-0.5.0-ui-foundation, feature/android-reconciliation-evidence-storage, feature/android-reconciliation-approval-flow]
   push:
     branches: [main]
 
@@ -32,7 +32,7 @@ jobs:
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"'
       - name: Exercise the released 0.4.0 source as the upgrade baseline
         id: upgrade-baseline
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'feature/android-0.5.0-ui-foundation' || github.base_ref == 'feature/android-reconciliation-evidence-storage'))
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'feature/android-0.5.0-ui-foundation' || github.base_ref == 'feature/android-reconciliation-evidence-storage' || github.base_ref == 'feature/android-reconciliation-approval-flow'))
         run: |
           properties=android_app/distribution.properties
           # Until 0.5.0 is versioned in source, bump only the CI candidate.

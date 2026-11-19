@@ -94,8 +94,8 @@ function validEvidence(evidence){
   return calculated===BigInt(evidence.calculatedCents)&&BigInt(observation.amountCents)-calculated===BigInt(evidence.differenceCents);
 }
 
-function readEvidence(proof){
-  if(typeof proof.evidenceJson!=='string'||typeof proof.evidenceSha256!=='string'||
+export function readBalanceApprovalEvidence(proof){
+  if(!proof||typeof proof.evidenceJson!=='string'||typeof proof.evidenceSha256!=='string'||
      !/^[a-f0-9]{64}$/.test(proof.evidenceSha256))return null;
   try{
     const evidence = JSON.parse(proof.evidenceJson);
@@ -115,7 +115,7 @@ export function validateBalanceApprovals(approvals){
   for(const approval of approvals){
     if(!approval||typeof approval!=='object'||Object.keys(approval).length!==5||
        !id(approval.id)||ids.has(approval.id)||!instant(approval.approvedAt))invalid();
-    const evidence = readEvidence(approval);
+    const evidence = readBalanceApprovalEvidence(approval);
     if(!evidence)invalid();
     const key = JSON.stringify([evidence.accountId,evidence.observation.id]);
     const prior = latest.get(key);
