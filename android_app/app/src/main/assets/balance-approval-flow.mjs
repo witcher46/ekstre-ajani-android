@@ -52,26 +52,13 @@ export function prepareBalanceApproval(android,observationId,options,expectedSna
   return review;
 }
 
-function previousApprovalId(approvals,evidence){
+function previousApproval(approvals,evidence){
   for(let index=approvals.length-1;index>=0;index--){
     const approval = approvals[index];
     const stored = JSON.parse(approval.evidenceJson);
-    if(stored.accountId===evidence.accountId&&stored.observation.id===evidence.observation.id)return approval.id;
+    if(stored.accountId===evidence.accountId&&stored.observation.id===evidence.observation.id)return approval;
   }
   return null;
-}
-
-function appendApproval(state,evidence){
-  const existing = state.version===3?state.balanceReconciliation.approvals:[];
-  const evidenceJson = JSON.stringify(evidence);
-  const approval = {
-    id:id(),
-    approvedAt:new Date().toISOString(),
-    previousApprovalId:previousApprovalId(existing,evidence),
-    evidenceJson,
-    evidenceSha256:sha256(evidenceJson),
-  };
-  return {...state,version:3,balanceReconciliation:{...state.balanceReconciliation,approvals:[...existing,approval]}};
 }
 
 export function saveBalanceApproval(android,review,independentlyReviewed){
@@ -90,7 +77,21 @@ export function saveBalanceApproval(android,review,independentlyReviewed){
   if(validation.status!=='current'||current.token!==pending.token)return reviewRequired();
 
   try{
-    const state = appendApproval(current.state,validation.comparison.evidence);
+    const evidence = validation.comparison.evidence;
+    const existing = current.state.version===3?current.state.balanceReconciliation.approvals:[];
+    const previous = previousApproval(existing,evidence);
+    const approvedAt = new Date().toISOString();
+    if(previous&&approvedAt<previous.approvedAt){
+      return {status:'clock-behind',previousApprovedAt:previous.approvedAt};
+    }
+    const evidenceJson = JSON.stringify(evidence);
+    const approval = {
+      id:id(),approvedAt,previousApprovalId:previous?.id??null,
+      evidenceJson,evidenceSha256:sha256(evidenceJson),
+    };
+    const state = {...current.state,version:3,balanceReconciliation:{
+      ...current.state.balanceReconciliation,approvals:[...existing,approval],
+    }};
     if(android.saveIfUnchanged(current.token,backupText(state))!==true)return reviewRequired();
     return {status:'saved',state};
   }catch{

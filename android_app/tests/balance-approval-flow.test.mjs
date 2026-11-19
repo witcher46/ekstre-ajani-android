@@ -281,3 +281,29 @@ test('the final preview rejects same-total changes since the user started source
   assert.equal(saveBalanceApproval(db.android,review,true).status,'review-required');
   assert.equal(db.attempts,0);
 });
+
+test('a device clock behind the previous approval gives an actionable rejection without a write',t=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-11-20T10:00:00.000Z')});
+  const {v2,observation,options} = fixture();
+  const db = storage(v2);
+  const first = prepareBalanceApproval(db.android,observation.id,options);
+  assert.equal(saveBalanceApproval(db.android,first,true).status,'saved');
+  const before = db.raw;
+  const previous = db.previous;
+  const attempts = db.attempts;
+  t.mock.timers.setTime(Date.parse('2026-11-20T09:59:59.999Z'));
+  const review = prepareBalanceApproval(db.android,observation.id,options);
+  const result = saveBalanceApproval(db.android,review,true);
+  assert.deepEqual(result,{status:'clock-behind',previousApprovedAt:'2026-11-20T10:00:00.000Z'});
+  assert.equal(db.raw,before);
+  assert.equal(db.previous,previous);
+  assert.equal(db.attempts,attempts);
+  assert.equal(saveBalanceApproval(db.android,review,true).status,'review-required');
+  t.mock.timers.setTime(Date.parse('2026-11-20T10:00:00.001Z'));
+  const renewed = prepareBalanceApproval(db.android,observation.id,options);
+  assert.equal(saveBalanceApproval(db.android,renewed,true).status,'saved');
+  const [firstApproval,secondApproval] = db.read().balanceReconciliation.approvals;
+  assert.equal(secondApproval.previousApprovalId,firstApproval.id);
+  assert.equal(secondApproval.approvedAt,'2026-11-20T10:00:00.001Z');
+  assert.equal(JSON.stringify(firstApproval),JSON.stringify(C.readBackup(before).balanceReconciliation.approvals[0]));
+});

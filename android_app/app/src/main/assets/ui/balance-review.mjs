@@ -26,7 +26,8 @@ export function renderBalanceAccount(state,account) {
   <h2 id="balance-reconciliation-title">Bakiye mutabakatı</h2>
   ${records.length?'':'<p>Gün sonu bakiyeni ve karşılaştırmak için daha eski bir bağımsız dayanağı kaydet.</p>'}
   <div class="actions"><button type="button" data-action="balanceAddAnchor">Dayanak ekle</button>
-   <button type="button" data-action="balanceAddObservation">Gözlem ekle</button></div>
+   <button type="button" data-action="balanceAddObservation">Gözlem ekle</button>
+   <button type="button" data-balance-history="${esc(account.id)}">Onay Geçmişi</button></div>
   ${records.map(row=>`<div class="row"><div><strong>${row.role==='anchor'?'Dayanak':'Gözlem'} · ${esc(row.observedDate)}</strong>
    ${amount(row.observedAmountCents)}<small>${esc(sourceLabels[row.sourceKind])}${row.note?` · ${esc(row.note)}`:''}</small></div>
    ${row.role==='observation'?`<button type="button" data-balance-review="${esc(row.id)}" aria-label="Mutabakatı incele · ${esc(row.observedDate)}">Mutabakatı incele</button>`:''}</div>`).join('')}
@@ -217,6 +218,11 @@ export function renderBalanceReview(state,observationId,draft,storageAvailable){
  const account = state.accounts.find(row=>row.id===observation?.accountId);
  const header = `<button type="button" class="back-link" data-action="balanceBack">← Hesap ayrıntısı</button><h1>Bakiye mutabakatı</h1>`;
  const error = '<p id="balance-review-error" role="alert" tabindex="-1" hidden></p>';
+ if(draft.clockBehind)return `<div class="wallet-v2 balance-review">${header}<section class="panel">
+  <h2 id="balance-clock-title" tabindex="-1">Cihaz saatini düzelt</h2>
+  <p>Cihaz saati önceki onaydan geride. Önceki onay · <time datetime="${esc(draft.clockBehind)}">${esc(draft.clockBehind)} UTC</time>.</p>
+  <p>Cihazın tarihini ve saatini düzeltip güncel kayıtları yeniden incele.</p>
+  <button type="button" data-action="balanceRestart">Yeniden incele</button>${error}</section></div>`;
  if(draft.saved)return `<div class="wallet-v2 balance-review">${header}<section class="panel"><h2 id="balance-review-saved">İnceleme onayı kaydedildi</h2><p>${esc(draft.saved.accountName)} · ${esc(draft.saved.date)}</p></section></div>`;
  if(draft.restart)return `<div class="wallet-v2 balance-review">${header}<section class="panel">
   <h2 id="balance-review-result" tabindex="-1">Yeniden inceleme gerekli</h2>

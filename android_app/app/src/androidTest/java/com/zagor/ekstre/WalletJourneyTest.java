@@ -18,6 +18,8 @@ import com.tom_roush.pdfbox.pdmodel.*;
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import org.junit.*;
@@ -635,6 +637,208 @@ public class WalletJourneyTest {
    waitJs(reopened,"!!document.querySelector('[data-stat=cardDebt]')");
    assertEquals(reopenExpected,js(reopened,"Android.load()"));
    assertEquals(homeStats,js(reopened,renderedStats));
+  }
+ }
+
+ private Map<Integer,String> nativeSnapshots(Context context) {
+  Map<Integer,String> snapshots=new LinkedHashMap<>();
+  try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null);
+      var rows=database.rawQuery("SELECT id,content FROM snapshots ORDER BY id",null)){
+   while(rows.moveToNext())snapshots.put(rows.getInt(0),rows.getString(1));
+  }
+  assertEquals("Current, previous and recovery raw snapshots must exist",3,snapshots.size());
+  return snapshots;
+ }
+
+ private JSONObject syntheticApprovalHistory() throws Exception {
+  JSONObject wallet;
+  try(var input=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("synthetic-reconciliation-v3.json");
+      var output=new ByteArrayOutputStream()){
+   byte[] buffer=new byte[4096];
+   for(int count;(count=input.read(buffer))!=-1;)output.write(buffer,0,count);
+   wallet=new JSONObject(new String(output.toByteArray(),StandardCharsets.UTF_8));
+  }
+  JSONObject reconciliation=wallet.getJSONObject("balanceReconciliation");
+  JSONArray observations=reconciliation.getJSONArray("observations");
+  for(int index=0;index<2;index++){
+   JSONObject cashObservation=new JSONObject(observations.getJSONObject(index).toString());
+   cashObservation.put("id",index==0?"cash-anchor":"cash-observation");
+   cashObservation.put("accountId","cash");
+   cashObservation.put("sourceKind","cashCount");
+   observations.put(cashObservation);
+  }
+  wallet.getJSONArray("accounts").put(new JSONObject(
+   "{\"id\":\"cash\",\"name\":\"Sentetik nakit\",\"type\":\"cash\",\"opening\":0}"));
+  JSONObject cashIncome=new JSONObject(wallet.getJSONArray("transactions").getJSONObject(0).toString());
+  cashIncome.put("id","cash-income");
+  cashIncome.put("account","cash");
+  wallet.getJSONArray("transactions").put(cashIncome);
+  wallet.getJSONArray("accounts").put(new JSONObject(
+   "{\"id\":\"card\",\"name\":\"Sentetik kart\",\"type\":\"card\",\"opening\":2500}"));
+  wallet.getJSONArray("transactions").put(new JSONObject("{\"id\":\"card-expense\",\"account\":\"card\","
+   +"\"kind\":\"expense\",\"date\":\"2026-11-10\",\"amount\":800,\"desc\":\"Sentetik\",\"category\":\"Diğer\","
+   +"\"period\":\"2026-11\",\"source\":\"manual\"}"));
+  JSONArray approvals=reconciliation.getJSONArray("approvals");
+  JSONObject first=approvals.getJSONObject(0),cash=new JSONObject(first.toString());
+  String cashEvidence=first.getString("evidenceJson")
+   .replace("\"accountId\":\"bank\"","\"accountId\":\"cash\"")
+   .replace("\"accountType\":\"bank\"","\"accountType\":\"cash\"")
+   .replace("\"id\":\"anchor\"","\"id\":\"cash-anchor\"")
+   .replace("\"id\":\"observation\"","\"id\":\"cash-observation\"")
+   .replace("synthetic-income","cash-income")
+   .replace("bankDocument","cashCount").replace("bankClosingRecord","cashCountRecord")
+   .replace("bankStatement","cashJournal");
+  cash.put("id","cash-approval").put("approvedAt","2026-11-18T09:00:00.000Z")
+   .put("evidenceJson",cashEvidence).put("evidenceSha256",BalanceApprovalStorage.sha256(cashEvidence));
+  approvals.put(cash);
+  JSONObject second=new JSONObject(first.toString());
+  second.put("id","approval-2").put("approvedAt","2026-11-19T09:00:00.000Z")
+   .put("previousApprovalId",first.getString("id"));
+  approvals.put(second);
+  return wallet;
+ }
+
+ private void openNativeApprovalHistory(ActivityScenario<MainActivity> a,String account) throws Exception {
+  click(a,"nav [data-page=wallet]");
+  click(a,"[data-account-view="+account+"]");
+  click(a,"[data-balance-history="+account+"]");
+  waitJs(a,"!!document.getElementById('balance-approval-history')");
+ }
+
+ @Test public void legacyApprovalHistoryNeverWritesOrMigratesSnapshots() throws Exception {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  for(int version:new int[]{1,2}){
+   JSONObject legacy=syntheticApprovalHistory();
+   legacy.put("version",version);
+   if(version==1)legacy.remove("balanceReconciliation");
+   else legacy.getJSONObject("balanceReconciliation").remove("approvals");
+   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+    waitJs(a,"!!document.querySelector('nav [data-page=wallet]')");
+    click(a,"nav [data-page=wallet]");
+    account(a,"Sentetik kurtarma "+version,"cash");
+    assertEquals("true",js(a,"Android.restore("+JSONObject.quote(legacy.toString())+")"));
+    a.recreate();
+    waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+    Map<Integer,String> snapshots=nativeSnapshots(context);
+    String totals=js(a,"Array.from(document.querySelectorAll('[data-stat]'),e=>e.textContent)");
+    openNativeApprovalHistory(a,"bank");
+    assertEquals("0",js(a,"document.querySelectorAll('[data-balance-approval-entry]').length"));
+    assertEquals(String.valueOf(version),js(a,"JSON.parse(Android.load()).version"));
+    assertEquals(snapshots,nativeSnapshots(context));
+    device.pressBack();
+    waitJs(a,"!!document.querySelector('[data-balance-history=bank]')");
+    a.recreate();
+    waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+    assertEquals(totals,js(a,"Array.from(document.querySelectorAll('[data-stat]'),e=>e.textContent)"));
+    assertEquals(snapshots,nativeSnapshots(context));
+   }
+  }
+ }
+
+ @Test public void approvalHistoryEvaluatesNativeSnapshotWithoutRewritingEvidence() throws Exception {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  JSONObject original=syntheticApprovalHistory();
+  String approvals=original.getJSONObject("balanceReconciliation").getJSONArray("approvals").toString();
+  String totals;
+  Map<Integer,String> afterMissing;
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=addAccount]')");
+   account(a,"Sentetik kurtarma","cash");
+   assertEquals("true",js(a,"Android.restore("+JSONObject.quote(original.toString())+")"));
+   a.recreate();
+   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+   totals=js(a,"Array.from(document.querySelectorAll('[data-stat]'),e=>e.textContent)");
+   Map<Integer,String> snapshots=nativeSnapshots(context);
+   openNativeApprovalHistory(a,"bank");
+   assertEquals("2",js(a,"document.querySelectorAll('[data-balance-approval-entry]').length"));
+   assertEquals("true",js(a,"!document.querySelector('[data-balance-approval-entry=cash-approval]') && document.querySelectorAll('nav button').length===5"));
+   click(a,"[data-balance-approval=approval-2]");
+   waitJs(a,"!!document.getElementById('balance-approval-detail')");
+   assertEquals("true",js(a,"document.getElementById('balance-approval-detail').textContent.includes('Kayıtlarla güncel')"));
+   assertEquals("true",js(a,"!document.getElementById('balance-approval-detail').textContent.includes('sentetik/kapanış')"));
+   click(a,"#balance-history-reveal");
+   assertEquals("true",js(a,"""
+    (()=>{const text=document.getElementById('balance-approval-detail').textContent;
+      return text.includes('sentetik/kapanış') && text.includes('sentetik/dönem') && text.includes('satır-1');
+    })()
+    """));
+   assertEquals("true",js(a,"document.getElementById('balance-history-reveal').getAttribute('aria-pressed')==='true'"));
+   a.onActivity(activity->web(activity).getSettings().setTextZoom(200));
+   drawn(a);
+   assertEquals("true",js(a,"document.documentElement.scrollWidth<=innerWidth"));
+   a.onActivity(activity->web(activity).getSettings().setTextZoom(100));
+   assertEquals(snapshots,nativeSnapshots(context));
+   device.pressBack();
+   waitJs(a,"!!document.getElementById('balance-approval-history')");
+   assertEquals("true",js(a,"!document.getElementById('balance-approval-history').textContent.includes('sentetik/kapanış')"));
+
+   JSONObject changed=new JSONObject(original.toString());
+   JSONArray transactions=changed.getJSONArray("transactions");
+   JSONObject originalIncome=transactions.getJSONObject(0);
+   transactions.remove(0);
+   for(int amount:new int[]{40,60}){
+    JSONObject movement=new JSONObject(originalIncome.toString());
+    movement.put("id","replacement-income-"+amount).put("amount",amount);
+    transactions.put(movement);
+   }
+   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
+    database.execSQL("UPDATE snapshots SET content=? WHERE id=1",new Object[]{changed.toString()});
+   }
+   Map<Integer,String> staleSnapshots=nativeSnapshots(context);
+   click(a,"#balance-history-refresh");
+   click(a,"[data-balance-approval=approval-2]");
+   waitJs(a,"document.getElementById('balance-approval-detail')?.textContent.includes('Yeniden inceleme gerekli')");
+   assertEquals("true",js(a,"!!document.querySelector('[data-balance-reapprove=approval-2]')"));
+   assertEquals(staleSnapshots,nativeSnapshots(context));
+   click(a,"[data-balance-reapprove=approval-2]");
+   waitJs(a,"!!document.getElementById('balance-anchor-form')");
+   assertEquals("\"\"",js(a,"document.getElementById('f-balance-anchor').value"));
+   assertEquals(staleSnapshots,nativeSnapshots(context));
+   device.pressBack();
+   waitJs(a,"!!document.getElementById('balance-approval-detail')");
+
+   JSONArray observations=changed.getJSONObject("balanceReconciliation").getJSONArray("observations");
+   for(int index=observations.length()-1;index>=0;index--){
+    if("anchor".equals(observations.getJSONObject(index).getString("id")))observations.remove(index);
+   }
+   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
+    database.execSQL("UPDATE snapshots SET content=? WHERE id=1",new Object[]{changed.toString()});
+   }
+   Map<Integer,String> missingAnchor=nativeSnapshots(context);
+   click(a,"#balance-history-refresh");
+   waitJs(a,"document.getElementById('balance-approval-detail')?.textContent.includes('Değerlendirilemiyor')");
+   assertEquals("true",js(a,"document.getElementById('balance-approval-detail').textContent.includes('Bu onayın dayanağı güncel kayıtlarda bulunamıyor.')"));
+   assertEquals("true",js(a,"!document.querySelector('[data-balance-reapprove]')"));
+   click(a,"#balance-history-reveal");
+   assertEquals("true",js(a,"""
+    (()=>{const text=document.getElementById('balance-approval-detail').textContent;
+      return text.includes('sentetik/kapanış') && text.includes('synthetic-income') && text.includes('satır-1');
+    })()
+    """));
+   assertEquals(missingAnchor,nativeSnapshots(context));
+
+   for(int index=observations.length()-1;index>=0;index--){
+    if("observation".equals(observations.getJSONObject(index).getString("id")))observations.remove(index);
+   }
+   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
+    database.execSQL("UPDATE snapshots SET content=? WHERE id=1",new Object[]{changed.toString()});
+   }
+   afterMissing=nativeSnapshots(context);
+   click(a,"#balance-history-refresh");
+   waitJs(a,"document.getElementById('balance-approval-detail')?.textContent.includes('Değerlendirilemiyor')");
+   assertEquals("true",js(a,"document.getElementById('balance-approval-detail').textContent.includes('Bu onayın gözlemi güncel kayıtlarda bulunamıyor.')"));
+   assertEquals("true",js(a,"!document.querySelector('[data-balance-reapprove]')"));
+   assertEquals(afterMissing,nativeSnapshots(context));
+   assertEquals(approvals,new JSONObject(afterMissing.get(1)).getJSONObject("balanceReconciliation").getJSONArray("approvals").toString());
+  }
+  try(ActivityScenario<MainActivity> reopened=ActivityScenario.launch(MainActivity.class)){
+   waitJs(reopened,"!!document.querySelector('[data-stat=cardDebt]')");
+   assertEquals(totals,js(reopened,"Array.from(document.querySelectorAll('[data-stat]'),e=>e.textContent)"));
+   openNativeApprovalHistory(reopened,"cash");
+   assertEquals("1",js(reopened,"document.querySelectorAll('[data-balance-approval-entry]').length"));
+   click(reopened,"[data-balance-approval=cash-approval]");
+   waitJs(reopened,"document.getElementById('balance-approval-detail')?.textContent.includes('Kayıtlarla güncel')");
+   assertEquals(afterMissing,nativeSnapshots(context));
   }
  }
 

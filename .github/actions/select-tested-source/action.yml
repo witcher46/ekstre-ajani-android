@@ -9,7 +9,7 @@ runs:
         PR_BASE: ${{ github.event.pull_request.base.sha }}
       run: |
         if [[ "$GITHUB_EVENT_NAME" == pull_request &&
-              ( "$GITHUB_BASE_REF" == main || "$GITHUB_BASE_REF" == feature/android-reconciliation-evidence-storage ) ]]; then
+              ( "$GITHUB_BASE_REF" == main || "$GITHUB_BASE_REF" == feature/android-reconciliation-evidence-storage || "$GITHUB_BASE_REF" == feature/android-reconciliation-approval-flow ) ]]; then
           head_tree=$(git rev-parse --verify "${PR_HEAD}^{tree}")
           merge_tree=$(git rev-parse --verify 'HEAD^{tree}')
           if [[ "$head_tree" == "$merge_tree" ]] && git merge-base --is-ancestor "$PR_BASE" "$PR_HEAD"; then
