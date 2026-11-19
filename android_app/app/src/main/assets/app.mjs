@@ -9,6 +9,9 @@ import {createDialog} from './ui/dialog.mjs';
 import {escapeHtml as esc,options,field,select} from './ui/form-controls.mjs';
 import {renderBottomNavigation} from './ui/navigation.mjs';
 import {renderReviewCenter} from './ui/review-center.mjs';
+import {compareBalanceObservation} from './balance-reconciliation.mjs';
+import {prepareBalanceApproval,readBalanceApprovalSnapshot,saveBalanceApproval} from './balance-approval-flow.mjs';
+import {addReviewedBalanceRecord,balanceObservationFields,readBalanceAnchor,readBalanceCoverage,renderBalanceReview} from './ui/balance-review.mjs';
 const $=id=>document.getElementById(id);
 const plainMoney=C.formatMoney;
 const fmt=n=>`<span class="money">${plainMoney(n)}</span>`,key='ekstre-android-v1';
@@ -18,6 +21,7 @@ let importDraft;
 let pdfRequest=null;
 let actionTrigger=null,csvOpener=null;
 let state=W.normalizeWallet(C.empty()),detailId=null,expenseCategory=null,page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,toastTimer,loadFailed=false;
+let balanceDraft={},balanceReviewToken=null;
 const reportFilters={months:6,accountId:'',category:null,reveal:false};
 function notice(message,{error=false}={}){
  const live=$(error?'error-announcement':'status-announcement');
@@ -28,7 +32,8 @@ function notice(message,{error=false}={}){
  toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),7000);
 }
 const errorNotice=message=>notice(message,{error:true});
-try{const raw=window.Android?Android.load():localStorage.getItem(key);if(raw)state=W.normalizeWallet(C.reviewLegacy(C.readBackup(raw)));}catch(e){loadFailed=true;errorNotice('Kayıtlar okunamadı. Mevcut verilerin üzerine yazılmayacak. '+e.message);}
+const displayedWallet=wallet=>W.normalizeWallet(C.reviewLegacy(wallet));
+try{const raw=window.Android?Android.load():localStorage.getItem(key);if(raw)state=displayedWallet(C.readBackup(raw));}catch(e){loadFailed=true;errorNotice('Kayıtlar okunamadı. Mevcut verilerin üzerine yazılmayacak. '+e.message);}
 function commit(next,{restore=false,recoveryRaw}={}){if(loadFailed)throw Error('Kayıtlar okunamadığı için yazma kapalı. Önce geçerli bir yedek yükle.');next=W.normalizeWallet(next);const raw=C.backupText(next);if(window.Android){if(!(recoveryRaw!==undefined&&Android.recoverSaved?Android.recoverSaved(sha256(recoveryRaw),raw):restore&&Android.restore?Android.restore(raw):Android.save(raw)))throw Error('Kayıt kaydedilemedi; değişiklik uygulanmadı.');}else {if(restore)localStorage.setItem(key+'-recovery',localStorage.getItem(key)||'');localStorage.setItem(key,raw);}state=next;render();}
 const copy=()=>structuredClone(state),accountName=id=>state.accounts.find(a=>a.id===id)?.name||'Hesap';
 const accountOptions=(filter=()=>true,selected)=>options(state.accounts.filter(filter).map(a=>[a.id,a.name]),selected);
@@ -62,6 +67,7 @@ window.handleBack=()=>{
  const previous=history.pop();
  if(!previous)return false;
  ({page,detailId,query,expenseCategory}=previous);
+ resetBalanceReview(page);
  render();window.scrollTo(0,previous.scroll);restoreFocus(previous.opener);
  return true;
 };
@@ -94,6 +100,7 @@ window.onPdfText=async (text,request)=>{
 function go(next,id=null,category=null){
  if(next!==page||id!==detailId||category!==expenseCategory){
   history.push({page,detailId,query,expenseCategory,scroll:window.scrollY,opener:focusTarget(actionTrigger||document.activeElement)});
+  resetBalanceReview(next);
  }
  page=next;detailId=id;expenseCategory=category;query='';
  render();window.scrollTo(0,0);focusMain();
@@ -116,6 +123,7 @@ function render(){
  if(page==='home'){html=V.homeView(ctx);
  }else if(page==='wallet'){html=V.walletView(ctx);
  }else if(page==='account'){html=V.accountView(ctx,detailId);
+ }else if(page==='balanceReview'){html=renderBalanceReview(state,detailId,balanceDraft,balanceReviewToken!==null);
  }else if(page==='incomePlans'){html=V.incomePlansView(ctx);
  }else if(page==='transactions'){
  const list=rows.filter(t=>(filteredExpenses?t.kind==='expense'&&t.amount>0&&t.category===expenseCategory:(!kindFilter||t.kind===kindFilter)&&(!accountFilter||t.account===accountFilter||t.target===accountFilter))&&`${t.desc} ${t.category} ${t.note||''}`.toLocaleLowerCase('tr').includes(query.toLocaleLowerCase('tr'))).sort((a,b)=>b.date.localeCompare(a.date));
@@ -293,6 +301,120 @@ function openQuickAdd(){
   </div>`,null);
 }
 
+function hasBalanceStorage(){
+ return typeof window.Android?.loadForCompare==='function'&&typeof window.Android?.saveIfUnchanged==='function';
+}
+
+function balanceRecordForm(role){
+ const account=state.accounts.find(row=>row.id===detailId);
+ if(!account||account.type==='card')return;
+ modal(role==='anchor'?'Dayanak ekle':'Gözlem ekle',balanceObservationFields(account,role),data=>{
+  if(!window.Android){commit(addReviewedBalanceRecord(state,account.id,role,data));return;}
+  const snapshot=readBalanceApprovalSnapshot(window.Android);
+  if(!snapshot)throw Error('Güncel hesap kaydı okunamadı. Veri tekrar okunmadan kayıt eklenemez.');
+  const current=snapshot.state.accounts.find(row=>row.id===account.id);
+  if(current?.type!==account.type||current.name!==account.name)throw Error('Hesap değişti. Hesabı yeniden açıp bilgileri kontrol et.');
+  const next=addReviewedBalanceRecord(snapshot.state,account.id,role,data);
+  if(!window.Android.saveIfUnchanged(snapshot.token,C.backupText(next)))throw Error('Kayıt eklenemedi. Hesabı yeniden açıp güncel bilgileri kontrol et.');
+  state=displayedWallet(next);
+  render();
+ });
+}
+
+function refreshBalanceWallet(){
+ const snapshot=readBalanceApprovalSnapshot(window.Android);
+ balanceReviewToken=snapshot?.token??null;
+ if(!snapshot)return false;
+ state=displayedWallet(snapshot.state);
+ return true;
+}
+
+function resetBalanceReview(next){
+ balanceDraft={};
+ balanceReviewToken=null;
+ if(next==='balanceReview'&&hasBalanceStorage())refreshBalanceWallet();
+}
+
+function showBalanceReviewError(message){
+ const error=$('balance-review-error');
+ if(!error)return;
+ error.textContent=message;
+ error.hidden=false;
+ error.focus();
+}
+
+function showBalanceStep(draft,heading){
+ balanceDraft=draft;
+ render();
+ const target=$(heading)??$('main').querySelector('h1');
+ target.tabIndex=-1;
+ target.focus();
+}
+
+function requireBalanceReview(message){
+ showBalanceStep({restart:message},'balance-review-result');
+}
+
+function prepareBalanceReview(data){
+ const {comparison,options}=balanceDraft;
+ if(!comparison||comparison.evidence.movements.some(row=>row.matchStatus==='pending'))return;
+ const coverageReview=readBalanceCoverage(comparison,data);
+ const result=prepareBalanceApproval(window.Android,detailId,{...options,coverageReview},balanceReviewToken);
+ if(result.status==='storage-unavailable'){
+  requireBalanceReview('Güncel Android kayıtları okunamadı.');
+  return;
+ }
+ const latest=result.comparison?.evidence;
+ if(!latest||JSON.stringify({...latest,coverage:comparison.evidence.coverage})!==JSON.stringify(comparison.evidence)){
+  requireBalanceReview('Karşılaştırmaya giren kayıtlar değişti. Yeni kayıtları kaynaklarınla yeniden karşılaştır.');
+  return;
+ }
+ if(result.status==='prepared'){
+  showBalanceStep({prepared:result},'balance-result-title');
+  return;
+ }
+ showBalanceReviewError('Kapsam yetersiz. Her kaynak satırının referansını, tarihini ve işaretli tutarını kontrol et.');
+}
+
+function submitBalanceReview(event){
+ if(page!=='balanceReview')return;
+ event.preventDefault();
+ const form=event.target;
+ if(!form.isConnected)return;
+ const data=new FormData(form);
+ try{
+  if(form.id==='balance-anchor-form'){
+   const options=readBalanceAnchor(state,detailId,data);
+   const comparison=compareBalanceObservation(state,detailId,options);
+   if(comparison.status!=='calculated'){
+    showBalanceReviewError(comparison.reason==='closing-mismatch'?
+     'Kaynakların ortak gün sonu saat dilimini kontrol et. Örneğin Europe/Istanbul.':
+     'Kaynakta yazan tarih ve tutarın seçtiğin dayanakla aynı olduğunu kontrol et.');
+    return;
+   }
+   showBalanceStep({options,comparison},'balance-result-title');
+  }else if(form.id==='balance-coverage-form'&&balanceReviewToken!==null){
+   prepareBalanceReview(data);
+  }else if(form.id==='balance-final-form'&&balanceDraft.prepared&&data.has('balance-confirmed')){
+   const prepared=balanceDraft.prepared;
+   balanceDraft={};
+   $('balance-save').disabled=true;
+   const result=saveBalanceApproval(window.Android,prepared,true);
+   if(result.status==='saved'){
+    state=displayedWallet(result.state);
+    showBalanceStep({saved:{accountName:prepared.accountName,date:prepared.comparison.evidence.observation.date}},'balance-review-saved');
+   }else{
+    requireBalanceReview(result.status==='review-required'?
+     'Güncel kayıtlar incelemenle uyuşmadı veya yazma sırasında değişti. Yeni kayıtları kaynaklarınla yeniden karşılaştır.':
+     'Onay kaydedilemedi. Güncel kayıtları kaynaklarınla yeniden karşılaştır.');
+   }
+  }
+ }catch(error){
+  if(form.id==='balance-final-form'&&!balanceDraft.prepared)requireBalanceReview('Onay işlemi tamamlanamadı. Güncel kayıtları kaynaklarınla yeniden karşılaştır.');
+  else showBalanceReviewError(error.message);
+ }
+}
+
 const actions={
  quickAdd:openQuickAdd,
  quickPayCard:()=>{
@@ -301,6 +423,17 @@ const actions={
   else payCardForm(undefined,{sourceId:account?.id});
  },
  back:()=>{if(!window.handleBack())go('import');},
+ balanceBack:()=>{if(!window.handleBack())go('wallet');},
+ balanceAddAnchor:()=>balanceRecordForm('anchor'),
+ balanceAddObservation:()=>balanceRecordForm('observation'),
+ balanceChangeAnchor:()=>{
+  resetBalanceReview('balanceReview');
+  showBalanceStep({},'balance-anchor-title');
+ },
+ balanceRestart:()=>{
+  if(!refreshBalanceWallet()){showBalanceReviewError('Android kayıtları okunamadı.');return;}
+  showBalanceStep({},'balance-anchor-title');
+ },
  clearExpenseCategory:()=>{expenseCategory=null;render();focusMain();},
  addImportCard:()=>accountForm(null,{fromImport:true}),
  more:()=>{
@@ -344,12 +477,14 @@ const actions={
  },
  cancelImport:()=>{invalidatePdfPreview();document.querySelector('[data-action="pdf"]')?.focus();}
 };
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete&&confirm('Gelir planı kaldırılsın mı? Kaydedilmiş gelirler korunur.')){const next=copy();next.incomePlans=next.incomePlans.filter(p=>p.id!==b.dataset.incomeDelete);commit(next);}else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action]();else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule&&confirm('Bu satıcı kuralı silinsin mi?')){commit(C.removeMerchantRule(state,b.dataset.removeRule));closeModal();}else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link){if(confirm('Bu iki kaynak aynı işlemi mi gösteriyor? İkinci kez sayılmayacak.'))commit(C.resolveCandidate(state,b.dataset.link,'link',$('match-'+b.dataset.link).value));}else if(b.dataset.distinct){if(confirm('Bu ayrı bir gerçek işlem mi? Toplama ayrıca eklenecek.'))commit(C.resolveCandidate(state,b.dataset.distinct,'distinct'));}else if(b.dataset.subdelete&&confirm('Abonelik silinsin mi?')){const next=copy();next.subscriptions=next.subscriptions.filter(r=>r.id!==b.dataset.subdelete);commit(next);}else if(b.dataset.budget&&confirm('Bütçe kaldırılsın mı?')){const next=copy();delete next.budgets[b.dataset.budget];commit(next);}}catch(error){if(b.closest('#quick-add-options'))showDialogError(error.message);else errorNotice(error.message);}finally{actionTrigger=null;}});
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if(b.dataset.balanceReview){go('balanceReview',b.dataset.balanceReview);}else if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete&&confirm('Gelir planı kaldırılsın mı? Kaydedilmiş gelirler korunur.')){const next=copy();next.incomePlans=next.incomePlans.filter(p=>p.id!==b.dataset.incomeDelete);commit(next);}else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action]();else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule&&confirm('Bu satıcı kuralı silinsin mi?')){commit(C.removeMerchantRule(state,b.dataset.removeRule));closeModal();}else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link){if(confirm('Bu iki kaynak aynı işlemi mi gösteriyor? İkinci kez sayılmayacak.'))commit(C.resolveCandidate(state,b.dataset.link,'link',$('match-'+b.dataset.link).value));}else if(b.dataset.distinct){if(confirm('Bu ayrı bir gerçek işlem mi? Toplama ayrıca eklenecek.'))commit(C.resolveCandidate(state,b.dataset.distinct,'distinct'));}else if(b.dataset.subdelete&&confirm('Abonelik silinsin mi?')){const next=copy();next.subscriptions=next.subscriptions.filter(r=>r.id!==b.dataset.subdelete);commit(next);}else if(b.dataset.budget&&confirm('Bütçe kaldırılsın mı?')){const next=copy();delete next.budgets[b.dataset.budget];commit(next);}}catch(error){if(b.closest('#quick-add-options'))showDialogError(error.message);else errorNotice(error.message);}finally{actionTrigger=null;}});
 function rememberImportAccount(field){
  importDraft.account=field.value;
  $('import-account-display').textContent=field.selectedOptions[0]?.textContent??'';
 }
+$('main').addEventListener('submit',submitBalanceReview);
 $('main').addEventListener('change',event=>{
+ if(event.target.id==='balance-confirmed')$('balance-save').disabled=!event.target.checked;
  if(!pending)return;
  const field=event.target;
  if(field.id==='import-account')rememberImportAccount(field);

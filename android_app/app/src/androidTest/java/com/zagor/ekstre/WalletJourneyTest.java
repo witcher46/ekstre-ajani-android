@@ -2,6 +2,7 @@ package com.zagor.ekstre;
 
 import android.app.Activity;
 import android.content.*;
+import android.database.sqlite.SQLiteDatabase;
 import android.net.Uri;
 import android.os.Environment;
 import android.os.SystemClock;
@@ -501,6 +502,140 @@ public class WalletJourneyTest {
    assertEquals(expected.getJSONObject("balanceReconciliation").toString(),
     restored.getJSONObject("balanceReconciliation").toString());
   }finally{context.getContentResolver().delete(file,null,null);}
+ }
+
+ private void prepareNativeBalanceReview(ActivityScenario<MainActivity> a,String movementSource) throws Exception {
+  waitJs(a,"!!document.getElementById('balance-anchor-form')");
+  js(a,"""
+   document.getElementById('f-balance-anchor').value='anchor';
+   document.getElementById('f-balance-anchor-ref').value='synthetic closing';
+   document.getElementById('f-balance-anchor-date').value='2026-11-01';
+   document.getElementById('f-balance-anchor-amount').value='1000,00';
+   document.getElementById('balance-closing-confirmed').checked=true;
+   document.getElementById('balance-anchor-form').requestSubmit();
+   """);
+  waitJs(a,"!!document.getElementById('balance-coverage-form')");
+  js(a,"document.getElementById('f-balance-coverage-ref').value="+JSONObject.quote(movementSource));
+  js(a,"""
+   document.getElementById('f-balance-row-ref-1').value='synthetic row';
+   document.getElementById('f-balance-row-date-1').value='2026-11-10';
+   document.getElementById('f-balance-row-amount-1').value='1,00';
+   document.getElementById('balance-coverage-confirmed').checked=true;
+   document.getElementById('balance-coverage-form').requestSubmit();
+   """);
+  waitJs(a,"!!document.getElementById('balance-final-form')");
+  assertEquals("true",js(a,"""
+   (()=>{const summary=document.querySelector('[aria-labelledby=balance-result-title]');
+     return summary.textContent.includes('Kapsam kaynak satırlarıyla desteklendi') && !summary.querySelector('.warning');
+   })()
+   """));
+  assertEquals("true",js(a,"document.getElementById('balance-save').disabled"));
+ }
+
+ private void submitNativeBalanceReviewTwice(ActivityScenario<MainActivity> a) throws Exception {
+  click(a,"#balance-confirmed");
+  assertEquals("false",js(a,"document.getElementById('balance-save').disabled"));
+  js(a,"""
+   (()=>{const button=document.getElementById('balance-save');
+     button.click();
+     button.click();
+   })()
+   """);
+ }
+
+ @Test public void balanceApprovalFlowCommitsThroughNativeCasAndReopens() throws Exception {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  JSONObject wallet;
+  try(var input=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("synthetic-reconciliation-v3.json");
+      var output=new ByteArrayOutputStream()){
+   byte[] buffer=new byte[4096];
+   for(int count;(count=input.read(buffer))!=-1;)output.write(buffer,0,count);
+   wallet=new JSONObject(new String(output.toByteArray(),StandardCharsets.UTF_8));
+  }
+  wallet.put("version",2);
+  JSONObject section=wallet.getJSONObject("balanceReconciliation");
+  section.remove("approvals");
+  JSONArray observations=section.getJSONArray("observations");
+  observations.getJSONObject(0).put("observedAmountCents",100000);
+  observations.getJSONObject(1).put("observedAmountCents",100100);
+  wallet.getJSONArray("accounts").put(new JSONObject(
+   "{\"id\":\"card\",\"name\":\"Sentetik kart\",\"type\":\"card\",\"opening\":2500}"));
+  wallet.getJSONArray("transactions").put(new JSONObject("{\"id\":\"card-expense\",\"account\":\"card\","
+   +"\"kind\":\"expense\",\"date\":\"2026-11-10\",\"amount\":800,\"desc\":\"Sentetik\",\"category\":\"Diğer\","
+   +"\"period\":\"2026-11\",\"source\":\"manual\"}"));
+  String v2=wallet.toString();
+  String reopenExpected;
+  String homeStats;
+  String renderedStats="Array.from(document.querySelectorAll('[data-stat]'),e=>e.textContent)";
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=addAccount]')");
+   account(a,"Sentetik kurtarma","cash");
+   String recovery=js(a,"Android.load()");
+   assertEquals("true",js(a,"Android.restore("+JSONObject.quote(v2)+")"));
+   a.recreate();
+   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+   String previous=js(a,"Android.load()");
+   assertEquals("2",js(a,"JSON.parse(Android.load()).version"));
+   homeStats=js(a,renderedStats);
+
+   click(a,"nav [data-page=wallet]");
+   click(a,"[data-account-view=bank]");
+   click(a,"[data-balance-review=observation]");
+   prepareNativeBalanceReview(a,"synthetic statement");
+   js(a,"document.getElementById('balance-final-form').requestSubmit()");
+   assertEquals(previous,js(a,"Android.load()"));
+
+   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
+    database.execSQL("CREATE TRIGGER abort_approval_test BEFORE INSERT ON snapshots WHEN NEW.id=1"
+     +" BEGIN SELECT RAISE(ABORT, 'synthetic-approval-write-failure'); END");
+    try{
+     submitNativeBalanceReviewTwice(a);
+     waitJs(a,"!!document.querySelector('[data-action=balanceRestart]') && !document.getElementById('balance-save')");
+     assertEquals(previous,js(a,"Android.load()"));
+     assertEquals(recovery,js(a,"Android.recovery()"));
+     try(var snapshots=database.rawQuery("SELECT content FROM snapshots WHERE id=2",null)){
+      assertTrue(snapshots.moveToFirst());
+      assertEquals(new JSONArray("["+recovery+"]").getString(0),snapshots.getString(0));
+     }
+    }finally{database.execSQL("DROP TRIGGER IF EXISTS abort_approval_test");}
+   }
+   assertEquals("true",js(a,"!document.getElementById('balance-final-form')"));
+   assertEquals(previous,js(a,"Android.load()"));
+   click(a,"[data-action=balanceRestart]");
+   prepareNativeBalanceReview(a,"synthetic statement");
+   submitNativeBalanceReviewTwice(a);
+   waitJs(a,"!!document.getElementById('balance-review-saved')");
+   assertEquals("true",js(a,"""
+    (()=>{const wallet=JSON.parse(Android.load()),rows=wallet.balanceReconciliation.approvals;
+      const evidence=JSON.parse(rows[0].evidenceJson);
+      return wallet.version===3 && rows.length===1 && rows[0].previousApprovalId===null &&
+       evidence.coverage.status==='source-supported' && evidence.differenceCents==='0';
+    })()
+    """));
+   String firstApproval=js(a,"JSON.stringify(JSON.parse(Android.load()).balanceReconciliation.approvals[0])");
+   click(a,"[data-action=balanceBack]");
+   click(a,"[data-balance-review=observation]");
+   prepareNativeBalanceReview(a,"synthetic replacement statement");
+   submitNativeBalanceReviewTwice(a);
+   waitJs(a,"!!document.getElementById('balance-review-saved')");
+   assertEquals(firstApproval,js(a,"JSON.stringify(JSON.parse(Android.load()).balanceReconciliation.approvals[0])"));
+   assertEquals("true",js(a,"""
+    (()=>{const rows=JSON.parse(Android.load()).balanceReconciliation.approvals;
+      return rows.length===2 && rows[1].previousApprovalId===rows[0].id;
+    })()
+    """));
+   assertEquals(recovery,js(a,"Android.recovery()"));
+   reopenExpected=js(a,"Android.load()");
+   JSONObject saved=new JSONObject(new JSONArray("["+reopenExpected+"]").getString(0));
+   for(String key:new String[]{"accounts","transactions","statements","budgets","subscriptions","categories"}){
+    assertEquals(wallet.get(key).toString(),saved.get(key).toString());
+   }
+  }
+  try(ActivityScenario<MainActivity> reopened=ActivityScenario.launch(MainActivity.class)){
+   waitJs(reopened,"!!document.querySelector('[data-stat=cardDebt]')");
+   assertEquals(reopenExpected,js(reopened,"Android.load()"));
+   assertEquals(homeStats,js(reopened,renderedStats));
+  }
  }
 
  private void assertMigratedWallet(ActivityScenario<MainActivity> a,JSONObject expected)throws Exception{
