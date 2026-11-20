@@ -1,20 +1,23 @@
 import {maskPdfRows,pdfIdentityKeyId} from './privacy.mjs';
+import {validateBalanceApprovals} from './balance-approval-storage.mjs';
 
 export const merchantKey=value=>String(value??'').normalize('NFKD').replace(/\p{M}/gu,'').replace(/ı/g,'i').toUpperCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 export const categories=['Market / Gıda','Dışarıda yeme','Akaryakıt','Fatura / İnternet','Abonelik','Oyun / Dijital','Online alışveriş','Ulaşım','Sağlık','Giyim','Ev / Kira','Eğitim','Faiz / Ücret','Diğer'];
 export const id=()=>crypto.randomUUID();
 export const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
-export function money(input){
+export function money(input,{wide=false}={}){
  const value=String(input).trim();
- const plain=/^([+-]?)(\d{1,10})(?:[,.](\d{1,2}))?$/.exec(value);
+ const plain=(wide?/^([+-]?)(\d{1,14})(?:[,.](\d{1,2}))?$/:/^([+-]?)(\d{1,10})(?:[,.](\d{1,2}))?$/).exec(value);
  const turkish=/^([+-]?)(\d{1,3}(?:\.\d{3})+),(\d{1,2})$/.exec(value);
  const english=/^([+-]?)(\d{1,3}(?:,\d{3})+)\.(\d{1,2})$/.exec(value);
  const match=plain||turkish||english;
  if(!match)throw Error('Tutarın ayraçlarını kontrol et. Örneğin 1234,56 yaz ve en fazla iki ondalık basamak kullan.');
  const [,sign,whole,fraction='']=match;
  const digits=whole.replace(/[.,]/g,'');
- if(digits.length>10)throw Error('Tutar en fazla 10 tam basamak içerebilir.');
+ const maxDigits=wide?14:10;
+ if(digits.length>maxDigits)throw Error(`Tutar en fazla ${maxDigits} tam basamak içerebilir.`);
  const amount=Number(digits+fraction.padEnd(2,'0'));
+ if(!Number.isSafeInteger(amount))throw Error('Tutar güvenli kuruş sınırını aşıyor.');
  return sign==='-'&&amount!==0?-amount:amount;
 }
 // Keep ordinary totals as numbers and widen only when the exact sum needs it.
@@ -78,11 +81,12 @@ function validateBalanceReconciliation(state){
 
 export function validate(s){
  if(!s||s.format!=='ekstre-android')throw Error('Bu dosya Android cüzdan yedeği değil.');
- if(s.version!==1&&s.version!==2)throw Error('Bu Android cüzdan yedeği sürümü desteklenmiyor.');
+ if(s.version!==1&&s.version!==2&&s.version!==3)throw Error('Bu Android cüzdan yedeği sürümü desteklenmiyor.');
  for(const k of ['accounts','transactions','statements','subscriptions','categories'])if(!Array.isArray(s[k])||s[k].length>50000)throw Error('Yedek yapısı veya boyutu geçersiz.');
  if(!s.budgets||typeof s.budgets!=='object'||Array.isArray(s.budgets))throw Error('Bütçe verisi geçersiz.');
  const ids=new Set();for(const a of s.accounts){if(!text(a.id)||ids.has(a.id)||!text(a.name)||!a.name.trim()||!['card','bank','cash'].includes(a.type)||!cents(a.opening))throw Error('Hesap kaydı geçersiz.');ids.add(a.id);}
- if(s.version===2)validateBalanceReconciliation(s);
+ if(s.version>=2)validateBalanceReconciliation(s);
+ if(s.version===3)validateBalanceApprovals(s.balanceReconciliation.approvals);
  const txids=new Set();for(const t of s.transactions){if(!text(t.id)||txids.has(t.id)||!ids.has(t.account)||!validDate(t.date)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(t.period)||!text(t.desc,500)||!text(t.category)||!text(t.note??'',2000)||!cents(t.amount)||t.amount<0||!['expense','income','refund','cardPayment','payment','transfer'].includes(t.kind))throw Error('İşlem kaydı geçersiz.');if(['payment','transfer'].includes(t.kind)&&(!ids.has(t.target)||t.target===t.account))throw Error('Hedef hesap geçersiz.');if(t.installment&&!/^\d{1,3}\/\d{1,3}$/.test(t.installment))throw Error('Taksit geçersiz.');txids.add(t.id);}
  for(const st of s.statements)if(!text(st.id)||!ids.has(st.account)||!validDate(st.cut)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(st.period)||!(st.debt===null||cents(st.debt))||!(st.due===null||validDate(st.due)))throw Error('Ekstre kaydı geçersiz.');
  for(const [k,v] of Object.entries(s.budgets))if(!/^\d{4}-(0[1-9]|1[0-2])\|.{1,200}$/.test(k)||!cents(v)||v<0)throw Error('Bütçe kaydı geçersiz.');
@@ -745,7 +749,7 @@ export function importCsv(s,rows,account){
  return validate(next);
 }
 function withBalanceObservations(state,observations){
- return validate({...state,version:2,balanceReconciliation:{...state.balanceReconciliation,observations}});
+ return validate({...state,version:state.version===3?3:2,balanceReconciliation:{...state.balanceReconciliation,observations}});
 }
 
 export function addBalanceObservation(state,input,{now=new Date().toISOString()}={}){
@@ -760,7 +764,7 @@ export function addBalanceObservation(state,input,{now=new Date().toISOString()}
 }
 
 export function updateBalanceObservation(state,observationId,changes,{now=new Date().toISOString()}={}){
- const rows=state.version===2?state.balanceReconciliation.observations:[];
+ const rows=state.version>=2?state.balanceReconciliation.observations:[];
  const row=rows.find(item=>item.id===observationId);
  if(!row)throw Error('Bakiye gözlemi bulunamadı.');
  if(!observationTimestamp(now)||now<row.updatedAt)throw Error('Bakiye gözleminin düzenleme zamanı geçersiz.');
@@ -771,7 +775,7 @@ export function updateBalanceObservation(state,observationId,changes,{now=new Da
 }
 
 export function removeBalanceObservation(state,observationId){
- const rows=state.version===2?state.balanceReconciliation.observations:[];
+ const rows=state.version>=2?state.balanceReconciliation.observations:[];
  const remaining=rows.filter(item=>item.id!==observationId);
  if(remaining.length===rows.length)throw Error('Bakiye gözlemi bulunamadı.');
  return withBalanceObservations(state,remaining);
