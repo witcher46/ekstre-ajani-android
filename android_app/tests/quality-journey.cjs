@@ -5,6 +5,113 @@ const assert = require('node:assert/strict');
 
 const root = path.resolve(__dirname,'../app/src/main/assets');
 
+async function routeWallet(page) {
+  await page.route('https://wallet.test/**', route => {
+    const name = new URL(route.request().url()).pathname.replace(/^\//,'') || 'index.html';
+    const file = path.join(root,name);
+    if (!file.startsWith(root+path.sep) || !fs.existsSync(file)) return route.abort();
+    const contentType = name.endsWith('.mjs') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html';
+    return route.fulfill({body:fs.readFileSync(file),contentType});
+  });
+}
+
+async function categorySuggestionsJourney(browser) {
+  const page=await browser.newPage({viewport:{width:320,height:720},hasTouch:true});
+  page.setDefaultTimeout(4000);
+  try {
+    await routeWallet(page);
+    await page.goto('https://wallet.test/');
+    await page.evaluate(async()=>{
+      const C=await import('/core.mjs');
+      const W=await import('/wallet.mjs');
+      const wallet=C.empty(),date=C.today();
+      wallet.accounts.push({id:'test-card',name:'Sentetik kart',type:'card',opening:0});
+      wallet.transactions.push({id:'test-movement',account:'test-card',date,period:date.slice(0,7),desc:'Sentetik Mağaza 1234 İzmir',kind:'expense',category:'Diğer',amount:4500,note:'Kalsın',reviewed:true,source:'manual'});
+      wallet.transactions.push({...wallet.transactions[0],id:'other-movement',desc:'Sentetik Mağaza 5678 Bursa',amount:6700});
+      wallet.transactions.push({...wallet.transactions[0],id:'uncategorized',desc:'Sentetik Mağaza 1111 Van',category:''});
+      wallet.transactions.push({...wallet.transactions[0],id:'remaining-movement',desc:'Sentetik Mağaza 2222 Bursa'});
+      localStorage.setItem('ekstre-android-v1',C.backupText(W.normalizeWallet(C.saveMerchantRule(wallet,'Sentetik Mağaza 5432 Ankara','Giyim'))));
+    });
+    await page.reload();
+    const saved=()=>page.evaluate(()=>localStorage.getItem('ekstre-android-v1'));
+    const stats=()=>page.locator('[data-stat]').allTextContents();
+    const before=await saved(), totals=await stats();
+    await page.locator('nav [data-page=transactions]').click();
+    assert.equal(await page.locator('nav button').count(),5);
+    const panel=page.locator('.transaction-with-suggestion').filter({has:page.locator('[data-edit=test-movement]')});
+    const apply=panel.getByRole('button',{name:/Öneriyi uygula: Sentetik Mağaza/});
+    const choose=panel.getByRole('button',{name:/Başka kategori seç: Sentetik Mağaza/});
+    const edit=panel.locator('[data-edit=test-movement]');
+    const dialog=page.getByRole('dialog',{name:'Kategori seç'});
+    await page.getByRole('button',{name:'Başka kategori seç: Sentetik Mağaza 1111 Van'}).click();
+    assert.equal(await dialog.getByLabel('Kategori',{exact:true}).inputValue(),'');
+    await dialog.getByRole('button',{name:'Kaydet'}).click();
+    assert.equal(await saved(),before);
+    assert.match(await panel.innerText(),/Mevcut kategori: Diğer[\s\S]*Önerilen kategori: Giyim[\s\S]*numaralı şubeleri/);
+    assert.match(await apply.getAttribute('aria-describedby'),/^transaction-category-advice-/);
+    assert.equal(await saved(),before);
+    assert.equal(await page.evaluate(()=>[...document.querySelectorAll('.transaction-category-suggestion button')].every(button=>{
+      const r=button.getBoundingClientRect();
+      return r.left>=0&&r.right<=320&&r.width>=48&&r.height>=48;
+    })),true);
+    const screenshots=path.resolve(__dirname,'../test-output/category-suggestions');
+    fs.mkdirSync(screenshots,{recursive:true});
+    await panel.screenshot({path:path.join(screenshots,'category-suggestion-320.png')});
+    await edit.focus();
+    await page.keyboard.press('Tab');
+    assert.equal(await apply.evaluate(e=>e===document.activeElement),true);
+    await page.keyboard.press('Tab');
+    assert.equal(await choose.evaluate(e=>e===document.activeElement),true);
+    await page.keyboard.press('Enter');
+    await dialog.waitFor();
+    assert.equal(await dialog.getByLabel('Kategori',{exact:true}).inputValue(),'Diğer');
+    await dialog.screenshot({path:path.join(screenshots,'choose-category-320.png')});
+    await dialog.getByLabel('Kategori',{exact:true}).selectOption('Eğitim');
+    assert.equal(await saved(),before);
+    assert.equal(await page.evaluate(()=>window.handleBack()),true);
+    await dialog.waitFor({state:'hidden'});
+    assert.equal(await choose.evaluate(e=>e===document.activeElement),true);
+    assert.equal(await saved(),before);
+    await page.locator('#search').fill('Diğer');
+    await choose.click();
+    await dialog.getByLabel('Kategori',{exact:true}).selectOption('Eğitim');
+    await dialog.getByRole('button',{name:'Kaydet'}).click();
+    assert.equal(await panel.count(),0);
+    assert.equal(await page.locator('main h1').evaluate(e=>e===document.activeElement),true);
+    await page.locator('#search').fill('');
+    assert.match(await panel.innerText(),/Mevcut kategori: Eğitim/);
+    await apply.focus();
+    await page.keyboard.press('Space');
+    await panel.waitFor({state:'detached'});
+    assert.equal(await page.locator('[data-edit=test-movement]').evaluate(e=>e===document.activeElement),true);
+    const expected=JSON.parse(before);
+    expected.transactions[0].category='Giyim';
+    assert.deepEqual(JSON.parse(await saved()),expected);
+    await page.locator('#search').fill('Diğer');
+    const otherApply=page.locator('[data-action=applyCategorySuggestion][data-transaction-id=other-movement]');
+    await otherApply.scrollIntoViewIfNeeded();
+    const {x,y,width,height}=await otherApply.boundingBox();
+    await page.touchscreen.tap(x+width/2,y+height/2);
+    await page.touchscreen.tap(x+width/2,y+height/2);
+    expected.transactions[1].category='Giyim';
+    assert.deepEqual(JSON.parse(await saved()),expected);
+    await page.locator('nav [data-page=home]').click();
+    assert.deepEqual(await stats(),totals);
+    await page.locator('#settings').click();
+    assert.equal(await page.locator('main .lead').innerText(),'Tarayıcı önizlemesi');
+    await page.evaluate(()=>{window.Android={versionName:()=>'<b>9.8.7-test</b>'};});
+    await page.locator('#settings').click();
+    assert.equal(await page.locator('main .lead').innerText(),'Android sürümü <b>9.8.7-test</b>');
+    assert.equal(await page.locator('main .lead b').count(),0);
+    await page.evaluate(()=>{window.Android={versionName:()=>{throw Error('Köprü kullanılamıyor');}};});
+    await page.locator('#settings').click();
+    assert.equal(await page.locator('main .lead').innerText(),'Android sürüm bilgisi kullanılamıyor');
+    console.log('Category suggestions: 320px, explicit saves, cancel/keyboard focus, stable totals and version fallbacks passed');
+  } finally {
+    await page.close();
+  }
+}
+
 async function quickAddJourney(page) {
   const add = page.getByRole('button',{name:'Ekle',exact:true});
   const menu = page.getByRole('dialog',{name:'Hızlı Ekle'});
@@ -282,6 +389,7 @@ async function advancedReportsJourney(page) {
 (async () => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.CHROME_PATH || undefined});
   try {
+    await categorySuggestionsJourney(browser);
     const page = await browser.newPage({viewport:{width:320,height:720}});
     page.setDefaultTimeout(4000);
     const errors = [];
@@ -292,13 +400,7 @@ async function advancedReportsJourney(page) {
       confirmations.push(dialog.message());
       return acceptConfirmation ? dialog.accept() : dialog.dismiss();
     });
-    await page.route('https://wallet.test/**', route => {
-      const name = new URL(route.request().url()).pathname.replace(/^\//,'') || 'index.html';
-      const file = path.join(root,name);
-      if (!file.startsWith(root+path.sep) || !fs.existsSync(file)) return route.abort();
-      const contentType = name.endsWith('.mjs') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html';
-      return route.fulfill({body:fs.readFileSync(file),contentType});
-    });
+    await routeWallet(page);
     await page.goto('https://wallet.test/');
     await quickAddJourney(page);
     await reviewCenterJourney(page);

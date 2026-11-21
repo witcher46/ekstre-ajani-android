@@ -33,6 +33,13 @@ dialog #submit{position:sticky;bottom:-12px;z-index:2;box-shadow:0 0 0 8px var(-
 button.transaction{width:100%;border-radius:0;border:0;border-bottom:1px solid var(--line);background:transparent;text-align:left;padding:14px 0}
 button.transaction:last-child{border-bottom:0}
 button.transaction .amount{flex-shrink:1}
+.transaction-with-suggestion{border-bottom:1px solid var(--line);padding-bottom:14px}
+.transaction-with-suggestion:last-child{border-bottom:0}
+.transaction-category-suggestion{padding:12px;background:var(--bg);border-radius:12px;overflow-wrap:anywhere}
+.transaction-category-suggestion p{margin:0}
+.transaction-category-suggestion strong{color:var(--text)}
+.transaction-category-suggestion .actions button{min-height:48px;overflow-wrap:anywhere}
+@media(max-width:600px){.transaction-category-suggestion .actions button{flex:auto}}
 [hidden]{display:none!important}
 @media(max-width:600px){main{padding-left:14px;padding-right:14px}.panel{padding:16px}.grid{grid-template-columns:minmax(0,1fr)}.hero .grid{gap:6px}.row>b{flex-basis:100%}.chart-label>b{flex-basis:100%}.actions{flex-direction:column}.row>div:last-child:not(:first-child){max-width:100%}.row>div:last-child>button{margin:4px;min-width:48px}.brand strong{font-size:1rem}h1{font-size:1.65rem}.lead{font-size:.9rem}.row .left strong{overflow-wrap:anywhere}}
 

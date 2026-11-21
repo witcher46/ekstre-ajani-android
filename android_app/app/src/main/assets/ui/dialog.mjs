@@ -1,5 +1,18 @@
 // The dialog owns its form lifecycle. Callers supply form markup and save
 // callbacks, and resolve focus targets in their own (possibly rerendered) view.
+export function guardAgainstRepeatClick(event) {
+  if (event.detail !== 1) return;
+  const document = event.target.ownerDocument;
+  const captureOnce = {capture:true, once:true};
+  const ignoreRepeat = repeat => {
+    if (repeat.detail < 2) return;
+    repeat.preventDefault();
+    repeat.stopImmediatePropagation();
+  };
+  document.addEventListener('mousedown', ignoreRepeat, captureOnce);
+  document.addEventListener('click', ignoreRepeat, captureOnce);
+}
+
 export function createDialog(dialog, {captureOpener, restoreFocus}) {
   const form = dialog.querySelector('form');
   const title = dialog.querySelector('#dialog-title');
@@ -44,20 +57,9 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
     close();
   });
   dismiss.addEventListener('click', close);
-  function ignoreRepeat(event) {
-    if (event.detail < 2) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  }
-
   // A save can close the dialog before a second click reaches the same point.
   // Catch both the focus-changing press and the click on the revealed page.
-  submit.addEventListener('click', event => {
-    if (event.detail !== 1) return;
-    const captureOnce = {capture:true, once:true};
-    dialog.ownerDocument.addEventListener('mousedown', ignoreRepeat, captureOnce);
-    dialog.ownerDocument.addEventListener('click', ignoreRepeat, captureOnce);
-  });
+  submit.addEventListener('click', guardAgainstRepeatClick);
   form.addEventListener('submit', event => {
     event.preventDefault();
     if (!dialog.open || !save || saving) return;

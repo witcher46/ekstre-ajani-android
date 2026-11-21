@@ -158,6 +158,48 @@ public class WalletJourneyTest {
    waitJs(a,"!document.querySelector('dialog[open]') && document.activeElement.id==='quick-add'");
   }
  }
+ @Test public void categorySuggestionAt320DpAndLargeText()throws Exception{
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String version=context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionName;
+  String apply="[data-action=applyCategorySuggestion]",choose="[data-action=chooseTransactionCategory]";
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=demo]')");
+   click(a,"[data-action=demo]");
+   assertEquals("true",js(a,"(()=>{const s=JSON.parse(Android.load());s.merchantCategoryRules=[{id:'category-rule',merchant:s.transactions[0].desc,category:'Giyim'}];return Android.save(JSON.stringify(s));})()"));
+   try{
+    device.executeShellCommand("wm size 320x844");device.executeShellCommand("wm density 160");
+    device.executeShellCommand("settings put system font_scale 2.0");
+    a.recreate();
+    waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
+    String original=js(a,"Android.load()"),totals=js(a,"[...document.querySelectorAll('[data-stat]')].map(e=>e.textContent)");
+    click(a,"#settings");
+    assertEquals(JSONObject.quote("Android sürümü "+version),js(a,"document.querySelector('main .lead').textContent"));
+    click(a,"nav [data-page=transactions]");
+    waitJs(a,"innerWidth===320 && Android.textZoom()===200 && document.querySelectorAll('nav button').length===5 && !!document.querySelector('"+apply+"')");
+    assertEquals("Actions fit at large text and have accessible context","true",js(a,"[...document.querySelectorAll('.transaction-category-suggestion button')].every(b=>{const r=b.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.width>=48&&r.height>=48&&!!b.getAttribute('aria-label')&&!!document.getElementById(b.getAttribute('aria-describedby'));})"));
+    assertEquals("true",js(a,"document.querySelector('.transaction-category-suggestion').textContent.includes('Önerilen kategori: Giyim')"));
+    js(a,"document.querySelector('.transaction-with-suggestion').scrollIntoView({block:'center'})");drawn(a);evidence("category-suggestion-320-200");
+    click(a,choose);
+    waitJs(a,"document.activeElement.id==='dialog-title' && document.activeElement.textContent==='Kategori seç'");
+    value(a,"category","Eğitim");
+    assertEquals("Selecting without saving changes no native bytes",original,js(a,"Android.load()"));
+    device.pressBack();
+    waitJs(a,"!document.querySelector('dialog[open]') && document.activeElement.matches('"+choose+"')");
+    assertEquals(original,js(a,"Android.load()"));
+    click(a,apply);
+    waitJs(a,"!document.querySelector('"+apply+"') && document.activeElement.matches('[data-edit]')");
+    JSONObject expected=new JSONObject(new JSONArray("["+original+"]").getString(0));
+    expected.getJSONArray("transactions").getJSONObject(0).put("category","Giyim");
+    JSONObject saved=new JSONObject(new JSONArray("["+js(a,"Android.load()")+"]").getString(0));
+    assertEquals("Only the category is saved",expected.toString(),saved.toString());
+    click(a,"nav [data-page=home]");
+    assertEquals(totals,js(a,"[...document.querySelectorAll('[data-stat]')].map(e=>e.textContent)"));
+   }finally{
+    device.executeShellCommand("settings put system font_scale 1.0");
+    device.executeShellCommand("wm size reset");device.executeShellCommand("wm density reset");
+   }
+  }
+ }
  private boolean waitForIme(ActivityScenario<MainActivity> a,boolean expected)throws InterruptedException{
   AtomicBoolean visible=new AtomicBoolean();
   for(int i=0;i<20;i++){
