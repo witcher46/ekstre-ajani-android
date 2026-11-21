@@ -5,7 +5,7 @@ import * as V from './views.mjs';
 import {parseStatementWithIdentity} from './parser.mjs';
 import {loadPdfIdentityKey} from './pdf-identity.mjs';
 import {parseStatementCsv} from './csv.mjs';
-import {createDialog,guardAgainstRepeatClick} from './ui/dialog.mjs';
+import {createDialog} from './ui/dialog.mjs';
 import {escapeHtml as esc,options,field,select} from './ui/form-controls.mjs';
 import {renderBottomNavigation} from './ui/navigation.mjs';
 import {renderReviewCenter} from './ui/review-center.mjs';
@@ -138,6 +138,26 @@ function categorySuggestionRow(row,edit,index,lookup){
    <button type="button" data-action="chooseTransactionCategory" data-transaction-id="${esc(row.id)}" aria-label="Başka kategori seç: ${esc(row.desc)}" aria-describedby="${descriptionId}">Başka kategori seç</button>
   </div>
  </div></div>`;
+}
+function guardCategoryActivation(event){
+ if(!event.detail)return;
+ const {clientX,clientY}=event;
+ let lastPress=event.timeStamp;
+ const ignoreRepeat=repeat=>{
+  // A touch series can reset the click count after the selected row moves.
+  const near=Math.hypot(repeat.clientX-clientX,repeat.clientY-clientY)<=6;
+  const repeats=repeat.detail>1||(repeat.detail===1&&near&&repeat.timeStamp-lastPress<450);
+  if(!repeats){
+   document.removeEventListener('mousedown',ignoreRepeat,true);
+   document.removeEventListener('click',ignoreRepeat,true);
+   return;
+  }
+  lastPress=repeat.timeStamp;
+  repeat.preventDefault();
+  repeat.stopImmediatePropagation();
+ };
+ document.addEventListener('mousedown',ignoreRepeat,true);
+ document.addEventListener('click',ignoreRepeat,true);
 }
 function installedVersionLabel(){
  if(!window.Android)return 'Tarayıcı önizlemesi';
@@ -514,7 +534,7 @@ const actions={
   const row=state.transactions.find(t=>t.id===transactionId);
   if(expenseCategorySuggestion(row)?.category!==suggestedCategory)return;
   const target=focusTarget(actionTrigger.closest('.transaction-with-suggestion').querySelector('[data-edit]'));
-  guardAgainstRepeatClick(event);
+  guardCategoryActivation(event);
   commit(C.setTransactionCategory(state,row.id,suggestedCategory));
   restoreFocus(target);
   notice('Kategori güncellendi.');
