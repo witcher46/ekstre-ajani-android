@@ -3,14 +3,17 @@
 export function guardAgainstRepeatClick(event) {
   if (event.detail !== 1) return;
   const document = event.target.ownerDocument;
-  const captureOnce = {capture:true, once:true};
   const ignoreRepeat = repeat => {
-    if (repeat.detail < 2) return;
+    if (repeat.detail < 2) {
+      document.removeEventListener('mousedown', ignoreRepeat, true);
+      document.removeEventListener('click', ignoreRepeat, true);
+      return;
+    }
     repeat.preventDefault();
     repeat.stopImmediatePropagation();
   };
-  document.addEventListener('mousedown', ignoreRepeat, captureOnce);
-  document.addEventListener('click', ignoreRepeat, captureOnce);
+  document.addEventListener('mousedown', ignoreRepeat, true);
+  document.addEventListener('click', ignoreRepeat, true);
 }
 
 export function createDialog(dialog, {captureOpener, restoreFocus}) {

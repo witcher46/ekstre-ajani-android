@@ -93,6 +93,7 @@ async function categorySuggestionsJourney(browser) {
     const {x,y,width,height}=await otherApply.boundingBox();
     await page.touchscreen.tap(x+width/2,y+height/2);
     await page.touchscreen.tap(x+width/2,y+height/2);
+    await page.touchscreen.tap(x+width/2,y+height/2);
     expected.transactions[1].category='Giyim';
     assert.deepEqual(JSON.parse(await saved()),expected);
     await page.locator('nav [data-page=home]').click();
