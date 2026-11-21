@@ -3,6 +3,7 @@ package com.zagor.ekstre;
 import android.app.*;
 import android.os.*;
 import android.content.*;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.net.Uri;
@@ -209,6 +210,10 @@ public class MainActivity extends Activity {
   }
  } public class Bridge {
   @JavascriptInterface public int textZoom(){return textZoom;}
+  @JavascriptInterface public String versionName(){
+   try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}
+   catch(PackageManager.NameNotFoundException e){return null;}
+  }
   @JavascriptInterface public String load(){synchronized(MainActivity.this){return readSnapshot(1);}}
   @JavascriptInterface public String loadForCompare(){return readForCompare();}
   @JavascriptInterface public boolean saveIfUnchanged(String token,String content){

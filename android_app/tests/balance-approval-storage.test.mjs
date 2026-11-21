@@ -72,6 +72,18 @@ test('historical evidence does not require the live observation or movement to r
   assert.equal(C.removeBalanceObservation(emptyHistory,emptyHistory.balanceReconciliation.observations[0].id).version,3);
 });
 
+test('categorizing a movement preserves the backup version and reviewed approval evidence',()=>{
+  const {v1,v2,v3,observation,options,comparison} = fixture();
+  for(const wallet of [movement(v1,'expense','expense',100),v2,v3]){
+    const edited=C.setTransactionCategory(wallet,'expense','Giyim');
+    const restored=C.readBackup(C.backupText(edited));
+    assert.equal(restored.version,wallet.version);
+    assert.deepEqual(restored.balanceReconciliation,wallet.balanceReconciliation);
+    assert.equal(C.balance(restored,bank),C.balance(wallet,bank));
+    if(wallet.version>=2)assert.deepEqual(compareBalanceObservation(restored,observation.id,options),comparison);
+  }
+});
+
 test('approval history rejects damaged evidence and invalid links',()=>{
   const {v3,approval,comparison} = fixture();
   const next = {...approval,id:'approval-2',previousApprovalId:approval.id};

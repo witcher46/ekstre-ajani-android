@@ -173,17 +173,40 @@ function branchMerchantName(key){
  return /\p{L}/u.test(name)&&!genericMerchantNames.has(name)&&branchProvinces.has(province)?name:null;
 }
 export function suggestCategory(s,merchant){
- const exact=merchantRule(s,merchant);
- if(exact)return exact.category;
- const name=branchMerchantName(merchantKey(merchant));
+ return categorySuggestion(s,merchant)?.category??null;
+}
+export function categorySuggestion(s,merchant){
+ return matchCategory(merchant,()=>merchantRule(s,merchant),name=>{
+  const categories=new Set();
+  for(const rule of s.merchantCategoryRules??[]){
+   const key=merchantKey(rule.merchant);
+   if(key===name||branchMerchantName(key)===name)categories.add(rule.category);
+   if(categories.size>1)return null;
+  }
+  return categories.values().next().value??null;
+ });
+}
+function matchCategory(merchant,exactRule,branchCategory){
+ const key=merchantKey(merchant),exact=exactRule(key);
+ if(exact)return {category:exact.category,match:'merchant'};
+ const name=branchMerchantName(key);
  if(!name)return null;
- const categories=new Set();
+ const category=branchCategory(name);
+ return category===null?null:{category,match:'branch'};
+}
+export function indexCategorySuggestions(s){
+ const rules=new Map(),branches=new Map();
+ const record=(name,category)=>{
+  if(!branches.has(name))branches.set(name,category);
+  else if(branches.get(name)!==category)branches.set(name,null);
+ };
  for(const rule of s.merchantCategoryRules??[]){
-  const key=merchantKey(rule.merchant);
-  if(key===name||branchMerchantName(key)===name)categories.add(rule.category);
-  if(categories.size>1)return null;
+  const key=merchantKey(rule.merchant),name=branchMerchantName(key);
+  if(!rules.has(key))rules.set(key,rule);
+  record(key,rule.category);
+  if(name)record(name,rule.category);
  }
- return categories.values().next().value??null;
+ return merchant=>matchCategory(merchant,key=>rules.get(key),name=>branches.get(name)??null);
 }
 export function saveMerchantRule(s,merchant,category,ruleId){
  const next=structuredClone(s);
@@ -442,6 +465,13 @@ export function updateTransaction(s,t){
   markCandidate(row,next.transactions);
  }
  return addTransaction(next,row,{editing:true});
+}
+export function setTransactionCategory(s,id,category){
+ const row=s.transactions.find(t=>t.id===id);
+ if(!row||row.linkedTo||!['expense','refund'].includes(row.kind))throw Error('Bu işlemin kategorisi burada değiştirilemez.');
+ if(!s.categories.includes(category))throw Error('Geçerli bir gider kategorisi seç.');
+ if(row.category===category)return s;
+ return validate({...s,transactions:s.transactions.map(t=>t===row?{...t,category}:t)});
 }
 function ledgerEffect(t,a){let n=0;if(t.account===a.id)n=a.type==='card'?(t.kind==='expense'?t.amount:['refund','cardPayment'].includes(t.kind)?-t.amount:0):(['income','refund'].includes(t.kind)?t.amount:-t.amount);if(t.target===a.id)n+=a.type==='card'?-t.amount:t.amount;return n;}
 export function cardDates(s){

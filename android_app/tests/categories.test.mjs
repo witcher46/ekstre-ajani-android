@@ -113,6 +113,30 @@ test('conflicting branch rules leave an unfamiliar branch unresolved and preserv
   assert.deepEqual(C.readBackup(C.backupText(state)),state);
 });
 
+test('the transaction list index preserves exact, branch, ambiguous and generic rule behavior', () => {
+  let state = C.saveMerchantRule(C.empty(),'MIGROS','Market / Gıda');
+  state = C.saveMerchantRule(state,'MIGROS 1234 IZMIR','Diğer');
+  state = C.saveMerchantRule(state,'METRO MARKET 5432 ANKARA','Giyim');
+  state = C.saveMerchantRule(state,'POS 5432 ANKARA','Diğer');
+  const lookup=C.indexCategorySuggestions(state);
+  for(const merchant of ['MİGROS','MIGROS 1234 IZMIR','MIGROS 5678 BURSA','METRO MARKET 1234 IZMIR','POS 1234 IZMIR','POS 5432 ANKARA','METRO TURIZM 1234 IZMIR']){
+    assert.deepEqual(lookup(merchant),C.categorySuggestion(state,merchant));
+  }
+  assert.deepEqual(lookup('METRO MARKET 1234 IZMIR'),{category:'Giyim',match:'branch'});
+  assert.deepEqual(lookup('MIGROS 1234 IZMIR'),{category:'Diğer',match:'merchant'});
+  assert.equal(lookup('MIGROS 5678 BURSA'),null);
+});
+
+test('the transaction list normalizes stored rules once for all visible suggestions', () => {
+  let reads=0;
+  const merchantCategoryRules=Array.from({length:5000},(_,i)=>({
+    get merchant(){reads++;return `Sentetik mağaza ${i} 1234 ANKARA`;},category:'Giyim',
+  }));
+  const lookup=C.indexCategorySuggestions({merchantCategoryRules});
+  for(let i=0;i<150;i++)assert.equal(lookup(`Sentetik mağaza ${i} 5678 IZMIR`).category,'Giyim');
+  assert.equal(reads,merchantCategoryRules.length);
+});
+
 
 test('the overall budget name cannot be assigned to a new expense category', () => {
   const state = {...C.empty(),budgets:{'2026-10|Toplam':10000}};
@@ -123,6 +147,25 @@ test('the overall budget name cannot be assigned to a new expense category', () 
   const legacy={...state,categories:[...state.categories,'Toplam']};
   assert.deepEqual(C.readBackup(C.backupText(legacy)),legacy);
   assert.deepEqual(C.renameExpenseCategory(legacy,'Toplam','Eski etiket').budgets,state.budgets);
+});
+
+test('category-only edits keep financial fields, row order and imported categories on reimport', () => {
+  const account={id:'card',name:'Sentetik kart',type:'card',opening:0};
+  const initial={...C.empty(),accounts:[account]};
+  const pdf={bank:'QNB',period:'2026-10',cut:'2026-10-05',due:'2026-10-15',debt:4500,rows:[
+    {importKey:'synthetic-pdf',date:'2026-10-01',period:'2026-10',desc:'Sentetik PDF',kind:'expense',amount:4500,category:'Diğer'},
+  ]};
+  const csv=[{transactionId:'synthetic-csv',date:'2026-10-02',period:'2026-10',desc:'Sentetik CSV',kind:'harcama',cents:7000,category:'Diğer'}];
+  const original=C.importCsv(C.importStatement(initial,pdf,'card'),csv,'card');
+  const [pdfRow,csvRow]=original.transactions;
+  const edited=C.setTransactionCategory(C.setTransactionCategory(original,pdfRow.id,'Giyim'),csvRow.id,'Eğitim');
+  assert.deepEqual(edited,{...original,transactions:[{...pdfRow,category:'Giyim'},{...csvRow,category:'Eğitim'}]});
+  assert.equal(C.balance(edited,account),C.balance(original,account));
+  assert.equal(C.summary(edited,'2026-10').net,C.summary(original,'2026-10').net);
+  assert.throws(()=>C.setTransactionCategory(edited,pdfRow.id,'Eksik'),/kategori/i);
+  const replayed=C.importCsv(C.importStatement(edited,pdf,'card'),csv,'card');
+  assert.deepEqual(replayed.transactions.map(t=>[t.id,t.category]).sort(),[[pdfRow.id,'Giyim'],[csvRow.id,'Eğitim']].sort());
+  assert.deepEqual(C.readBackup(C.backupText(replayed)),replayed);
 });
 
 
