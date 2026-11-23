@@ -1,0 +1,4 @@
+# Project-scoped Codex default (loaded by supported clients for trusted projects).
+# Keep owner-selected model/reasoning level and permission settings unchanged.
+[agents]
+enabled = false
