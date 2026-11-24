@@ -55,7 +55,8 @@ async function reconciliationJourney(browser){
       window.Android={
         load,
         save(raw){writes.save++;return write(raw);},
-        restore(raw){writes.restore++;return write(raw);},
+        snapshotSlot:slot=>slot===1?load():null,
+        restoreChecked(expected,slot,source,raw){writes.restore++;return slot===1&&expected===source&&write(raw);},
         loadForCompare:()=>rejectReads?null:token()+'\n'+load(),
         saveIfUnchanged(expected,raw){
           writes.cas++;

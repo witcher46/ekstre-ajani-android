@@ -45,8 +45,93 @@ function notice(message,{error=false}={}){
 }
 const errorNotice=message=>notice(message,{error:true});
 const displayedWallet=wallet=>W.normalizeWallet(C.reviewLegacy(wallet));
-try{const raw=window.Android?Android.load():localStorage.getItem(key);if(raw)state=displayedWallet(C.readBackup(raw));}catch(e){loadFailed=true;errorNotice('Kayıtlar okunamadı. Mevcut verilerin üzerine yazılmayacak. '+e.message);}
-function commit(next,{restore=false,recoveryRaw}={}){if(loadFailed)throw Error('Kayıtlar okunamadığı için yazma kapalı. Önce geçerli bir yedek yükle.');next=W.normalizeWallet(next);const raw=C.backupText(next);if(window.Android){if(!(recoveryRaw!==undefined&&Android.recoverSaved?Android.recoverSaved(sha256(recoveryRaw),raw):restore&&Android.restore?Android.restore(raw):Android.save(raw)))throw Error('Kayıt kaydedilemedi; değişiklik uygulanmadı.');}else {if(restore)localStorage.setItem(key+'-recovery',localStorage.getItem(key)||'');localStorage.setItem(key,raw);}state=next;render();}
+function readSlot(slot){
+ if(window.Android){
+  // WebView returns undefined for a Java null String (missing SQLite row).
+  if(typeof Android.snapshotSlot==='function')return Android.snapshotSlot(slot)??null;
+  // Older test/preview bridges can read the primary but cannot authorize recovery.
+  if(slot===1)return Android.load()||null;
+  return null;
+ }
+ return localStorage.getItem([null,key,key+'-previous',key+'-recovery'][slot]);
+}
+function verifiedCopy(raw){
+ if(raw===null)return null;
+ try{
+  const wallet=displayedWallet(C.readBackup(raw));
+  return {raw,wallet};
+ }catch{return null;}
+}
+const tokenOf=raw=>raw===null?'':sha256(raw);
+function initialWallet(){
+ const raw=readSlot(1);
+ if(raw===null&&readSlot(3)===null&&readSlot(2)===null)return W.normalizeWallet(C.empty());
+ const copy=verifiedCopy(raw);
+ if(!copy)throw Error('Güncel cüzdan doğrulanamadı.');
+ return copy.wallet;
+}
+try{state=initialWallet();}catch{loadFailed=true;errorNotice('Kayıtlar okunamadı. Kurtarma seçeneklerini incele.');}
+function commit(next){
+ if(loadFailed)throw Error('Kayıtlar okunamadığı için yazma kapalı.');
+ next=W.normalizeWallet(next);
+ const raw=C.backupText(next);
+ if(window.Android){
+  if(!Android.save(raw))throw Error('Kayıt kaydedilemedi; değişiklik uygulanmadı.');
+ }else localStorage.setItem(key,raw);
+ state=next;render();
+}
+const copyLabel=slot=>slot===3?'Geri yükleme öncesi kopya':'Son kayıt öncesi kopya';
+function finishReplacement(wallet){
+ state=wallet;loadFailed=false;
+ pending=null;pdfRequest=null;history.length=0;detailId=null;
+ balanceDraft={};balanceReviewToken=null;balanceHistoryArchive=null;balanceHistoryView={};
+ page='home';render();focusMain();
+}
+function previewRecovery(slot){
+ const current=readSlot(1),selected=verifiedCopy(readSlot(slot));
+ if(!selected)throw Error('Seçilen kurtarma kopyası doğrulanamadı.');
+ const w=selected.wallet;
+ const totals=W.overview(w,period);
+ const message=copyLabel(slot)+' · '+w.accounts.length+' hesap · '+w.transactions.length+' işlem\nNet varlık: '+plainMoney(totals.netWorth)+'\nBu kopya güncel cüzdan olarak geri getirilsin mi?';
+ if(!confirm(message))return;
+ const keepCurrent=!!verifiedCopy(current);
+ if(window.Android){
+  if(!Android.recoverSnapshot(slot,tokenOf(selected.raw),tokenOf(current),keepCurrent))
+   throw Error('Kurtarma kaydedilemedi. Kopyaları tekrar incele.');
+ }else{
+  if(current!==readSlot(1)||selected.raw!==readSlot(slot))throw Error('Cüzdan değişti. Tekrar incele.');
+  if(keepCurrent)localStorage.setItem(slot===3?key+'-previous':key+'-recovery',current);
+  localStorage.setItem(key,selected.raw);
+ }
+ finishReplacement(w);notice('Cüzdan kurtarıldı.');
+}
+function restoreExternal(next){
+ const wallet=displayedWallet(next),content=C.backupText(wallet);
+ const current=readSlot(1);
+ let slot=0,source=null;
+ for(const id of [1,3,2]){
+  const raw=id===1?current:readSlot(id);
+  if(verifiedCopy(raw)){slot=id;source=raw;break;}
+ }
+ if(!confirm('Bu yedek mevcut Android cüzdanının yerini alacak. Devam edilsin mi?'))return;
+ if(window.Android){
+  if(!Android.restoreChecked(tokenOf(current),slot,tokenOf(source),content))
+   throw Error('Geri yükleme kaydedilemedi. Mevcut kopyalar korunuyor.');
+ }else{
+  if(current!==readSlot(1)||(slot&&source!==readSlot(slot)))throw Error('Cüzdan değişti. Tekrar incele.');
+  if(slot===1||slot===2)localStorage.setItem(key+'-recovery',source);
+  localStorage.setItem(key,content);
+ }
+ finishReplacement(wallet);notice('Yedek geri yüklendi.');
+}
+function validatedExport(){
+ if(loadFailed)throw Error('Dışa aktarma kapalı. Önce cüzdanı kurtar.');
+ try{return C.backupText(initialWallet());}
+ catch{
+  loadFailed=true;render();
+  throw Error('Güncel kayıt doğrulanamadı. Dışa aktarma kapalı. Kurtarma seçeneklerini incele.');
+ }
+}
 const copy=()=>structuredClone(state),accountName=id=>state.accounts.find(a=>a.id===id)?.name||'Hesap';
 const accountOptions=(filter=()=>true,selected)=>options(state.accounts.filter(filter).map(a=>[a.id,a.name]),selected);
 const categoryOptions=(kind,selected)=>options([...new Set([...(kind==='income'?state.incomeCategories:state.categories),...(selected?[selected]:[])])].map(c=>[c,c]),selected);
@@ -180,6 +265,15 @@ function importCategoryOption(merchant,current,index,selectedCategory){
 }
 function render(){
   $('nav').innerHTML=renderBottomNavigation(page);
+ if(loadFailed){
+  const buttons=[];
+  for(const slot of [3,2]){
+   try{if(verifiedCopy(readSlot(slot)))buttons.push('<button type="button" data-action="recover" data-slot="'+slot+'">'+copyLabel(slot)+' · incele</button>');}catch{/* Keep other readable slots available. */}
+  }
+  $('main').innerHTML='<h1>Cüzdan kurtarma</h1><p>Güncel cüzdan okunamadı. Normal kayıt ve dışa aktarma kapalı.</p>'+
+   (buttons.length?buttons.join(''):'<p>Doğrulanabilen dahili kopya bulunamadı.</p>')+'<button data-action="restore">JSON yedeğini yükle</button>';
+  return;
+ }
  const filteredExpenses=page==='transactions'&&expenseCategory!==null;
  const mode=!filteredExpenses&&['transactions','reports'].includes(page)?periodMode:'calendar';
  const periodLabel=page==='reports'?'Bitiş ayı':'Takvim ayı / ekstre dönemi';
@@ -604,7 +698,7 @@ const actions={
   reportFilters.reveal=!reportFilters.reveal;
   render();$('report-movements-toggle')?.focus({preventScroll:true});
  },
- recover:()=>{const raw=window.Android&&Android.recovery?Android.recovery():localStorage.getItem(key+'-recovery');if(!raw)throw Error('Geri yükleme öncesine ait kurtarma kopyası yok.');const prior=C.readBackup(raw);if(confirm('Geri yükleme öncesindeki cüzdan geri getirilsin mi?'))commit(prior,{recoveryRaw:raw});},
+ recover:()=>previewRecovery(Number(actionTrigger?.dataset.slot||3)),
  merchantRule:()=>merchantRuleForm(),
  cancelCategoryRemoval:closeModal,
  addAccount:()=>accountForm(),addTransaction:()=>transactionForm(),addIncome:()=>transactionForm(null,'income'),transfer:()=>transactionForm(null,'transfer'),payCard:()=>payCardForm(),incomePlan:()=>incomePlanForm(),
@@ -621,7 +715,7 @@ const actions={
   try{Android.pickPdf(request);}catch{window.onPdfError('Dosya seçici açılamadı.',request);}
  },
  csv:()=>{csvOpener=focusTarget(actionTrigger||document.activeElement);$('csv-file').click();},restore:()=>$('backup-file').click(),
- backup:()=>{const raw=C.backupText(state);if(window.Android)Android.exportBackup(raw);else{const u=URL.createObjectURL(new Blob([raw],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='ekstre-ajani-yedek.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}},
+ backup:()=>{const raw=validatedExport();if(window.Android)Android.exportBackup(raw);else{const u=URL.createObjectURL(new Blob([raw],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='ekstre-ajani-yedek.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}},
  confirmImport:()=>{
   if(!pending)return;
   if(pending.reconciliation?.status==='mismatch')throw Error('Ekstre toplamları çelişiyor; kayıt yapılamaz.');
@@ -657,7 +751,7 @@ $('main').addEventListener('change',event=>{
  }
 });
 $('settings').dataset.page='settings';
-$('backup-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{if(file.size>C.BACKUP_LIMIT)throw Error('Yedek 32 MB’den büyük olamaz.');const next=C.readBackup(await file.text());if(confirm('Bu yedek mevcut Android cüzdanının yerini alacak. Devam edilsin mi?')){const was=loadFailed;loadFailed=false;try{commit(W.normalizeWallet(C.reviewLegacy(next)),{restore:true});}catch(err){loadFailed=was;throw err;}notice('Yedek geri yüklendi.');}}catch(error){errorNotice(error.message);}};
+$('backup-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{if(file.size>C.BACKUP_LIMIT)throw Error('Yedek 32 MB’den büyük olamaz.');const next=C.readBackup(await file.text());restoreExternal(next);}catch(error){errorNotice(error.message);}};
 $('csv-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{
  if(file.size>5*1024*1024)throw Error('CSV en fazla 5 MB olabilir.');
  const rows=parseStatementCsv(new TextDecoder('utf-8',{fatal:true}).decode(await file.arrayBuffer())),groups=[...new Set(rows.map(r=>JSON.stringify([r.bank,r.card])))];

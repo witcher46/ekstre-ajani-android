@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.Instant;
 import java.time.format.DateTimeFormatterBuilder;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.concurrent.*;
@@ -33,7 +34,7 @@ public class MainActivity extends Activity {
  private SQLiteDatabase db;
  private final ExecutorService worker=Executors.newSingleThreadExecutor();
  private ValueCallback<Uri[]> chooser;
- private String exportText;
+ private byte[] pendingExport;
  private String pdfPickerRequest;
  private int textZoom=100;
  private static final int PDF=101,FILE=102,EXPORT=103;
@@ -79,12 +80,34 @@ public class MainActivity extends Activity {
   String args=JSONObject.quote(value)+(request==null?"":","+JSONObject.quote(request));
   runOnUiThread(()->{if(!isFinishing()&&!isDestroyed())web.evaluateJavascript("window."+fn+"("+args+")",null);});
  }
+ private String readSlot(int id){
+  String key=String.valueOf(id);
+  int length;
+  // Byte chunks preserve even a damaged value containing NUL. Decode UTF-8 only
+  // after joining them so a character spanning two CursorWindows stays intact.
+  try(Cursor row=db.rawQuery("SELECT length(CAST(content AS BLOB)) FROM snapshots WHERE id=?",new String[]{key})){
+   if(!row.moveToFirst())return null;
+   length=row.getInt(0);
+  }
+  byte[] content=new byte[length];
+  for(int offset=0;offset<length;offset+=100000){
+   try(Cursor row=db.rawQuery("SELECT substr(CAST(content AS BLOB),?,100000) FROM snapshots WHERE id=?",new String[]{String.valueOf(offset+1),key})){
+    if(!row.moveToFirst())throw new IllegalStateException("Snapshot changed during read");
+    byte[] chunk=row.getBlob(0);
+    if(chunk.length!=Math.min(100000,length-offset))throw new IllegalStateException("Snapshot changed during read");
+    System.arraycopy(chunk,0,content,offset,chunk.length);
+   }
+  }
+  String decoded=new String(content,StandardCharsets.UTF_8);
+  // Reject lossy decoding while keeping an exact token for a damaged primary.
+  // The NUL prefix makes the value unreadable as JSON and reserves a distinct range.
+  if(decoded.indexOf('\uFFFD')>=0&&!Arrays.equals(content,decoded.getBytes(StandardCharsets.UTF_8)))
+   return "\0"+android.util.Base64.encodeToString(content,android.util.Base64.NO_WRAP);
+  return decoded.startsWith("\0")?"\0"+decoded:decoded;
+ }
  private String readSnapshot(int id){
-  int length;try(Cursor c=db.rawQuery("SELECT length(content) FROM snapshots WHERE id=?",new String[]{String.valueOf(id)})){if(!c.moveToFirst())return "";length=c.getInt(0);}
-  StringBuilder content=new StringBuilder(length);
-  // Small SQL chunks avoid the CursorWindow limit for valid large JSON backups.
-  for(int start=1;start<=length;start+=100000){try(Cursor c=db.rawQuery("SELECT substr(content,?,100000) FROM snapshots WHERE id=?",new String[]{String.valueOf(start),String.valueOf(id)})){if(c.moveToFirst())content.append(c.getString(0));}}
-  return content.toString();
+  String value=readSlot(id);
+  return value==null?"":value;
  }
  private boolean supportsSnapshot(JSONObject wallet)throws JSONException{
   if(!"ekstre-android".equals(wallet.opt("format"))||!(wallet.opt("version") instanceof Number))return false;
@@ -179,36 +202,64 @@ public class MainActivity extends Activity {
    return null;
   }
  }
- private synchronized boolean writeSnapshot(String content, boolean restore, String expectedToken, String recoveryToken) {
-  if(content==null||content.getBytes(StandardCharsets.UTF_8).length>BACKUP_LIMIT)return false;
-  try {
-   JSONObject candidate = new JSONObject(content);
-   if(!supportsSnapshot(candidate)||!isJsonDocument(content))return false;
+ private static String slotToken(String raw){
+  return raw==null?"":BalanceApprovalStorage.sha256(raw);
+ }
+ private boolean supportedDocument(String raw)throws Exception {
+  return raw!=null&&raw.getBytes(StandardCharsets.UTF_8).length<=BACKUP_LIMIT&&
+    isJsonDocument(raw)&&supportsSnapshot(new JSONObject(raw));
+ }
+ private void copySlot(int from,int to){
+  db.execSQL("INSERT OR REPLACE INTO snapshots SELECT ?,content FROM snapshots WHERE id=?",new Object[]{to,from});
+ }
+ private synchronized boolean writeSnapshot(String content,String expectedToken){
+  try{
+   if(!supportedDocument(content))return false;
+   JSONObject candidate=new JSONObject(content);
    db.beginTransaction();
-   try {
-    if(recoveryToken!=null) {
-     String recovery = readSnapshot(3);
-     if(recovery.isEmpty()||!recoveryToken.equals(BalanceApprovalStorage.sha256(recovery))||
-        !BalanceApprovalStorage.preservesHistory(new JSONObject(recovery),candidate,false))return false;
-    } else if(!restore) {
-     String current = readSnapshot(1);
-     if(expectedToken!=null &&
-        (!expectedToken.equals(BalanceApprovalStorage.sha256(current)) ||
-         expectedToken.equals(BalanceApprovalStorage.sha256(content))))return false;
-     if(!BalanceApprovalStorage.preservesHistory(current.isEmpty()?null:new JSONObject(current),candidate,expectedToken!=null))return false;
-    }
-    if(restore)db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 3,content FROM snapshots WHERE id=1");
-    db.execSQL("INSERT OR REPLACE INTO snapshots SELECT 2,content FROM snapshots WHERE id=1");
+   try{
+    String current=readSnapshot(1);
+    if(expectedToken!=null&&(!expectedToken.equals(BalanceApprovalStorage.sha256(current))||
+       expectedToken.equals(BalanceApprovalStorage.sha256(content))))return false;
+    if(!BalanceApprovalStorage.preservesHistory(current.isEmpty()?null:new JSONObject(current),candidate,expectedToken!=null))return false;
+    copySlot(1,2);
     db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});
     db.setTransactionSuccessful();
-   } finally {
-    db.endTransaction();
-   }
+   }finally{db.endTransaction();}
    return true;
-  } catch(Exception|StackOverflowError e) {
-   return false;
-  }
- } public class Bridge {
+  }catch(Exception|StackOverflowError e){return false;}
+ }
+ // JS validates the domain model before consent. Bind that exact selection and
+ // the displaced primary to the SQLite write lock; never rotate unchecked bytes.
+ private synchronized boolean replaceReviewed(String currentToken,int slot,String sourceToken,
+                                             String external,boolean keepCurrent){
+  boolean recovering=external==null;
+  if(slot<0||slot>3||(recovering&&slot<2))return false;
+  try{
+   if(!recovering&&!supportedDocument(external))return false;
+   db.beginTransaction();
+   try{
+    String current=readSlot(1);
+    if(!slotToken(current).equals(currentToken))return false;
+    String source=slot==0?null:slot==1?current:readSlot(slot);
+    if(!slotToken(source).equals(sourceToken)||(slot!=0&&!supportedDocument(source)))return false;
+    if(recovering){
+     if(keepCurrent){
+      if(!supportedDocument(current))return false;
+      copySlot(1,slot==3?2:3);
+     }
+     copySlot(slot,1);
+    }else{
+     if(slot==1){copySlot(1,3);copySlot(1,2);}
+     else if(slot==2){copySlot(2,3);}
+     db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{external});
+    }
+    db.setTransactionSuccessful();
+   }finally{db.endTransaction();}
+   return true;
+  }catch(Exception|StackOverflowError e){return false;}
+ }
+ public class Bridge {
   @JavascriptInterface public int textZoom(){return textZoom;}
   @JavascriptInterface public String versionName(){
    try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}
@@ -217,13 +268,24 @@ public class MainActivity extends Activity {
   @JavascriptInterface public String load(){synchronized(MainActivity.this){return readSnapshot(1);}}
   @JavascriptInterface public String loadForCompare(){return readForCompare();}
   @JavascriptInterface public boolean saveIfUnchanged(String token,String content){
-   return token!=null&&token.matches("[a-f0-9]{64}")&&writeSnapshot(content,false,token,null);
+   return token!=null&&token.matches("[a-f0-9]{64}")&&writeSnapshot(content,token);
   }
-  @JavascriptInterface public boolean recoverSaved(String token,String content){
-   return token!=null&&token.matches("[a-f0-9]{64}")&&writeSnapshot(content,false,null,token);
-  }  @JavascriptInterface public String recovery(){synchronized(MainActivity.this){return readSnapshot(3);}}
-  @JavascriptInterface public boolean save(String content){return writeSnapshot(content,false,null,null);}
-  @JavascriptInterface public boolean restore(String content){return writeSnapshot(content,true,null,null);}
+  @JavascriptInterface public String snapshotSlot(int slot){
+   if(slot<1||slot>3)throw new IllegalArgumentException("Invalid snapshot slot");
+   synchronized(MainActivity.this){
+    db.beginTransactionNonExclusive();
+    try{String raw=readSlot(slot);db.setTransactionSuccessful();return raw;}
+    finally{db.endTransaction();}
+   }
+  }
+  @JavascriptInterface public boolean recoverSnapshot(int slot,String source,String current,boolean keepCurrent){
+   return replaceReviewed(current,slot,source,null,keepCurrent);
+  }
+  @JavascriptInterface public boolean restoreChecked(String current,int slot,String source,String content){
+   return content!=null&&replaceReviewed(current,slot,source,content,false);
+  }
+  @JavascriptInterface public String recovery(){synchronized(MainActivity.this){return readSnapshot(3);}}
+  @JavascriptInterface public boolean save(String content){return writeSnapshot(content,null);}
   @JavascriptInterface public void pickPdf(String request){runOnUiThread(()->{
    if(request==null||request.isEmpty())return;
    if(pdfPickerRequest!=null){callback("onPdfError","PDF dosya seçici zaten açık.",request);return;}
@@ -231,7 +293,31 @@ public class MainActivity extends Activity {
    try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/pdf"),PDF);}
    catch(Exception e){pdfPickerRequest=null;callback("onPdfError","Dosya seçici açılamadı.",request);}
   });}
-  @JavascriptInterface public void exportBackup(String content){if(content==null||content.getBytes(StandardCharsets.UTF_8).length>BACKUP_LIMIT){callback("nativeError","Yedek 32 MB sınırını aşıyor; mevcut kayıtlar korunuyor.");return;}runOnUiThread(()->{exportText=content;try{startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json").putExtra(Intent.EXTRA_TITLE,"ekstre-ajani-yedek.json"),EXPORT);}catch(Exception e){exportText=null;callback("nativeError","Yedek dosyası oluşturulamadı.");}});}
+  @JavascriptInterface public void exportBackup(String content){
+   byte[] bytes=content==null?null:content.getBytes(StandardCharsets.UTF_8);
+   if(bytes!=null&&bytes.length>BACKUP_LIMIT){
+    callback("nativeError","Yedek 32 MB sınırını aşıyor. Mevcut kayıtlar korunuyor.");
+    return;
+   }
+   try{
+    if(bytes==null||!isJsonDocument(content)||!supportsSnapshot(new JSONObject(content)))
+     throw new IOException();
+   }catch(Exception|StackOverflowError e){
+    callback("nativeError","Yedek hazırlanamadı. Dışa aktarmayı tekrar başlat.");
+    return;
+   }
+   runOnUiThread(()->{
+    if(pendingExport!=null){callback("nativeError","Yedek dosya seçici zaten açık.");return;}
+    pendingExport=bytes;
+    try{
+     startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+       .setType("application/json").putExtra(Intent.EXTRA_TITLE,"ekstre-ajani-yedek.json"),EXPORT);
+    }catch(Exception e){
+     pendingExport=null;
+     callback("nativeError","Yedek dosyası oluşturulamadı. Dışa aktarmayı tekrar başlat.");
+    }
+   });
+  }
  }
  @Override protected void onActivityResult(int req,int result,Intent data){
   super.onActivityResult(req,result,data);Uri uri=data==null?null:data.getData();
@@ -244,8 +330,31 @@ public class MainActivity extends Activity {
    readPdf(uri,request);
    return;
   }
-  if(result!=RESULT_OK||uri==null){if(req==EXPORT)exportText=null;return;}
-  if(req==EXPORT){final String saved=exportText;exportText=null;worker.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null||saved==null)throw new IOException();out.write(saved.getBytes(StandardCharsets.UTF_8));callback("nativeNotice","Yedek kaydedildi.");}catch(Exception e){callback("nativeError","Yedek kaydedilemedi.");}});return;}
+  if(req==EXPORT){
+   byte[] saved=pendingExport;
+   pendingExport=null;
+   if(result!=RESULT_OK||uri==null)return;
+   if(saved==null){
+    String message="Yedek kaydedilemedi. Dışa aktarmayı tekrar başlat.";
+    // Android may deliver this result before the recreated WebView has loaded.
+    web.evaluateJavascript("typeof window.nativeError==='function' && (window.nativeError("
+      +JSONObject.quote(message)+"),true)",delivered->{
+      if(!"true".equals(delivered))
+       android.widget.Toast.makeText(this,message,android.widget.Toast.LENGTH_LONG).show();
+     });
+    return;
+   }
+   worker.execute(()->{
+    try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){
+     if(out==null)throw new IOException();
+     out.write(saved);
+    }catch(Exception e){
+     callback("nativeError","Yedek kaydedilemedi. Dışa aktarmayı tekrar başlat.");
+     return;
+    }
+    callback("nativeNotice","Yedek kaydedildi.");
+   });
+  }
  }
  private void readPdf(Uri uri,String request){
   worker.execute(()->{
