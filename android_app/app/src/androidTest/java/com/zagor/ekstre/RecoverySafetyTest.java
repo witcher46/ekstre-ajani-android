@@ -81,6 +81,32 @@ public class RecoverySafetyTest {
   String token=current==null?"":BalanceApprovalStorage.sha256(current);
   return bridge.restoreChecked(token,current==null?0:1,token,next);
  }
+
+ @Test public void webViewDistinguishesMissingEmptyAndUnreadableSlots() throws Exception {
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class);
+      SQLiteDatabase db=context.openOrCreateDatabase("wallet.db",0,null)) {
+   waitFor(scenario,"!!document.querySelector('main h1')");
+   assertEquals("true",js(scenario,"[1,2,3].every(slot=>Android.snapshotSlot(slot)===undefined)"));
+   assertEquals("true",js(scenario,"!!document.querySelector('[data-action=addAccount]')"));
+   js(scenario,"document.querySelector('#settings').click()");
+   assertEquals("true",js(scenario,"!!document.querySelector('[data-action=demo]') && !!document.querySelector('[data-action=backup]')"));
+
+   db.execSQL("ALTER TABLE snapshots RENAME TO unavailable_snapshots");
+   try {
+    assertEquals("true",js(scenario,"(()=>{try{Android.snapshotSlot(1);return false;}catch{return true;}})()"));
+    scenario.onActivity(activity->((WebView)((ViewGroup)activity.findViewById(android.R.id.content)).getChildAt(0)).reload());
+    waitFor(scenario,"document.querySelector('main h1')?.textContent==='Cüzdan kurtarma'");
+    assertEquals("0",js(scenario,"document.querySelectorAll('[data-action=backup]').length"));
+   } finally { db.execSQL("ALTER TABLE unavailable_snapshots RENAME TO snapshots"); }
+
+   seed(db,"",DAMAGED,GOOD);
+   scenario.recreate();
+   waitFor(scenario,"!!document.querySelector('[data-action=recover][data-slot=\"3\"]')");
+   assertEquals("true",js(scenario,"Android.snapshotSlot(1)===''"));
+   assertEquals("0",js(scenario,"document.querySelectorAll('[data-action=backup]').length"));
+  }
+ }
+
  @Test public void approvedRecoveryRestores74325AfterRecreation() throws Exception {
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class);
       SQLiteDatabase db=context.openOrCreateDatabase("wallet.db",0,null)) {

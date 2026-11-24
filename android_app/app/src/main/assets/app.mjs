@@ -47,7 +47,8 @@ const errorNotice=message=>notice(message,{error:true});
 const displayedWallet=wallet=>W.normalizeWallet(C.reviewLegacy(wallet));
 function readSlot(slot){
  if(window.Android){
-  if(typeof Android.snapshotSlot==='function')return Android.snapshotSlot(slot);
+  // WebView returns undefined for a Java null String (missing SQLite row).
+  if(typeof Android.snapshotSlot==='function')return Android.snapshotSlot(slot)??null;
   // Older test/preview bridges can read the primary but cannot authorize recovery.
   if(slot===1)return Android.load()||null;
   return null;

@@ -147,6 +147,7 @@ jobs:
           }
           expected = {('com.zagor.ekstre.SnapshotAtomicityTest', name) for name in atomicity}
           expected.update(('com.zagor.ekstre.RecoverySafetyTest', name) for name in (
+              'webViewDistinguishesMissingEmptyAndUnreadableSlots',
               'approvedRecoveryRestores74325AfterRecreation',
               'externalRestoreKeepsOnlyReadableCopyFromEitherSlot',
               'malformedUtf8DoesNotHideTheVerifiedRecoveryCopy',

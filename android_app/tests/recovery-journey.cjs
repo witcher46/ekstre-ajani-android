@@ -6,8 +6,8 @@ const good=JSON.stringify(wallet,null,2),broken='okunamayan sentetik kayıt';
 
 module.exports=async function recoveryJourney(browser,url){
  const page=await browser.newPage();
- const configure=async slots=>{
-  await page.evaluate(slots=>{sessionStorage.setItem('slots',JSON.stringify(slots));},slots);
+ const configure=async (slots,unreadable)=>{
+  await page.evaluate(config=>{sessionStorage.setItem('recoveryFixture',JSON.stringify(config));},{slots,unreadable});
   await page.reload();
   await page.locator('#settings').click();
  };
@@ -15,12 +15,12 @@ module.exports=async function recoveryJourney(browser,url){
  const upload=async()=>page.locator('#backup-file').setInputFiles({name:'sentetik.json',mimeType:'application/json',buffer:Buffer.from(good)});
  try{
   await page.addInitScript(()=>{
-   const slots=JSON.parse(sessionStorage.getItem('slots')||'{}');
+   const {slots={},unreadable}=JSON.parse(sessionStorage.getItem('recoveryFixture')||'{}');
    const io=window.io={slots,exports:[],recoveries:[],restores:[],saves:0,confirmations:[],accept:true,fail:false};
    window.confirm=text=>{io.confirmations.push(text);return io.accept;};
    window.Android={
     load:()=>slots[1]??'',
-    snapshotSlot(index){if(io.unreadable===index)throw Error('okuma hatası');return slots[index]??null;},
+    snapshotSlot(index){if(unreadable===index)throw Error('okuma hatası');return slots[index];},
     exportBackup(raw){io.exports.push(raw);},
     save(){io.saves++;return true;},
     recoverSnapshot(slot,sourceToken,currentToken){
@@ -36,6 +36,8 @@ module.exports=async function recoveryJourney(browser,url){
    };
   });
   await page.goto(url);
+  await configure({});
+  assert.equal(await page.locator('[data-action=backup]').count(),1,'Missing SQLite rows return undefined in WebView and must open the empty wallet');
   for(const invalid of [broken,'',JSON.stringify({...wallet,version:99})]){
    await configure({1:invalid,3:good});
    const backup=page.locator('[data-action=backup]');
@@ -43,6 +45,16 @@ module.exports=async function recoveryJourney(browser,url){
    assert.deepEqual((await details()).exports,[],'An unreadable primary must never open the file provider');
    assert.match(await page.locator('main').innerText(),/dışa aktarma kapalı/i);
   }
+  for(const slot of [1,3,2]){
+   await configure({},slot);
+   assert.match(await page.locator('main').innerText(),/dışa aktarma kapalı/i);
+   assert.equal(await page.locator('[data-action=backup]').count(),0);
+   assert.deepEqual((await details()).exports,[]);
+  }
+  await configure({3:good});
+  assert.match(await page.locator('main').innerText(),/dışa aktarma kapalı/i);
+  await page.locator('[data-action=recover][data-slot="3"]').click();
+  assert.deepEqual((await details()).recoveries,[[3,digest(good),'']]);
   for(const slot of [3,2]){
    const slots={1:broken,3:'{}',[slot]:good};
    await configure(slots);
@@ -77,9 +89,11 @@ module.exports=async function recoveryJourney(browser,url){
   await page.evaluate(()=>window.io.slots[1]='bozuk');
   await page.locator('[data-action=backup]').click();
   assert.deepEqual((await details()).exports,[]);
-  await configure({});
-  await page.locator('[data-action=backup]').click();
-  assert.deepEqual(JSON.parse((await details()).exports[0]).accounts,[]);
+  for(const slots of [{},{1:null,2:null,3:null}]){
+   await configure(slots);
+   await page.locator('[data-action=backup]').click();
+   assert.deepEqual(JSON.parse((await details()).exports[0]).accounts,[]);
+  }
   await configure({1:JSON.stringify({...wallet,accounts:[]})});
   await page.locator('[data-action=backup]').click();
   assert.deepEqual(JSON.parse((await details()).exports[0]).accounts,[]);
