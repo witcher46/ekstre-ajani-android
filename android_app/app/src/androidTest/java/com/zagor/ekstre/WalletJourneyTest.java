@@ -120,7 +120,7 @@ public class WalletJourneyTest {
    // CSV still passes through its actual file-input change handler, using a synthetic File.
    js(a,"(()=>{const input=document.getElementById('csv-file'),dt=new DataTransfer();dt.items.add(new File(['bank,kart,period,date,desc,amount_cents,category,tur\\nQNB,Kart,2026-10,2026-10-05,SENTETIK CSV,8000,Market,harcama'],'synthetic.csv',{type:'text/csv'}));input.files=dt.files;input.dispatchEvent(new Event('change'));})()");waitJs(a,"!!document.querySelector('[name=card-0]')");submit(a);assertEquals("10",js(a,"JSON.parse(Android.load()).transactions.length"));
    // Native restore is atomic and retains the previous JSON; UI restore is separately tested in Chrome.
-   AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();a.onActivity(activity->bridge.set(activity.new Bridge()));String backup=bridge.get().load();JSONObject changed=new JSONObject(backup);changed.put("syntheticExtra","keep recovery");assertTrue(bridge.get().save(changed.toString()));assertTrue(bridge.get().restore(backup));assertTrue(new JSONObject(bridge.get().recovery()).has("syntheticExtra"));assertEquals(10,new JSONObject(bridge.get().load()).getJSONArray("transactions").length());
+   AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();a.onActivity(activity->bridge.set(activity.new Bridge()));String backup=bridge.get().load();JSONObject changed=new JSONObject(backup);changed.put("syntheticExtra","keep recovery");assertTrue(bridge.get().save(changed.toString()));assertTrue(RecoverySafetyTest.restoreFixture(bridge.get(),backup));assertTrue(new JSONObject(bridge.get().recovery()).has("syntheticExtra"));assertEquals(10,new JSONObject(bridge.get().load()).getJSONArray("transactions").length());
    a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");assertEquals("10",js(a,"JSON.parse(Android.load()).transactions.length"));
   }
  }
@@ -615,7 +615,7 @@ public class WalletJourneyTest {
    waitJs(a,"!!document.querySelector('[data-action=addAccount]')");
    account(a,"Sentetik kurtarma","cash");
    String recovery=js(a,"Android.load()");
-   assertEquals("true",js(a,"Android.restore("+JSONObject.quote(v2)+")"));
+   assertEquals("true",js(a,"Android.restoreChecked(Android.loadForCompare().slice(0,64),1,Android.loadForCompare().slice(0,64),"+JSONObject.quote(v2)+")"));
    a.recreate();
    waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
    String previous=js(a,"Android.load()");
@@ -758,7 +758,7 @@ public class WalletJourneyTest {
     waitJs(a,"!!document.querySelector('nav [data-page=wallet]')");
     click(a,"nav [data-page=wallet]");
     account(a,"Sentetik kurtarma "+version,"cash");
-    assertEquals("true",js(a,"Android.restore("+JSONObject.quote(legacy.toString())+")"));
+    assertEquals("true",js(a,"Android.restoreChecked(Android.loadForCompare().slice(0,64),1,Android.loadForCompare().slice(0,64),"+JSONObject.quote(legacy.toString())+")"));
     a.recreate();
     waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
     Map<Integer,String> snapshots=nativeSnapshots(context);
@@ -786,7 +786,7 @@ public class WalletJourneyTest {
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
    waitJs(a,"!!document.querySelector('[data-action=addAccount]')");
    account(a,"Sentetik kurtarma","cash");
-   assertEquals("true",js(a,"Android.restore("+JSONObject.quote(original.toString())+")"));
+   assertEquals("true",js(a,"Android.restoreChecked(Android.loadForCompare().slice(0,64),1,Android.loadForCompare().slice(0,64),"+JSONObject.quote(original.toString())+")"));
    a.recreate();
    waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
    totals=js(a,"Array.from(document.querySelectorAll('[data-stat]'),e=>e.textContent)");

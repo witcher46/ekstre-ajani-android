@@ -73,21 +73,21 @@ public class SnapshotAtomicityTest {
    MainActivity.Bridge bridge=bridge(scenario);
    assertTrue(bridge.save(unicodeName));
    assertTrue(bridge.save(original));
-   assertTrue(bridge.restore(edited));
-   assertFalse(bridge.restore(edited.replace("\"accountId\":\"bank\"","\"accountId\":\"missing\"")));
-   assertFalse(bridge.restore(edited.replace("\"id\":\"bank\"","\"id\":123")
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,edited));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("\"accountId\":\"bank\"","\"accountId\":\"missing\"")));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("\"id\":\"bank\"","\"id\":123")
     .replace("\"accountId\":\"bank\"","\"accountId\":\"123\"")));
-   assertFalse(bridge.restore(edited.replace("\"opening\":0}]","\"opening\":0},{\"id\":\"bank\",\"type\":\"bank\"}]")));
-   assertFalse(bridge.restore(edited.replace("2026-11-14\"","2026-02-30\"")));
-   assertFalse(bridge.restore(edited.replace("-9007199254740991","-9007199254740992")));
-   assertFalse(bridge.restore(edited+" trailing"));
-   assertFalse(bridge.restore(edited.replace("\"version\"","'version'")));
-   assertFalse(bridge.restore(edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"\\q")));
-   assertFalse(bridge.restore(edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"line\nbreak")));
-   assertFalse(bridge.restore(edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"zero"+(char)0)));
-   assertFalse(bridge.restore("\uFEFF"+edited));
-   assertFalse(bridge.restore(edited.replace("\"transactions\":[]","\"transactions\":[null]")));
-   assertFalse(bridge.restore(edited.replace("\"opening\":0","\"opening\":\"bad\"")));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("\"opening\":0}]","\"opening\":0},{\"id\":\"bank\",\"type\":\"bank\"}]")));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("2026-11-14\"","2026-02-30\"")));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("-9007199254740991","-9007199254740992")));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited+" trailing"));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("\"version\"","'version'")));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"\\q")));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"line\nbreak")));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("syntheticMarker\":\"edited", "syntheticMarker\":\"zero"+(char)0)));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,"\uFEFF"+edited));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("\"transactions\":[]","\"transactions\":[null]")));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("\"opening\":0","\"opening\":\"bad\"")));
    try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
     assertEquals(edited,snapshot(database,1));
     assertEquals(original,snapshot(database,2));
@@ -95,14 +95,14 @@ public class SnapshotAtomicityTest {
     database.execSQL("CREATE TRIGGER "+TRIGGER+" BEFORE INSERT ON snapshots WHEN NEW.id=1"
      +" BEGIN SELECT RAISE(ABORT, 'synthetic-observation-write-failure'); END");
     try{
-     assertFalse(bridge.restore(legacy));
+     assertFalse(RecoverySafetyTest.restoreFixture(bridge,legacy));
      assertEquals(edited,snapshot(database,1));
      assertEquals(original,snapshot(database,2));
      assertEquals(original,snapshot(database,3));
     } finally {
      database.execSQL("DROP TRIGGER IF EXISTS "+TRIGGER);
     }
-    assertTrue(bridge.restore(legacy));
+    assertTrue(RecoverySafetyTest.restoreFixture(bridge,legacy));
     assertEquals(legacy,snapshot(database,1));
     assertEquals(edited,snapshot(database,2));
     assertEquals(edited,snapshot(database,3));
@@ -130,7 +130,7 @@ public class SnapshotAtomicityTest {
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
    assertTrue(bridge.save(small));
-   assertTrue(bridge.restore(large));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,large));
    assertEquals(large,bridge.load());
    assertEquals(small,bridge.recovery());
 
@@ -142,7 +142,7 @@ public class SnapshotAtomicityTest {
    java.util.Arrays.fill(padding,'ü');
    String atLimit=prefix+new String(padding)+(remaining%2==1?"a":"")+suffix;
    assertTrue(bridge.save(atLimit));
-   assertFalse(bridge.restore(atLimit+" "));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,atLimit+" "));
    assertEquals(atLimit,bridge.load());
    assertEquals(small,bridge.recovery());
   }
@@ -154,7 +154,7 @@ public class SnapshotAtomicityTest {
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)) {
    MainActivity.Bridge bridge=bridge(scenario);
    assertTrue(bridge.save(first));
-   assertTrue(bridge.restore(current));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
    assertEquals(current,bridge.load());
    assertEquals(first,bridge.recovery());
 
@@ -170,7 +170,7 @@ public class SnapshotAtomicityTest {
       +" BEFORE INSERT ON snapshots WHEN NEW.id=1"
       +" BEGIN SELECT RAISE(ABORT, 'synthetic-final-write-failure'); END");
     try {
-     assertFalse("A forced SQLite error must reject the restore",bridge.restore(candidate));
+     assertFalse("A forced SQLite error must reject the restore",RecoverySafetyTest.restoreFixture(bridge,candidate));
      assertEquals(current,bridge.load());
      assertEquals(first,bridge.recovery());
      assertEquals(current,snapshot(database,1));
@@ -181,7 +181,7 @@ public class SnapshotAtomicityTest {
     }
 
     // Prove the database remains writable after the injected failure.
-    assertTrue(bridge.restore(candidate));
+    assertTrue(RecoverySafetyTest.restoreFixture(bridge,candidate));
     assertEquals(candidate,snapshot(database,1));
     assertEquals(current,snapshot(database,2));
     assertEquals(current,snapshot(database,3));
@@ -199,7 +199,7 @@ public class SnapshotAtomicityTest {
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)) {
    MainActivity.Bridge bridge=bridge(scenario);
    assertTrue(bridge.save(first));
-   assertTrue(bridge.restore(current));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
    assertEquals(current,bridge.load());
    assertEquals(first,bridge.recovery());
 
@@ -233,7 +233,7 @@ public class SnapshotAtomicityTest {
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
    assertTrue(bridge.save(first));
-   assertTrue(bridge.restore(current));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
    String read=bridge.loadForCompare();
    assertEquals(current,read.substring(65));
    String token=read.substring(0,64);
@@ -264,7 +264,7 @@ public class SnapshotAtomicityTest {
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
    assertTrue(bridge.save(first));
-   assertTrue(bridge.restore(current));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
    String token=bridge.loadForCompare().substring(0,64);
    try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
     database.execSQL("CREATE TRIGGER "+TRIGGER+" BEFORE INSERT ON snapshots WHEN NEW.id=1"
@@ -334,7 +334,7 @@ public class SnapshotAtomicityTest {
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
    assertTrue(bridge.save(recovery));
-   assertTrue(bridge.restore(current));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
    String comparison=bridge.loadForCompare();
    assertEquals(current,comparison.substring(65));
    String token=comparison.substring(0,64);
@@ -371,7 +371,7 @@ public class SnapshotAtomicityTest {
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
    assertTrue(bridge.save(initial));
-   assertTrue(bridge.restore(raw));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,raw));
    assertEquals(raw,bridge.load());
    assertEquals(initial,bridge.recovery());
    String token=bridge.loadForCompare().substring(0,64);
@@ -381,8 +381,8 @@ public class SnapshotAtomicityTest {
    assertFalse(bridge.save(emptyHistory));
    assertFalse(bridge.saveIfUnchanged(token,emptyHistory));
    assertFalse(bridge.saveIfUnchanged(token,initial));
-   assertFalse(bridge.recoverSaved("0".repeat(64),initial));
-   assertFalse(bridge.restore(raw.replace("satır-1","satır-2")));
+   assertFalse(bridge.recoverSnapshot(3,"0".repeat(64),token,true));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,raw.replace("satır-1","satır-2")));
 
    var forged=new org.json.JSONObject(raw);
    var proof=forged.getJSONObject("balanceReconciliation").getJSONArray("approvals").getJSONObject(0);
@@ -398,9 +398,9 @@ public class SnapshotAtomicityTest {
     assertNotEquals(canonical,invalid);
     proof.put("evidenceJson",invalid);
     proof.put("evidenceSha256",BalanceApprovalStorage.sha256(invalid));
-    assertFalse(bridge.restore(forged.toString()));
+    assertFalse(RecoverySafetyTest.restoreFixture(bridge,forged.toString()));
    }
-   assertFalse(bridge.restore(raw.replace("\"version\":3","\"version\":4")));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,raw.replace("\"version\":3","\"version\":4")));
 
    try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
     assertEquals(raw,snapshot(database,1));
@@ -410,7 +410,7 @@ public class SnapshotAtomicityTest {
    scenario.recreate();
    MainActivity.Bridge reopened=bridge(scenario);
    assertEquals(raw,reopened.load());
-   assertTrue(reopened.recoverSaved(BalanceApprovalStorage.sha256(initial),initial));
+   assertTrue(reopened.recoverSnapshot(3,BalanceApprovalStorage.sha256(initial),BalanceApprovalStorage.sha256(reopened.load()),true));
    assertEquals(initial,reopened.load());
    assertEquals(initial,reopened.recovery());
    try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
@@ -419,7 +419,7 @@ public class SnapshotAtomicityTest {
    String alternateCase=canonical.replace("Europe/Istanbul","europe/istanbul");
    proof.put("evidenceJson",alternateCase);
    proof.put("evidenceSha256",BalanceApprovalStorage.sha256(alternateCase));
-   assertTrue(reopened.restore(forged.toString()));
+   assertTrue(RecoverySafetyTest.restoreFixture(reopened,forged.toString()));
    String payment=canonical.replace("synthetic-income","synthetic-payment")
     .replace("\"kind\":\"income\"","\"kind\":\"payment\"")
     .replace("\"targetId\":null","\"targetId\":\"card\"")
@@ -433,12 +433,12 @@ public class SnapshotAtomicityTest {
    proof.put("evidenceJson",linked);
    proof.put("evidenceSha256",BalanceApprovalStorage.sha256(linked));
    String accepted=forged.toString();
-   assertTrue(reopened.restore(accepted));
+   assertTrue(RecoverySafetyTest.restoreFixture(reopened,accepted));
    String invalidLink=payment.substring(0,payment.length()-2)+","+alias.replace("\"100\"","\"101\"")+"]}";
    proof.put("evidenceJson",invalidLink);
    proof.put("evidenceSha256",BalanceApprovalStorage.sha256(invalidLink));
    String recoveryBefore=reopened.recovery();
-   assertFalse(reopened.restore(forged.toString()));
+   assertFalse(RecoverySafetyTest.restoreFixture(reopened,forged.toString()));
    assertEquals(accepted,reopened.load());
    assertEquals(recoveryBefore,reopened.recovery());
   }
@@ -449,13 +449,13 @@ public class SnapshotAtomicityTest {
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
    assertTrue(bridge.save(first));
-   assertTrue(bridge.restore(current));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
 
    String invalidVersion=wallet("unsupported").replace("\"version\":1","\"version\":3");
    String missingObservations=wallet("incomplete").replace("\"version\":1","\"version\":2");
    String missingArray=wallet("broken").replace("\"transactions\":[]","\"transactions\":null");
    for(String invalid:new String[]{"{invalid JSON",invalidVersion,missingObservations,missingArray}) {
-    assertFalse("Malformed/unsupported native restore must fail",bridge.restore(invalid));
+    assertFalse("Malformed/unsupported native restore must fail",RecoverySafetyTest.restoreFixture(bridge,invalid));
     assertEquals(current,bridge.load());
     assertEquals(first,bridge.recovery());
    }

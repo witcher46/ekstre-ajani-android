@@ -52,8 +52,8 @@ public class OfflineTest {
    String old="{\"format\":\"ekstre-android\",\"version\":1,\"accounts\":[],\"transactions\":[],\"statements\":[],\"budgets\":{},\"subscriptions\":[],\"categories\":[],\"legacyPadding\":\""+"x".repeat(3000000)+"\"}";
    assertTrue(bridge.save(old));assertEquals(old,bridge.load());
    String restored=old.replace("legacyPadding","restoredPadding");
-   assertTrue(bridge.restore(restored));assertEquals(old,bridge.recovery());assertEquals(restored,bridge.load());
-   assertFalse(bridge.restore("{bad json"));assertEquals(old,bridge.recovery());assertEquals(restored,bridge.load());
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,restored));assertEquals(old,bridge.recovery());assertEquals(restored,bridge.load());
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,"{bad json"));assertEquals(old,bridge.recovery());assertEquals(restored,bridge.load());
   }
  }
 }

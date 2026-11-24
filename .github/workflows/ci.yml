@@ -146,6 +146,13 @@ jobs:
               'onlyOneConcurrentApprovalCanAppendToTheSameSnapshot',
           }
           expected = {('com.zagor.ekstre.SnapshotAtomicityTest', name) for name in atomicity}
+          expected.update(('com.zagor.ekstre.RecoverySafetyTest', name) for name in (
+              'approvedRecoveryRestores74325AfterRecreation',
+              'externalRestoreKeepsOnlyReadableCopyFromEitherSlot',
+              'malformedUtf8DoesNotHideTheVerifiedRecoveryCopy',
+              'failedRecoveryAndRestoreRollBackEverySlot',
+              'recreatedExportKeepsEveryByteOfExistingDestination',
+          ))
           expected.add(('com.zagor.ekstre.WalletJourneyTest', 'balanceApprovalFlowCommitsThroughNativeCasAndReopens'))
           expected.add(('com.zagor.ekstre.WalletJourneyTest', 'legacyApprovalHistoryNeverWritesOrMigratesSnapshots'))
           expected.add(('com.zagor.ekstre.WalletJourneyTest', 'approvalHistoryEvaluatesNativeSnapshotWithoutRewritingEvidence'))
@@ -160,6 +167,16 @@ jobs:
           if passed != expected:
               raise SystemExit(f'Missing passing SQLite cases: {sorted(expected - passed)}')
           PY
+      - name: Preserve Android instrumentation results
+        if: always() && github.head_ref == 'fix/android-recovery-safety'
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-recovery-instrumentation-results
+          path: |
+            android_app/app/build/outputs/androidTest-results/connected/
+            android_app/app/build/reports/androidTests/connected/
+          if-no-files-found: warn
+          retention-days: 30
       - name: Upload verified trial APK
         if: env.BUILD_TRIAL_APK == 'true'
         uses: actions/upload-artifact@v7
