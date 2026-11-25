@@ -19,12 +19,17 @@ export function normalizeWallet(s){
 export function paymentRows(s,asOf=C.today(),{bankAccount,includeBankMovements=false}={}){
  const manuals=s.transactions.filter(t=>t.kind==='payment'&&bankMovement(t,asOf));
  if(bankAccount)return manuals.filter(t=>t.account===bankAccount);
- const manualIds=new Set(manuals.map(t=>t.id));
- const candidates=new Set(manuals.flatMap(t=>t.matchCandidates??[]));
- const documents=s.transactions.filter(t=>t.kind==='cardPayment'&&C.effective(t)&&
-  !candidates.has(t.id)&&!t.matchCandidates?.some(id=>manualIds.has(id)));
+ const effectiveDocuments=s.transactions.filter(t=>t.kind==='cardPayment'&&C.effective(t));
+ const documentIds=new Set(effectiveDocuments.map(t=>t.id));
+ // Multiple document candidates remain separate card movements while the bank match is unresolved.
+ const cardManuals=manuals.filter(t=>t.matchStatus!=='pending'||
+  (t.matchCandidates??[]).filter(id=>documentIds.has(id)).length<2);
+ const manualIds=new Set(cardManuals.map(t=>t.id));
+ const candidates=new Set(cardManuals.flatMap(t=>t.matchCandidates??[]));
+ const documents=effectiveDocuments.filter(t=>!candidates.has(t.id)&&!t.matchCandidates?.some(id=>manualIds.has(id)));
  const posted=C.postedCardPaymentSources(s,asOf);
- return [...manuals.filter(t=>includeBankMovements||!posted.has(t.id)),...documents,...posted.values()];
+ const bankRows=includeBankMovements?manuals:cardManuals.filter(t=>!posted.has(t.id));
+ return [...bankRows,...documents,...posted.values()];
 }
 
 export function periodFigures(s,period,account){

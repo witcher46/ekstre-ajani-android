@@ -71,16 +71,23 @@ test('a cross-month refund reduces that month only and never counts as income', 
   assert.equal(W.overview(s,'2026-02').income, 0);
 });
 
-test('a second identical PDF payment cannot be linked to a canonical row already linked to that source', () => {
+test('a second identical PDF payment cannot be linked to a canonical row already linked to that source', t => {
+  t.mock.timers.enable({apis:['Date'], now:new Date(2026,0,6,12)});
   const bank = C.addTransaction(base(),expense({
     account:'bank', target:'card', kind:'payment', date:'2026-01-03',
   }));
   const pdf = parseStatement('QNB\nHesap Kesim Tarihi: 05/01/2026\n03/01/2026 ODEME 100.00\n03/01/2026 ODEME 100.00');
   const review = C.importStatement(bank,pdf,'card');
-  const [first,second] = review.transactions.filter(t => t.matchStatus === 'pending');
-  const linked = C.resolveCandidate(review,first.id,'link',bank.transactions[0].id);
-  assert.throws(() => C.resolveCandidate(linked,second.id,'link',bank.transactions[0].id), /kaynak/i);
-  const distinct = C.resolveCandidate(linked,second.id,'distinct');
+  const [payment,first,second] = review.transactions;
+  assert.deepEqual(payment.matchCandidates, [first.id,second.id]);
+  assert.equal(W.overview(review,'2026-01').cardPayments, 20000);
+  const linked = C.resolveCandidate(review,payment.id,'link',first.id);
+
+  // Older backups could retain the second PDF row as a candidate for an already linked bank row.
+  const legacy = C.readBackup(JSON.stringify({...linked,transactions:linked.transactions.map(row =>
+    row.id===second.id ? {...row,matchStatus:'pending',matchCandidates:[payment.id]} : row)}));
+  assert.throws(() => C.resolveCandidate(legacy,second.id,'link',payment.id), /kaynak/i);
+  const distinct = C.resolveCandidate(legacy,second.id,'distinct');
   assert.equal(C.balance(distinct,distinct.accounts[0]), 90000);
   assert.equal(W.overview(distinct,'2026-01').netExpense, 0);
   assert.equal(W.overview(distinct,'2026-01').cardPayments, 20000);

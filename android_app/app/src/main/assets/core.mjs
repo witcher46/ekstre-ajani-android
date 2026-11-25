@@ -434,7 +434,14 @@ function appendToGroup(groups,key,row){
 function matchingRows(rows,t){
  const viaAliases=new Set(),incompatible=new Set();
  for(const row of rows){
-  if(row.id===t.id||sourceOf(row)===sourceOf(t))continue;
+  if(row.id===t.id)continue;
+  if(sourceOf(row)===sourceOf(t)){
+   // A confirmed statement payment uses this source's slot; sibling rows are separate evidence.
+   if(row.linkedTo&&t.kind==='cardPayment'&&row.kind==='cardPayment'&&t.statement===row.statement&&t.statement){
+    incompatible.add(row.linkedTo);
+   }
+   continue;
+  }
   if(incompatibleStatementPeriods(row,t)||incompatibleDocumentPayments(row,t))incompatible.add(row.linkedTo||row.id);
   if(row.linkedTo&&sameEconomic(row,t))viaAliases.add(row.linkedTo);
  }
@@ -685,7 +692,41 @@ export function removeTransaction(s,tid){
  next.transactions=next.transactions.filter(t=>!removed.has(t.id));
  return validate(repairReferences(next));
 }
+function collectAmbiguousStatementPayments(s){
+ const byId=new Map(),pendingByCandidate=new Map(),linkedTargets=new Set();
+ for(const row of s.transactions){
+  byId.set(row.id,row);
+  if(row.linkedTo)linkedTargets.add(row.linkedTo);
+  if(row.kind==='cardPayment'&&row.statement&&sourceOf(row)==='pdf'&&row.matchStatus==='pending'&&
+     !row.matchReason&&!row.previousLinkedTo&&row.matchCandidates?.length===1){
+   appendToGroup(pendingByCandidate,row.matchCandidates[0],row);
+  }
+ }
+ if(!pendingByCandidate.size)return;
+ for(const bank of s.transactions){
+  if(bank.kind!=='payment'||sourceOf(bank)!=='manual'||bank.linkedTo||linkedTargets.has(bank.id))continue;
+  const direct=pendingByCandidate.get(bank.id)||[];
+  let documents=direct;
+  if(bank.matchStatus){
+   if(bank.matchStatus!=='pending'||bank.matchReason||bank.matchCandidates?.length!==1)continue;
+   // Older imports repointed the other pending PDF rows to this first PDF candidate.
+   const first=byId.get(bank.matchCandidates[0]);
+   if(!first||first.kind!=='cardPayment'||!first.statement||sourceOf(first)!=='pdf'||first.matchStatus||first.linkedTo)continue;
+   documents=[first,...direct,...(pendingByCandidate.get(first.id)||[])];
+  }
+  if(documents.length<2||!documents.every(row=>row.statement===documents[0].statement&&
+     !linkedTargets.has(row.id)&&sameEconomic(row,bank)))continue;
+  // The bank has one unresolved decision. Each PDF row is evidence in its own right.
+  bank.matchStatus='pending';
+  bank.matchCandidates=documents.map(row=>row.id);
+  for(const row of documents){
+   delete row.matchStatus;delete row.matchCandidates;
+  }
+ }
+}
+
 function preferPdfAcrossCut(s){
+ collectAmbiguousStatementPayments(s);
  const afterCut=cardAfterCut(s);
  for(const row of s.transactions.filter(t=>t.matchStatus==='pending'&&sourceOf(t)==='pdf')){
   const latest=s.statements.filter(st=>st.account===row.account&&st.debt!==null).sort((a,b)=>b.cut.localeCompare(a.cut))[0];
