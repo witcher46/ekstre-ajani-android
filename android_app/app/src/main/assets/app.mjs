@@ -269,8 +269,7 @@ function transactionList(rows,{suggestCategories=false}={}){
   return lookup?categorySuggestionRow(t,edit,index,lookup):edit;
  }).join(''):empty('Henüz işlem yok. Hesap ekleyebilir veya bir ekstre aktarabilirsin.');
 }
-function importCategoryOption(merchant,current,index,selectedCategory){
- const category=C.suggestCategory(state,merchant);
+function importCategoryOption(merchant,current,index,selectedCategory,category=C.suggestCategory(state,merchant)){
  return category&&category!==current?`<label><input type="checkbox" data-category-suggestion="${index}" value="${esc(category)}" ${category===selectedCategory?'checked':''}> ${esc(merchant)} · Öneriyi seç: ${esc(category)}</label>`:'';
 }
 function render(){
@@ -778,11 +777,19 @@ $('backup-file').onchange=async e=>{const file=e.target.files[0];e.target.value=
 $('csv-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{
  if(file.size>5*1024*1024)throw Error('CSV en fazla 5 MB olabilir.');
  const rows=parseStatementCsv(new TextDecoder('utf-8',{fatal:true}).decode(await file.arrayBuffer())),groups=[...new Set(rows.map(r=>JSON.stringify([r.bank,r.card])))];
- const merchants=[...new Set(rows.filter(r=>r.kind!=='odeme'&&C.suggestCategory(state,r.desc)!==r.category&&C.suggestCategory(state,r.desc)).map(r=>r.desc))];
- modal('CSV aktarımı',`<p>${rows.length} hareket okundu. Daha önce işlenen satırlar tekrar eklenmez. Olası çakışmalar incelemeye alınır.</p>`+groups.map((group,i)=>select('card-'+i,JSON.parse(group).join(' · '),accountOptions(a=>a.type==='card'))).join('')+merchants.map((name,i)=>importCategoryOption(name,null,i)).join(''),f=>{
+ const previewRules=state.merchantCategoryRules,lookup=C.indexCategorySuggestions(state);
+ const suggestions=new Map();
+ for(const row of rows){
+  if(row.kind==='odeme'||suggestions.has(row.desc))continue;
+  const category=lookup(row.desc)?.category;
+  if(category&&category!==row.category)suggestions.set(row.desc,category);
+ }
+ const merchants=[...suggestions.keys()];
+ modal('CSV aktarımı',`<p>${rows.length} hareket okundu. Daha önce işlenen satırlar tekrar eklenmez. Olası çakışmalar incelemeye alınır.</p>`+groups.map((group,i)=>select('card-'+i,JSON.parse(group).join(' · '),accountOptions(a=>a.type==='card'))).join('')+merchants.map((name,i)=>importCategoryOption(name,null,i,undefined,suggestions.get(name))).join(''),f=>{
   const targets=groups.map((g,i)=>f.get('card-'+i));if(targets.some(t=>!t)||new Set(targets).size!==targets.length)throw Error('Her kaynak kart için ayrı bir hedef kredi kartı seç.');
   const chosen=new Set(merchants.filter((_,i)=>document.querySelector(`#fields [data-category-suggestion="${i}"]:checked`)));
-  const selected=rows.map(r=>r.kind!=='odeme'&&chosen.has(r.desc)?{...r,category:C.suggestCategory(state,r.desc)??r.category}:r);
+  const currentLookup=state.merchantCategoryRules===previewRules?lookup:C.indexCategorySuggestions(state);
+  const selected=rows.map(r=>r.kind!=='odeme'&&chosen.has(r.desc)?{...r,category:currentLookup(r.desc)?.category??r.category}:r);
   const previousIds=new Set(state.transactions.map(row=>row.id));
   let next=state;
   for(const [i,g]of groups.entries())next=C.importCsv(next,selected.filter(r=>JSON.stringify([r.bank,r.card])===g),targets[i]);
