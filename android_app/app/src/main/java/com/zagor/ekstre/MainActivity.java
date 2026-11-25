@@ -115,14 +115,41 @@ public class MainActivity extends Activity {
   if(version!=1&&version!=2&&version!=3)return false;
   for(String name:new String[]{"accounts","transactions","statements","subscriptions","categories"})wallet.getJSONArray(name);
   wallet.getJSONObject("budgets");
+  if(!hasDistinctIds(wallet.getJSONArray("statements"))||!hasDistinctIds(wallet.getJSONArray("subscriptions")))return false;
+  if(!validTransactionTargets(wallet.getJSONArray("accounts"),wallet.getJSONArray("transactions")))return false;
   if(version==1)return true;
-  for(String name:new String[]{"transactions","statements","subscriptions"}){
-   JSONArray rows=wallet.getJSONArray(name);
-   if(rows.length()>50000)return false;
-   for(int i=0;i<rows.length();i++)rows.getJSONObject(i);
-  }
   return validBalanceObservations(wallet)&& (version!=3 ||
    BalanceApprovalStorage.validApprovals(wallet.getJSONObject("balanceReconciliation").getJSONArray("approvals")));
+ }
+ private boolean hasDistinctIds(JSONArray rows)throws JSONException{
+  if(rows.length()>50000)return false;
+  HashSet<String> ids=new HashSet<>();
+  for(int i=0;i<rows.length();i++){
+   if(!(rows.getJSONObject(i).opt("id") instanceof String id)||!ids.add(id))return false;
+  }
+  return true;
+ }
+ private boolean validTransactionTargets(JSONArray accounts,JSONArray transactions)throws JSONException{
+  if(transactions.length()>50000)return false;
+  HashMap<String,String> types=new HashMap<>();
+  for(int i=0;i<accounts.length();i++){
+   JSONObject account=accounts.getJSONObject(i);
+   types.put(account.getString("id"),account.getString("type"));
+  }
+  for(int i=0;i<transactions.length();i++){
+   JSONObject row=transactions.getJSONObject(i);
+   String kind=row.optString("kind");
+   if(!"payment".equals(kind)&&!"transfer".equals(kind)){
+    // Match the ledger's exact string lookup, without coercing legacy metadata.
+    if(row.opt("target") instanceof String targetId&&types.containsKey(targetId))return false;
+    continue;
+   }
+   if(!(row.opt("account") instanceof String from)||!(row.opt("target") instanceof String to)||from.equals(to))return false;
+   String source=types.get(from),target=types.get(to);
+   if(!"bank".equals(source)&&!"cash".equals(source))return false;
+   if("payment".equals(kind)?!"card".equals(target):(!"bank".equals(target)&&!"cash".equals(target)))return false;
+  }
+  return true;
  }
  private boolean validBalanceObservations(JSONObject wallet)throws JSONException{
   JSONArray accounts=wallet.getJSONArray("accounts");
@@ -212,16 +239,17 @@ public class MainActivity extends Activity {
  private void copySlot(int from,int to){
   db.execSQL("INSERT OR REPLACE INTO snapshots SELECT ?,content FROM snapshots WHERE id=?",new Object[]{to,from});
  }
- private synchronized boolean writeSnapshot(String content,String expectedToken){
+ private synchronized boolean writeSnapshot(String content,String expectedToken,boolean mayAppendApproval){
   try{
    if(!supportedDocument(content))return false;
    JSONObject candidate=new JSONObject(content);
    db.beginTransaction();
    try{
-    String current=readSnapshot(1);
-    if(expectedToken!=null&&(!expectedToken.equals(BalanceApprovalStorage.sha256(current))||
-       expectedToken.equals(BalanceApprovalStorage.sha256(content))))return false;
-    if(!BalanceApprovalStorage.preservesHistory(current.isEmpty()?null:new JSONObject(current),candidate,expectedToken!=null))return false;
+    String current=readSlot(1);
+    String currentToken=mayAppendApproval&&current==null?BalanceApprovalStorage.sha256(""):slotToken(current);
+    if(!expectedToken.equals(currentToken)||
+       (mayAppendApproval&&expectedToken.equals(BalanceApprovalStorage.sha256(content))))return false;
+    if(!BalanceApprovalStorage.preservesHistory(current==null?null:new JSONObject(current),candidate,mayAppendApproval))return false;
     copySlot(1,2);
     db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});
     db.setTransactionSuccessful();
@@ -268,7 +296,7 @@ public class MainActivity extends Activity {
   @JavascriptInterface public String load(){synchronized(MainActivity.this){return readSnapshot(1);}}
   @JavascriptInterface public String loadForCompare(){return readForCompare();}
   @JavascriptInterface public boolean saveIfUnchanged(String token,String content){
-   return token!=null&&token.matches("[a-f0-9]{64}")&&writeSnapshot(content,token);
+   return token!=null&&token.matches("[a-f0-9]{64}")&&writeSnapshot(content,token,true);
   }
   @JavascriptInterface public String snapshotSlot(int slot){
    if(slot<1||slot>3)throw new IllegalArgumentException("Invalid snapshot slot");
@@ -285,7 +313,9 @@ public class MainActivity extends Activity {
    return content!=null&&replaceReviewed(current,slot,source,content,false);
   }
   @JavascriptInterface public String recovery(){synchronized(MainActivity.this){return readSnapshot(3);}}
-  @JavascriptInterface public boolean save(String content){return writeSnapshot(content,null);}
+  @JavascriptInterface public boolean save(String content,String token){
+   return token!=null&&(token.isEmpty()||token.matches("[a-f0-9]{64}"))&&writeSnapshot(content,token,false);
+  }
   @JavascriptInterface public void pickPdf(String request){runOnUiThread(()->{
    if(request==null||request.isEmpty())return;
    if(pdfPickerRequest!=null){callback("onPdfError","PDF dosya seçici zaten açık.",request);return;}

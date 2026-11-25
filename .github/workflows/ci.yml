@@ -136,6 +136,9 @@ jobs:
           atomicity = {
               'failedFinalSqliteWriteRollsBackWalletPreviousAndRecovery',
               'failedFinalSqliteSaveRollsBackThePreviousSnapshot',
+              'staleOrdinaryWritePreservesEverySnapshot',
+              'duplicateBackupIdsPreserveEverySnapshot',
+              'invalidBackupTargetPreservesEverySnapshot',
               'malformedRestoreDoesNotReplaceWalletOrRecovery',
               'observationSnapshotsSurviveRestoreAndWriteFailure',
               'largeObservationBackupSurvivesAndOversizeRestoreIsRejected',

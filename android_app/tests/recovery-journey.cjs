@@ -12,7 +12,7 @@ module.exports=async function recoveryJourney(browser,url){
   await page.locator('#settings').click();
  };
  const details=()=>page.evaluate(()=>window.io);
- const upload=async()=>page.locator('#backup-file').setInputFiles({name:'sentetik.json',mimeType:'application/json',buffer:Buffer.from(good)});
+ const upload=async(raw=good)=>page.locator('#backup-file').setInputFiles({name:'sentetik.json',mimeType:'application/json',buffer:Buffer.from(raw)});
  try{
   await page.addInitScript(()=>{
    const {slots={},unreadable}=JSON.parse(sessionStorage.getItem('recoveryFixture')||'{}');
@@ -22,7 +22,7 @@ module.exports=async function recoveryJourney(browser,url){
     load:()=>slots[1]??'',
     snapshotSlot(index){if(unreadable===index)throw Error('okuma hatası');return slots[index];},
     exportBackup(raw){io.exports.push(raw);},
-    save(){io.saves++;return true;},
+    save(raw){io.saves++;slots[1]=raw;return true;},
     recoverSnapshot(slot,sourceToken,currentToken){
      io.recoveries.push([slot,sourceToken,currentToken]);
      if(io.fail)return false;
@@ -97,5 +97,56 @@ module.exports=async function recoveryJourney(browser,url){
   await configure({1:JSON.stringify({...wallet,accounts:[]})});
   await page.locator('[data-action=backup]').click();
   assert.deepEqual(JSON.parse((await details()).exports[0]).accounts,[]);
+
+  await configure({1:good});
+  await page.locator('[data-action=incomeCategory]').click();
+  await page.locator('#fields [name=name]').fill('Sentetik eski düzenleme');
+  const newer=await page.evaluate(async()=>{
+   const {sha256}=await import('/sha256.mjs');
+   const originalSave=Android.save;
+   Android.save=(raw,expected)=>expected===undefined||expected===sha256(window.io.slots[1])?originalSave(raw):false;
+   window.io.slots[1]=JSON.stringify({...JSON.parse(window.io.slots[1]),budgets:{'2026-10|Toplam':12345}});
+   sessionStorage.setItem('recoveryFixture',JSON.stringify({slots:window.io.slots}));
+   window.io.accept=false;
+   return window.io.slots[1];
+  });
+  await page.locator('#form').evaluate(form=>form.requestSubmit());
+  assert.equal((await details()).slots[1],newer,'A normal save must preserve the newer budget and reject the stale edit');
+  assert.match(await page.locator('#form-error').innerText(),/cüzdan .*değişti/i);
+  assert.match((await details()).confirmations.at(-1),/güncel cüzdanı aç/i);
+  await page.evaluate(()=>{window.io.accept=true;});
+  await Promise.all([page.waitForEvent('framenavigated'),page.locator('#submit').click()]);
+  assert.equal((await details()).slots[1],newer);
+  assert.equal(await page.locator('dialog[open]').count(),0);
+
+  const settingsOnly=JSON.stringify({...wallet,accounts:[],categories:['Sentetik özel kategori'],
+   budgets:{'2026-10|Sentetik özel kategori':12345},incomeCategories:['Sentetik gelir'],
+   syntheticPreferences:{marker:'Yalnız ayarlar'}});
+  await configure({1:settingsOnly});
+  await page.locator('[data-action=demo]').click();
+  assert.equal((await details()).slots[1],settingsOnly,'Demo must preserve all persisted settings in a wallet with no accounts');
+  assert.equal((await details()).saves,0);
+  assert.match(await page.locator('#error-announcement').innerText(),/henüz kayıt/i);
+
+  await configure({1:good,2:broken,3:settingsOnly});
+  const backupSlots=(await details()).slots;
+  const subscription={id:'sub',name:'Sentetik abonelik',account:'bank',next:'2026-10-15',amount:1500};
+  const statement={id:'statement',account:'bank',cut:'2026-10-05',period:'2026-10',debt:8000,due:null};
+  await upload(JSON.stringify({...wallet,subscriptions:[subscription,{...subscription,amount:2500}]}));
+  await page.waitForFunction(()=>document.querySelector('#error-announcement').textContent.includes('Abonelik kimliği'));
+  await upload(JSON.stringify({...wallet,statements:[statement,{...statement,debt:18000}]}));
+  await page.waitForFunction(()=>document.querySelector('#error-announcement').textContent.includes('Ekstre kimliği'));
+  assert.deepEqual((await details()).slots,backupSlots);
+  assert.deepEqual((await details()).restores,[]);
+  assert.deepEqual((await details()).confirmations,[]);
+
+  const expense={id:'bad-expense',account:'bank',target:'cash',kind:'expense',date:'2026-10-01',
+   period:'2026-10',amount:2000,desc:'Sentetik gider',category:'Diğer'};
+  await upload(JSON.stringify({...wallet,accounts:[{...wallet.accounts[0],opening:10000},
+   {id:'cash',type:'cash',name:'Sentetik nakit',opening:0}],transactions:[expense]}));
+  await page.waitForFunction(()=>document.querySelector('#error-announcement').textContent.includes('Hedef hesap bağlantısı'));
+  assert.deepEqual((await details()).slots,backupSlots);
+  assert.deepEqual((await details()).restores,[]);
+  assert.deepEqual((await details()).confirmations,[]);
  }finally{await page.close();}
 };

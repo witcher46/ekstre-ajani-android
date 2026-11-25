@@ -27,3 +27,21 @@ for (const version of ['0.1.0','0.1.1','0.2.0']) {
     assert.equal(W.overview(reimported,'2026-11').plannedIncome,version==='0.2.0'?20000:0);
   });
 }
+
+for (const version of [1,2,3]) {
+ for(const [field,value,message] of [['subscriptions',{amount:2500},/abonelik kimliği/i],
+   ['statements',{debt:18000},/ekstre kimliği/i]]) {
+  test('rejects duplicate '+field+' IDs in v'+version+' backups', () => {
+    const wallet = C.empty();
+    wallet.version = version;
+    if(version>=2)wallet.balanceReconciliation={observations:[]};
+    if(version===3)wallet.balanceReconciliation.approvals=[];
+    wallet.accounts.push({id:'card',name:'Sentetik kart',type:'card',opening:0});
+    wallet.subscriptions.push({id:'sub',name:'Sentetik abonelik',account:'card',next:'2026-10-15',amount:1500});
+    wallet.statements.push({id:'statement',account:'card',cut:'2026-10-05',period:'2026-10',debt:8000,due:null});
+    assert.deepEqual(C.readBackup(JSON.stringify(wallet)),wallet);
+    assert.throws(()=>C.readBackup(JSON.stringify({...wallet,[field]:[...wallet[field],
+      {...wallet[field][0],...value}]})),message);
+  });
+ }
+}

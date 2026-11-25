@@ -160,6 +160,31 @@ test('restore rejects unrelated, wrong-source and wrong-direction links before c
   assert.throws(()=>C.readBackup(JSON.stringify(reversed)),/bağlantı|eşleşme/i);
 });
 
+test('F-B5 rejects an expense that assigns a fictitious cash credit',()=>{
+  const s=C.empty();
+  const bank={id:'bank',name:'Sentetik banka',type:'bank',opening:10000};
+  const cash={id:'cash',name:'Sentetik nakit',type:'cash',opening:0};
+  s.accounts=[bank,cash];
+  const expense={id:'expense',kind:'expense',account:'bank',date:'2026-10-01',period:'2026-10',
+    desc:'Sentetik 20 TL gider',category:'Diğer',amount:2000};
+  const malformed={...s,transactions:[{...expense,target:'cash'}]};
+  assert.throws(()=>C.readBackup(JSON.stringify(malformed)),/hedef hesap/i);
+  assert.throws(()=>C.addTransaction(s,malformed.transactions[0]),/hedef hesap/i);
+  assert.deepEqual([C.balance(s,bank),C.balance(s,cash)],[10000,0]);
+  const validExpense=C.readBackup(JSON.stringify({...s,transactions:[{...expense,target:null}]}));
+  assert.deepEqual([C.balance(validExpense,bank),C.balance(validExpense,cash)],[8000,0]);
+  for(const target of [{foreign:true},'no-such-account']){
+    const row={...expense,target};
+    const raw=JSON.stringify({...s,transactions:[row]});
+    const legacy=C.readBackup(raw);
+    assert.equal(C.backupText(legacy),raw);
+    assert.deepEqual([C.balance(legacy,bank),C.balance(legacy,cash)],[8000,0]);
+    assert.throws(()=>C.addTransaction(s,row),/hedef hesap/i);
+  }
+  const validTransfer=C.addTransaction(s,{...expense,kind:'transfer',target:'cash'});
+  assert.deepEqual([C.balance(validTransfer,bank),C.balance(validTransfer,cash)],[8000,2000]);
+});
+
 test('restore rejects a linked CSV row whose period disagrees with its recorded source',()=>{
   const imported=importCsv(C.importStatement(wallet(),parseStatement(pdfText('SENTETIK ALISVERIS')),'card'),[csv({date:'2026-10-01'})]);
   const candidate=imported.transactions.find(t=>t.source==='csv');
