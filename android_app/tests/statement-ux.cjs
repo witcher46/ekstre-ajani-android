@@ -319,6 +319,34 @@ async function run() {
     await save.click();
     assert.match(await page.locator('#error-announcement').textContent(),/tekrar aktarımı inceleme/);
     assert.deepEqual(await snapshot(),beforeReplay,'The rejected import must not write to either wallet snapshot');
+
+    const usdOnly=['QNB','Hesap Kesim Tarihi: 05/01/2027','Onceki Donem Borcu: 0.00 USD',
+      'Donem Borcu: 100.00 USD','01/01/2027 SENTETIK DOVIZ MARKET 100.00 USD'].join('\n');
+    const ambiguous=usdOnly.replace('100.00 USD','100.00 USD 3500.00');
+    await page.evaluate(()=>{window.Android={pickPdf:id=>window.pdfRequests.push(id)};});
+    const beforeCurrencyTests=await snapshot();
+    for(const text of [usdOnly,ambiguous]){
+      await choose();
+      await complete(text,await token());
+      assert.match(await page.locator('#error-announcement').textContent(),/para birimi/i);
+      assert.equal(await preview.count(),0);
+      assert.equal(await save.count(),0);
+      assert.deepEqual(await snapshot(),beforeCurrencyTests);
+    }
+
+    const equivalent=usdOnly.replace('0.00 USD','0.00 TL')
+      .replaceAll('100.00 USD','100.00 USD / TL karsiligi: 3500.00');
+    await choose();
+    await complete(equivalent,await token());
+    await preview.getByText('Toplamlar doğrulandı',{exact:true}).waitFor();
+    await page.evaluate(()=>{delete window.Android;});
+    await cardPicker.selectOption('synthetic-card');
+    await save.click();
+    const afterCurrencyTests=JSON.parse((await snapshot())[0]);
+    assert.deepEqual(afterCurrencyTests.transactions.filter(t=>t.period==='2027-01').map(t=>t.amount),[350000]);
+    const converted=afterCurrencyTests.statements.find(s=>s.period==='2027-01');
+    assert.equal(converted.debt,350000);
+    assert.equal(converted.reconciliationStatus,'verified');
     assert.deepEqual(errors,[]);
     console.log('Statement and expense chart journeys passed; '+checks+' responsive checks');
   } finally {

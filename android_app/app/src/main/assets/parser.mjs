@@ -71,12 +71,74 @@ const qnbCarryover='Onceki\\s+Donem\\s+Bakiyeniz';
 const debtLabels='(?:(?:Bu|Toplam)\\s+)?D[o]?nem\\s+Borcu(?:nuz)?|Hesap\\s+O?zeti\\s+Borcu(?:nuz)?|Ekstre\\s+Borcu(?:nuz)?';
 const cutLabel='(?:Hesap Kesim Tarihi|Hesap O?zeti Tarihi|Ekstre Kesim Tarihi)';
 const dueLabel='Son\\s+O?deme Tarihi';
-function headerAmount(t,labels,pattern){
- const label=t.match(new RegExp('(?:^|\\n)\\s*(?:'+labels+')\\b(?:\\s*(?:\\(TL\\)|TL|₺))?\\s*:?\\s*','i'));
+// Use the same ISO codes on older WebViews, independent of the device's locale data.
+const currencyCodes=`
+ AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BRL BSD BTN BWP BYN BZD
+ CAD CDF CHF CLP CNY COP CRC CUC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD
+ GNF GTQ GYD HKD HNL HRK HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT
+ LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD
+ OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SLL SOS SRD SSP STN
+ SVC SYP SZL THB TJS TMT TND TOP TRL TTD TWD TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XAG XAU XCD XCG
+ XDR XOF XPD XPF XPT XSU XTS XXX YER ZAR ZMW ZWG ZWL
+`.trim().replace(/\s+/g,'|');
+const foreignCurrency=String.raw`(?:(?<![A-Z])(?:${currencyCodes}|DOLAR(?:I)?|DOLLARS?|EUROS?|AVRO|DOVIZ)(?![A-Z])|(?!₺)\p{Sc})`;
+const tryCurrency=String.raw`(?:(?<![A-Z])(?:TL|TRY)(?![A-Z])|₺)`;
+const currency=String.raw`(?:${tryCurrency}|${foreignCurrency})`;
+const unit=String.raw`(?:\(\s*${currency}\s*\)|${currency})(?:[ \t]+KARSILIGI)?`;
+const decimalAmount=String.raw`(?<![\d.,])(?:${enMoney}|${trMoney})(?![\d.,])`;
+const annotatedNumber=String.raw`(?:${decimalAmount}|(?<![\d.,])[+-]?\d+(?![\d.,]))`;
+const foreignPattern=new RegExp(foreignCurrency,'iu');
+const currencyPattern=new RegExp(currency,'iu');
+const tryUnitPattern=new RegExp(tryCurrency,'iu');
+const tryPattern=new RegExp(String.raw`^\(?\s*${tryCurrency}`,'iu');
+const decimalPattern=new RegExp(decimalAmount);
+const currencyHeading=/^(?:(?:EKSTRE|HESAP)\s+)?(?:PARA\s+BIRIMI|DOVIZ\s+CINSI|CURRENCY)\b/i;
+const currencyError=()=>Error('Ekstre tutarının para birimi belirsiz veya TRY karşılığı okunamadı; kısmi kayıt yapılmadı.');
+
+function annotatedTry(field,pattern,isQ,requireTry=false){
+ // QNB also uses PEN as a legacy extraction of Peşin before an amount.
+ const prefix=isQ?String.raw`(?!PEN\b)${unit}`:unit;
+ const pairs=[...field.matchAll(new RegExp(String.raw`(${prefix})[ \t:]*(${annotatedNumber})|(${annotatedNumber})[ \t]*(${unit})`,'giu'))];
+ const firstDecimal=field.search(decimalPattern);
+ if(!pairs.length&&!requireTry&&(firstDecimal<0||!currencyPattern.test(field.slice(firstDecimal))))return null;
+
+ const first=pairs[0];
+ if(!first)throw currencyError();
+ const beforeFirst=field.slice(0,first.index);
+ const unpairedUnit=new RegExp(String.raw`${prefix}[\s()/|:;-]*$`,'iu');
+ if(decimalPattern.test(beforeFirst)||unpairedUnit.test(beforeFirst))throw currencyError();
+ let end=first.index,selected=null,foreign=false;
+ const validAmount=new RegExp('^(?:'+pattern+')$');
+ for(const pair of pairs){
+  if((pair!==first&&pair.index===end)||!/^[\s()/|;-]*$/.test(field.slice(end,pair.index)))throw currencyError();
+  end=pair.index+pair[0].length;
+  const [,before,prefixed,suffixed,after]=pair;
+  if(!tryPattern.test(before??after)){foreign=true;continue;}
+  const value=prefixed??suffixed;
+  if(selected||!validAmount.test(value))throw currencyError();
+  selected={index:before?end-value.length:pair.index};
+ }
+ const remainder=field.slice(end);
+ if(!selected||currencyPattern.test(remainder)||((foreign||requireTry||isQ)&&decimalPattern.test(remainder)))throw currencyError();
+ return {...selected,foreign,start:first.index};
+}
+
+function headerAmount(t,labels,pattern,isQ,requireTry){
+ const label=t.match(new RegExp(String.raw`(?:^|\n)[ \t]*(?:${labels})\b([^\r\n]*)`,'i'));
  if(!label)return {value:null,present:false};
- const token=t.slice(label.index+label[0].length).match(new RegExp('^('+pattern+')(?![\\d.,])'));
+ let field=label[1].trim().replace(/^:\s*/,'');
+ if(!field||new RegExp(String.raw`^${unit}\s*:?$`,'iu').test(field)){
+  const continuation=t.slice(label.index+label[0].length).match(/^\r?\n([^\r\n]+)/)?.[1]?.trim();
+  if(continuation&&!rowMatch(continuation))field+=' '+continuation;
+ }
+ const annotated=annotatedTry(field,pattern,isQ,requireTry);
+ if(annotated&&field.slice(0,annotated.start).trim())throw currencyError();
+ const valueField=field.slice(annotated?.index??0).trimStart();
+ const token=valueField.match(new RegExp(String.raw`^(${pattern})(?![\d.,])`));
+ if(!annotated&&token&&decimalPattern.test(valueField.slice(token[0].length)))throw currencyError();
  return {value:token?money(token[1]):null,present:true};
 }
+
 export function parseStatement(text){return parseStatementRows(text);}
 
 function parseStatementRows(text,privateIdentities){
@@ -93,10 +155,19 @@ function parseStatementRows(text,privateIdentities){
  const yapiPoints=/^World\s*puan\s+(?:Detaylari|Islemleriniz|Hareketleri)\b/i;
  const boundary=isQ?qnbPoints:yapiPoints;
  const rowStop=new RegExp('^(?:'+previousLabels+'|'+qnbCarryover+'|'+debtLabels+'|'+cutLabel+'|'+dueLabel+')\\b','i');
- for(let i=0;i<lines.length;i++){
+ const limit=lines.findIndex((line,i)=>boundary.test(line.trim())||boundary.test(line.trim()+' '+(lines[i+1]?.trim()??'')));
+ const movementEnd=limit<0?lines.length:limit;
+ const onlyCurrency=new RegExp(String.raw`^\s*${foreignCurrency}\s*$`,'iu');
+ const foreignContext=lines.slice(0,movementEnd).some(line=>{
+  const heading=line.trim();
+  if(rowMatch(heading))return false;
+  if(currencyHeading.test(heading))return foreignPattern.test(heading)||!tryUnitPattern.test(heading);
+  return foreignPattern.test(heading)&&(onlyCurrency.test(heading)||rowStop.test(heading)||/\b(?:TUTAR|ISLEM\s+TARIHI|HESAP\s+OZETI|EKSTRE)\b/i.test(heading));
+ });
+ let foreignMovement=false,implicitMovement=false;
+ for(let i=0;i<movementEnd;i++){
   const line=lines[i].trim().replace(/\s+/g,' ');
   const nextLine=lines[i+1]?.trim();
-  if(boundary.test(line)||boundary.test(line+' '+(nextLine??'')))break;
   const m=rowMatch(line);if(!m)continue;
   const d=date(...m.slice(1,4));if(!d)throw Error('Ekstrede geçersiz işlem tarihi var; kısmi kayıt yapılmadı.');
   let body=m[4]||'';
@@ -108,10 +179,19 @@ function parseStatementRows(text,privateIdentities){
   }
   const tokens=[...body.matchAll(new RegExp(moneyPattern,'g'))],rawTokens=[...rawBody.matchAll(new RegExp(moneyPattern,'g'))];
   if(!tokens.length||!rawTokens.length)throw Error('Tarihli bir işlem satırının tutarı okunamadı; kısmi kayıt yapılmadı.');
-  const token=isQ?tokens.at(-1):tokens[0],rawToken=isQ?rawTokens.at(-1):rawTokens[0];
+  const annotated=annotatedTry(body,pattern,isQ,foreignContext);
+  if(!annotated&&isQ&&tokens.length>1){
+   const between=body.slice(tokens[0].index+tokens[0][0].length,tokens[1].index);
+   if(tokens.length!==2||!/^\s+al(?:is)?v\s+ind\s+$/i.test(between))throw currencyError();
+  }
+  foreignMovement ||= annotated?.foreign===true;
+  implicitMovement ||= annotated===null;
+  const index=annotated?tokens.findIndex(token=>token.index===annotated.index):isQ?tokens.length-1:0;
+  if(index<0||(annotated&&(tokens.length!==rawTokens.length||tokens[index][0]!==rawTokens[index][0])))throw currencyError();
+  const token=tokens[index],rawToken=annotated?rawTokens[index]:isQ?rawTokens.at(-1):rawTokens[0];
   const semanticDesc=body.slice(0,token.index).trim(),tail=body.slice(token.index+token[0].length);
   const legacyTokens=[...legacyBody.matchAll(new RegExp(moneyPattern,'g'))];
-  const legacyToken=isQ?legacyTokens.at(-1):legacyTokens[0];
+  const legacyToken=annotated?legacyTokens[index]:isQ?legacyTokens.at(-1):legacyTokens[0];
   const oldDesc=legacyBody.slice(0,legacyToken?.index??token.index).trim();
   const sourceDesc=maskPaymentIdentifiers(rawBody.slice(0,rawToken.index).trim());
   const afterAmount=tail.match(/^\s*(\d{1,3}\/\d{1,3})(?:\s|$)/)?.[1];
@@ -133,7 +213,11 @@ function parseStatementRows(text,privateIdentities){
   rows.push({date:d,period,desc,sourceDesc,amount:Math.abs(n),kind,category:isPayment?'Kart ödemesi':categorize(desc),installment:inst,importKey:key+'|'+count});
  }
  if(!rows.length)throw Error('İşlem satırları okunamadı. Metin içeren banka PDF’i seç.');
- const previous=headerAmount(t,isQ?previousLabels+'|'+qnbCarryover:previousLabels,pattern),statement=headerAmount(t,debtLabels,pattern),due=findDate(t,dueLabel),totals={expenses:0,payments:0,refunds:0},missing=[],reasons=[];
+ if(foreignMovement&&implicitMovement)throw currencyError();
+ const requireTry=foreignContext||foreignMovement;
+ const previous=headerAmount(t,isQ?previousLabels+'|'+qnbCarryover:previousLabels,pattern,isQ,requireTry);
+ const statement=headerAmount(t,debtLabels,pattern,isQ,requireTry);
+ const due=findDate(t,dueLabel),totals={expenses:0,payments:0,refunds:0},missing=[],reasons=[];
  for(const r of rows){
   const field=r.kind==='expense'?'expenses':r.kind==='cardPayment'?'payments':'refunds';
   totals[field]=addCents(totals[field],r.amount);
