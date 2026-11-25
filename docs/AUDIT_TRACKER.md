@@ -9,10 +9,10 @@ All entries OPEN at baseline: 1 P0, 5 P1, 11 P2, 7 P3. Severity follows the full
 | D01 | P0 | MainActivity/app: corrupt slots 1/2, valid slot 3 inaccessible; external restore overwrites last good recovery | Real SQLite recovery succeeds; last good bytes protected, failed writes atomic | CLOSED (Phase 1A) |
 | D02 | P1 | Failed load exports valid-looking empty JSON | Invalid load blocks ordinary export; valid empty wallet still exports | CLOSED (Phase 1A) |
 | D04 | P2 | Missing export buffer after Activity recreation can truncate target | Check payload before opening target; existing bytes unchanged | CLOSED (Phase 1A) |
-| D03 | P2 | Ordinary stale save overwrites newer budget | Stale write rejected safely; current data unchanged | OPEN |
-| D05 | P2 | Demo replaces saved budget/category in otherwise empty wallet | Preserve all pre-existing settings or require explicit safe separate demo | OPEN |
-| D06 | P2 | Duplicate subscription/statement IDs accepted in backup | Reject ambiguous identifiers without changing existing wallet | OPEN |
-| F-B5 | P2 | Expense with inappropriate target creates phantom cash on restore | Validate kind/target relationships; safe reject or explicit repair | OPEN |
+| D03 | P2 | Ordinary stale save overwrites newer budget | Stale write rejected safely; current data unchanged | CLOSED (Phase 1B) |
+| D05 | P2 | Demo replaces saved budget/category in otherwise empty wallet | Preserve all pre-existing settings or require explicit safe separate demo | CLOSED (Phase 1B) |
+| D06 | P2 | Duplicate subscription/statement IDs accepted in backup | Reject ambiguous identifiers without changing existing wallet | CLOSED (Phase 1B) |
+| F-B5 | P2 | Expense with inappropriate target creates phantom cash on restore | Validate kind/target relationships; safe reject or explicit repair | CLOSED (Phase 1B) |
 | F-B3 | P1 | USD-only QNB statement verified as TRY | No unsupported/ambiguous currency written as TRY; test explicit TRY equivalents | OPEN |
 | F-B2 | P1 | Included post-cut-date row counted again (100 -> 200 TL) | Flag date inconsistency; do not count statement-included identity twice | OPEN |
 | F-S1 | P1 | Future manual payment reduces today's balance/debt | Define actual-vs-planned date policy; no premature realized payment | OPEN |
@@ -38,6 +38,21 @@ All entries OPEN at baseline: 1 P0, 5 P1, 11 P2, 7 P3. Severity follows the full
 - **D01** — Android 35 restored the synthetic 74,325-kuruş wallet after Activity recreation, preserved the readable copy from either backup slot and rolled back every slot after an injected write failure. [Android evidence](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45511972641/job/138861706070)
 - **D02** — WebView distinguished missing SQLite rows from empty or unreadable records. The browser recovery regression verified that invalid loads blocked export and a valid empty wallet could be exported. [Android evidence](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45511972641/job/138861706070) · [Browser evidence](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45511972641/job/138861705865)
 - **D04** — The Android 35 regression delivered a picker result after Activity recreation and verified that the existing destination retained every byte. [Android evidence](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45511972641/job/138861706070)
+
+## Phase 1B acceptance
+
+[PR #28](https://github.com/witcher46/ekstre-ajani-android/pull/28) merged at `5cc79c53022e2db86548d5453c7c18424b6ddd94` with the same tree as tested candidate `3fb31fa0fb672116951be5a5278240e77991ead1`. Owner authorized merge only. [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45519563048/job/138887691706) (263/263 Node tests; legacy optional target and F-B5 regressions passed) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45519563048/job/138887691159) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45519563064/job/138887690527).
+
+- D03: native staleOrdinaryWritePreservesEverySnapshot passed.
+- D05: demo is restricted to first-ever unsaved wallet; CI passed on the candidate.
+- D06: duplicateBackupIdsPreserveEverySnapshot passed.
+- F-B5: invalidBackupTargetPreservesEverySnapshot and Node phantom cash regression passed; inert legacy metadata remains readable.
+
+These are code/CI closures, not physical-device or production release acceptance.
+
+## Phase 2 scope
+
+First slice F-B3 only: reproduce USD-only QNB false TRY verification; fail closed for unsupported/ambiguous currency, retain explicitly supported TRY equivalents and existing reconciliation/backup contracts. F-B2, F-S1, F-B1 and F-B4 remain OPEN. No bank-specific real data committed.
 
 ## Release gates still open
 - Valid reconciliation approval/history and freshness with complete synthetic independent-source inputs.

@@ -116,3 +116,77 @@ test('wrapped raw bank descriptions retain their original text',()=>{
  assert.equal(p.rows[0].desc,'SENTETİK ÇİÇEK ŞUBE PEŞİN');
  assert.equal(p.rows[0].importKey,'["QNB","2026-10","2026-10-01","SENTETIK CICEK SUBE PESIN",1350,""]|1');
 });
+
+
+test('QNB rejects USD-only debt and movements before producing a TRY preview',()=>{
+ const headers='Önceki Dönem Borcu: 0.00 USD\nDönem Borcu: 100.00 USD';
+ assert.throws(()=>parseStatement(qnb('01/10/2026 SENTETİK MARKET 100.00 USD',headers)),/para birimi/i);
+});
+
+test('QNB rejects ambiguous movement and debt currency even when the numbers reconcile',()=>{
+ const row='01/10/2026 SENTETİK MARKET 100.00';
+ const headers='Önceki Dönem Borcu: 0.00\nDönem Borcu: 100.00';
+ const currencyCases=[
+  qnb(row+' EUR',headers),
+  qnb(row.replace('100.00','100.00USD'),headers),
+  qnb(row+' $35.00 TL',headers),
+  qnb(row+' 3500.00',headers),
+  qnb(row,headers.replace('100.00','100.00 3500.00')),
+  qnb(row,'Currency: USD\n'+headers),
+  qnb(row,'Ekstre Para Birimi: TRY / USD\n'+headers),
+  qnb(row+' USD 3500.00',headers),
+  qnb(row+' TL USD',headers),
+  qnb(row+' TRY 3500.00 TL',headers),
+  qnb(row,headers.replace('100.00','100.00 GBP')),
+  qnb(row,headers.replace('100.00','100.00\nUSD')),
+  qnb(row,'Ekstre Para Birimi: USD\n'+headers),
+  qnb(row,headers+'\nİşlem Tarihi Açıklama Tutar (USD) Tutar (TL)'),
+  qnb(row+'\nUSD',headers),
+ ];
+ for(const text of currencyCases)assert.throws(()=>parseStatement(text),/para birimi/i,text);
+});
+
+test('QNB verifies only the explicitly labeled TRY amounts in mixed-currency fields',()=>{
+ const headers='Önceki Dönem Borcu (TL): 0.00\nDönem Borcu: 100.00 USD / TL karşılığı: 3,500.00';
+ for(const body of ['100.00 USD 3,500.00 TL','USD 100.00 / TRY 3,500.00','3,500.00 TRY / USD 100.00','100.00 USD (TL karşılığı: 3,500.00)']){
+  const p=parseStatement(qnb('01/10/2026 SENTETİK MARKET '+body,headers));
+  assert.equal(p.rows[0].amount,350000);
+  assert.equal(p.debt,350000);
+  assert.equal(p.reconciliation.status,'verified');
+  assert.equal(p.reconciliation.difference,0);
+ }
+});
+
+test('QNB amount annotations preserve the raw description, installment and legacy identity',()=>{
+ const headers='Önceki Dönem Borcu (TL): 0.00\nDönem Borcu (TL): 100.00';
+ const description='SENTETİK  ÇİÇEK PE(cid:1)N';
+ const variants=[
+  '100.00 01/03','100.00 TL 01/03','TL 100.00 01/03',
+  '100.00 USD / TL karşılığı: 100.00 01/03','TL 100.00 / USD 100.00 01/03',
+  '100.00 USD (TL karşılığı: 100.00) 01/03',
+  '(USD 100.00 / TL 100.00) 01/03',
+ ];
+ for(const variant of variants){
+  const p=parseStatement(qnb('01/10/2026 '+description+' '+variant,headers));
+  const {amount,kind,desc,sourceDesc,installment,importKey}=p.rows[0];
+  assert.deepEqual({amount,kind,desc,sourceDesc,installment,importKey},{
+   amount:10000,kind:'expense',desc:'SENTETİK ÇİÇEK PEŞİN',sourceDesc:description,installment:'01/03',
+   importKey:'["QNB","2026-10","2026-10-01","SENTETIK CICEK PESIN",10000,"01/03"]|1',
+  },variant);
+ }
+});
+
+test('QNB classifies annotated card payments and refunds by their description and selected TRY sign',()=>{
+ const headers='Önceki Dönem Borcu (TL): 100.00\nDönem Borcu (TL): 75.00';
+ const p=parseStatement(qnb('01/10/2026 ÖDEME İNTERNET TL 20.00 / USD 100.00\n02/10/2026 SENTETİK MARKET 100.00 USD / TL karşılığı: -5.00',headers));
+ assert.deepEqual(p.rows.map(({desc,kind,amount})=>[desc,kind,amount]),[
+  ['ÖDEME İNTERNET','cardPayment',2000],['SENTETİK MARKET','refund',500],
+ ]);
+ assert.equal(p.reconciliation.status,'verified');
+});
+
+test('Yapı Kredi keeps the installment before a labeled amount block',()=>{
+ const p=parseStatement('YAPI VE KREDİ\nHesap Özeti Tarihi: 05.10.2026\nÖnceki Hesap Özeti Borcu (TL): 0,00\nHesap Özeti Borcu (TL): 100,00\n01.10.2026 SENTETİK MAĞAZA 01/03 TL 100,00');
+ const row=p.rows[0];
+ assert.deepEqual([row.desc,row.sourceDesc,row.installment,row.amount],['SENTETİK MAĞAZA','SENTETİK MAĞAZA 01/03','01/03',10000]);
+});

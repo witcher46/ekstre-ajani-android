@@ -112,3 +112,38 @@ test('Yapı Kredi does not infer an installment from a merchant reference', () =
   const text = yapi.replace('SENTETIK MARKET 100,00', 'SENTETIK MARKET REF 1/2 100,00');
   assert.equal(parseStatement(text).rows[0].installment, '');
 });
+
+test('reimporting equivalent QNB amount spellings retains the original transaction and edits', () => {
+  const original = parseStatement(qnb.replace('SENTETIK MARKET 100.00', 'SENTETIK MARKET 100.00 01/03'));
+  const initial = importStatement(wallet(), original, 'card');
+  const edited = updateTransaction(initial, {
+    ...initial.transactions[0], desc: 'Sentetik düzenleme', category: 'Ulaşım', note: 'Sentetik not',
+  });
+  const priorRows = new Map(edited.transactions.map(row => [row.id, row]));
+  const mixed = qnb.replace('Borcu: 100.00', 'Borcu (TL): 100.00').replace('Borcu: 255.00', 'Borcu (TL): 255.00')
+    .replace('85.00 2/6', '85.00 TL 2/6').replace('-10.00', '-10.00 TL').replace('TESEKKUR 20.00', 'TESEKKUR 20.00 TL');
+  for (const [text, amount] of [
+    [qnb, '100.00 TL'], [qnb, 'TL 100.00'],
+    [mixed, '100.00 USD / TL karşılığı: 100.00'], [mixed, 'TL 100.00 / USD 100.00'],
+  ]) {
+    const parsed = parseStatement(text.replace('SENTETIK MARKET 100.00', 'SENTETIK MARKET '+amount+' 01/03'));
+    assert.equal(parsed.reconciliation.status, 'verified');
+    const replay = importStatement(edited, parsed, 'card');
+    assert.equal(replay.transactions.length, edited.transactions.length);
+    assert.deepEqual(new Map(replay.transactions.map(row => [row.id, row])), priorRows, amount);
+  }
+});
+
+test('a historical QNB identity with a currency label in the saved description still requires review', () => {
+  const corrected = parseStatement(qnb.replace('SENTETIK MARKET 100.00', 'SENTETIK MARKET TL 100.00 01/03'));
+  const historical = structuredClone(corrected);
+  Object.assign(historical.rows[0], {
+    desc: 'SENTETIK MARKET TL',
+    sourceDesc: 'SENTETIK MARKET TL',
+    importKey: '["QNB","2026-10","2026-10-01","SENTETIK MARKET TL",10000,"01/03"]|1',
+  });
+  const state = importStatement(wallet(), historical, 'card');
+  const before = backupText(state);
+  assert.throws(() => importStatement(state, corrected, 'card'), /tekrar aktarımı inceleme/);
+  assert.equal(backupText(state), before);
+});
