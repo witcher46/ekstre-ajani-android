@@ -149,3 +149,81 @@ test('future installments remain separate from today’s balance and expense',()
   assert.match(html,/Gelecek ayların taksitleri güncel kart borcuna/);
   assert.equal(C.summary(s,'2026-10').net,0);
 });
+
+test('a QNB purchase already included in statement debt is not a post-cut purchase',()=>{
+  const parsed=parseStatement([
+    'QNB', 'Hesap Kesim Tarihi: 05/10/2026',
+    'Önceki Dönem Borcu: 0.00', 'Dönem Borcu: 100.00',
+    '06/10/2026 SENTETIK MARKET 100.00',
+  ].join('\n'));
+  const imported=C.importStatement(base(),parsed,'card');
+  const [row]=imported.transactions;
+  assert.equal(row.date,'2026-10-06');
+  assert.equal(row.statement,imported.statements[0].id);
+
+  const assertCard=(state,debt,expenses)=>{
+    const card=W.cardDetail(state,'card');
+    assert.deepEqual([card.current,card.postCutExpenses],[debt,expenses]);
+    const html=htmlFor(state);
+    for(const [stat,value] of [['cardDebt',debt],['postCutExpenses',expenses]]){
+      const metric=html.match(new RegExp('data-stat="'+stat+'">(.*?)</b>'));
+      assert.ok(metric?.[1].includes(C.formatMoney(value)),stat);
+    }
+    assert.match(html,/kesim tarihinden sonra olan/i);
+  };
+  assertCard(imported,10_000,0);
+  assert.match(V.statementView(viewContext(imported),row.statement),/kesim tarihinden sonra olan/i);
+  const added=C.addTransaction(imported,movement('new','expense','2026-10-07',2_500));
+  assertCard(added,12_500,2_500);
+});
+
+test('a confirmed statement purchase keeps its identity through linked manual and CSV rows',()=>{
+  const parsed=parseStatement('QNB\nHesap Kesim Tarihi: 05/10/2026\nDönem Borcu: 100.00\n06/10/2026 SENTETIK MARKET 100.00');
+  const manual=movement('manual','expense','2026-10-06',10_000,{desc:'SENTETIK MARKET'});
+  const imported=C.importStatement(C.addTransaction(base(),manual),parsed,'card');
+  const pdf=imported.transactions.find(row=>row.source==='pdf');
+  const linked=C.resolveCandidate(imported,pdf.id,'link',manual.id);
+  const withCsv=C.importCsv(linked,[{
+    date:'2026-10-06',period:'2026-10',desc:'SENTETIK MARKET',cents:10_000,kind:'gider',category:'Market / Gıda',
+  }],'card');
+  const csv=withCsv.transactions.find(row=>row.source==='csv');
+  const restored=W.normalizeWallet(C.readBackup(C.backupText(C.resolveCandidate(withCsv,csv.id,'link',manual.id))));
+  const card=W.cardDetail(restored,'card');
+  assert.deepEqual([card.current,card.postCutExpenses],[10_000,0]);
+  assert.equal(card.movements.length,1);
+  assert.equal(card.movements[0].category,manual.category);
+  assert.deepEqual(card.movements[0].sources.map(row=>row.id),[pdf.id,csv.id]);
+  assert.equal(card.movements[0].sources[0].date,'2026-10-06');
+});
+
+test('included post-cut refunds and payments do not change the statement balance again',()=>{
+  const parsed=parseStatement([
+    'QNB', 'Hesap Kesim Tarihi: 05/10/2026',
+    'Önceki Dönem Borcu: 200.00', 'Dönem Borcu: 150.00',
+    '06/10/2026 ODEME 35.00', '06/10/2026 SENTETIK IADE -15.00',
+  ].join('\n'));
+  const bank=movement('bank-payment','payment','2026-10-07',3_500,{account:'bank',target:'card'});
+  const imported=C.importStatement(C.addTransaction(base(),bank),parsed,'card');
+  assert.equal(parsed.reconciliation.status,'verified');
+  const amounts=state=>{
+    const card=W.cardDetail(state,'card');
+    return [card.current,card.statementRemaining,card.paidAfterCut,card.postCutRefunds];
+  };
+  assert.deepEqual(amounts(imported),[15_000,15_000,0,0]);
+  const payment=imported.transactions.find(row=>row.kind==='cardPayment');
+  const linked=C.resolveCandidate(imported,bank.id,'link',payment.id);
+  assert.deepEqual(amounts(linked),[15_000,15_000,0,0]);
+  const anchor={accountId:'bank',date:'2026-10-05',amountCents:2_000_000};
+  assert.equal(C.balanceAt(linked,'bank','2026-10-06',{anchor}).amountCents,2_000_000);
+  assert.equal(C.balanceAt(linked,'bank','2026-10-07',{anchor}).amountCents,1_996_500);
+});
+
+test('a newer statement without debt does not hide purchases from the older debt estimate',()=>{
+  const s=base();
+  s.statements=[statement('2026-10','2026-10-05',null,10_000)];
+  const parsed=parseStatement('QNB\nHesap Kesim Tarihi: 05/11/2026\n06/11/2026 SENTETIK MARKET 25.00');
+  const imported=C.importStatement(s,parsed,'card');
+  const card=W.cardDetail(imported,'card');
+  assert.equal(card.currentAnchor.id,'card|2026-10');
+  assert.deepEqual([card.current,card.statementDebt,card.postCutExpenses],[12_500,null,0]);
+});

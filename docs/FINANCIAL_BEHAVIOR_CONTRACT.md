@@ -29,6 +29,8 @@ Test ve örneklerde yalnızca sentetik veri kullanılmalıdır.
 
 Manuel taksit planında ilk taksit tarihini kullanıcı seçer. PDF’deki taksit giderinin ayı, bankanın bildirdiği ekstre döneminden alınır. Satırdaki kaynak işlem tarihi korunur. Belgedeki dönem borcu, kayıtlardan hesaplanan güncel borç ve gelecekteki taksitler ayrı gösterilir. Mevcut Android borç tahmini, manuel plandaki gelecek taksitleri tarihleri geldiğinde işler.
 
+Bir hareket, borç tahminine dayanak olan ekstreye dahilse kaynak işlem tarihi kesimden sonra olsa bile borca ikinci kez eklenmez veya borçtan ikinci kez düşülmez. Onaylanmış kaynak bağlantıları aynı hareketin kimliğini korur. Ekran, tarih tutarsızlığını gösterir ve kaynaktaki tarihi korur. Son ekstrede dönem borcu bilinmiyorsa tahmin önceki bilinen borçtan başlayabilir. Son ekstreye dahil bir hareket, o kesimden sonraki yeni hareket toplamına girmez.
+
 ## Ürün kararı bekleyen alanlar
 
 Bu ortak sözleşme aşağıdaki konularda henüz platformlar arası politika tanımlamaz. Bir uygulamadaki mevcut kod davranışı diğer platformlar için ürün kararı sayılmaz; bu başlıklarda sessiz varsayım veya otomatik uyumlaştırma yapılmamalıdır.

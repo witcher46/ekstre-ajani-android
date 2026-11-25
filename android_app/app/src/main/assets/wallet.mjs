@@ -85,8 +85,8 @@ function sourceGroups(s){
 
 export function cardDetail(s,accountId){
  const status=C.cardStatus(s,accountId),sources=sourceGroups(s),movements=s.transactions.filter(t=>C.effective(t)&&cardId(t)===accountId).map(t=>({...t,cardDate:sources.dateOf(t),sources:sources.aliases(t.id).map(r=>({...r}))})).sort((a,b)=>b.cardDate.localeCompare(a.cardDate));
- const today=C.today();
- const afterCut=status.latest?movements.filter(t=>t.cardDate>status.latest.cut&&(!t.installmentPlan||t.cardDate<=today)):[];
+ const today=C.today(),isAfterCut=C.cardAfterCut(s,sources.dateOf);
+ const afterCut=status.latest?movements.filter(t=>isAfterCut(t,status.latest)&&(!t.installmentPlan||t.cardDate<=today)):[];
  return {...status,debt:C.positiveCents(status.current),credit:C.positiveCents(-status.current),postCutExpenses:total(afterCut.filter(t=>t.kind==='expense')),postCutRefunds:total(afterCut.filter(t=>t.kind==='refund')),unassignedPayments:movements.filter(t=>t.kind==='cardPayment'&&C.sourceOf(t)!=='manual'),movements,installments:installmentOverview(s,accountId)};
 }
 

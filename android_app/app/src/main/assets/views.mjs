@@ -146,10 +146,12 @@ function cardView(ctx,account) {
     '<span class="card-source-label">' + (latest ? 'Ekstre: ' + esc(latest.period) : 'Ekstre yok') + '</span></div>';
   if(latest){
     const {rowsByStatement,underReview} = statementGroups(state);
-    const status = statementStatus(latest,underReview.has(latest.id),rowsByStatement.get(latest.id)?.length ?? 0);
+    const rows = rowsByStatement.get(latest.id) || [];
+    const status = statementStatus(latest,underReview.has(latest.id),rows.length);
     const label = status.tone === 'verified' ? 'Ekstre toplamları doğrulandı' : status.label;
     const reconciliation = status.reason ? label + ' · ' + status.reason : label;
     html += '<p class="notice">' + esc(latest.bank || 'Banka bilinmiyor') + ' · ' + esc(reconciliation) + '</p>' +
+      statementDateWarning(latest,rows) +
       '<dl class="card-details">' +
       detail(ctx,'Hesap kesim tarihi',latest.cut) +
       detail(ctx,'Son ödeme tarihi',latest.due) +
@@ -356,6 +358,12 @@ function totalsList(ctx,totals,debt=undefined) {
   return `<dl class="statement-totals">${detail(ctx,'Harcama',totals.expenses,true)}${detail(ctx,'Ödeme',totals.payments,true)}${detail(ctx,'İade / indirim',totals.refunds,true)}${debt!==undefined?detail(ctx,'Dönem borcu',debt,true):''}</dl>`;
 }
 
+function statementDateWarning(statement,rows) {
+  return rows.some(row=>row.date>statement.cut)
+    ? '<p class="warning" role="status">Ekstrede işlem tarihi hesap kesim tarihinden sonra olan hareketler var. Kaynak tarihleri korundu.</p>'
+    : '';
+}
+
 function statementStatus(statement,pending,movementCount) {
   if (statement.reconciliationStatus === 'mismatch') return {label:'İnceleme gerekiyor',reason:'Belgedeki ekstre toplamları uyuşmuyor.'};
   if (Number.isSafeInteger(statement.importedMovementCount) && statement.importedMovementCount !== movementCount) {
@@ -390,6 +398,7 @@ export function statementView(ctx,id) {
     <p class="lead">${ctx.esc(accountName(ctx.state,statement.account))}</p>
     <section class="panel"><h2>Ekstre bilgileri</h2><p class="statement-status ${status.tone||''}">${status.label}</p>
       ${status.reason?`<p>${status.reason}</p>`:''}
+      ${statementDateWarning(statement,rows)}
       ${totalsList(ctx,statementTotals(rows),statement.debt??null)}
       <dl class="card-details">${detail(ctx,'Hesap kesimi',statement.cut)}${detail(ctx,'Son ödeme tarihi',statement.due)}${detail(ctx,'İçe aktarma tarihi',statement.imported)}</dl>
       <div class="actions"><button data-card-view="${ctx.esc(statement.account)}">Kredi kartını aç</button>${pending?'<button data-page="review">İnceleme kutusu</button>':''}</div>
@@ -424,6 +433,7 @@ export function importView(ctx,pending) {
         <button type="button" data-action="addImportCard">+ Kart ekle</button>
       </div>
       ${reconciliationPreview(ctx,pending)}
+      ${statementDateWarning(pending,rows)}
       <div class="preview-movements"><h3 id="preview-movement-title">Okunan hareketler</h3><div class="preview import-preview" role="region" aria-labelledby="preview-movement-title" tabindex="0">${rows.map((r,i) => `<article class="import-row"><div class="row"><div class="left"><strong>${esc(r.desc)}</strong><small>${esc(r.date)} · ${esc(kindNames[r.kind] || r.kind)}<br>${esc(r.category || 'Kategori belirlenmedi')}${r.installment ? ' · '+esc(r.installment) : ''}</small></div><b>${amount(ctx,r.amount)}</b></div><details class="raw-source"><summary>Orijinal banka açıklaması</summary><p>${esc(r.sourceDesc ?? r.desc)}</p></details>${['expense','refund'].includes(r.kind)?ctx.importCategoryOption(r.desc,r.category,i,ctx.importDraft.suggestions.get(i)):''}</article>`).join('') || noRows('Okunmuş hareket yok.')}</div></div>
       <p class="notice">Aynı kartın aynı dönemini tekrar aktarmak ekstre hareketlerini yeniler. Manuel kayıtlar korunur.</p>
       <div class="preview-actions"><button class="primary" data-action="confirmImport" ${blocked || !cards.length || !rows.length || (needsAcknowledgement && !ctx.importDraft.acknowledged) ? 'disabled' : ''}>Onayla ve kaydet</button><button data-action="cancelImport">Vazgeç</button></div>
