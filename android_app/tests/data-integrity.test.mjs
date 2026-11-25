@@ -393,7 +393,8 @@ test('equal rows sharing a CSV source ID are reviewed and replay preserves the d
   assert.equal(importCsv(dismissed,[row,row,row]).transactions.filter(t=>t.matchStatus==='pending').length,1);
 });
 
-test('a manual bank payment does not bridge unrelated PDF and CSV payment dates',()=>{
+test('a manual bank payment does not bridge unrelated PDF and CSV payment dates',t=>{
+  t.mock.timers.enable({apis:['Date'],now:new Date(2026,11,1,12)});
   const p=parseStatement('QNB\nHesap Kesim Tarihi: 05/10/2026\n01/10/2026 ODEME 50.00');
   let s=C.importStatement(wallet(),p,'card');
   s=W.attachPaymentSource(s,s.transactions[0].id,'bank',{paidOn:'2026-11-30'});
