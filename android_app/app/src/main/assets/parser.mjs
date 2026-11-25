@@ -81,12 +81,12 @@ const currencyCodes=`
  SVC SYP SZL THB TJS TMT TND TOP TRL TTD TWD TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XAG XAU XCD XCG
  XDR XOF XPD XPF XPT XSU XTS XXX YER ZAR ZMW ZWG ZWL
 `.trim().replace(/\s+/g,'|');
-const foreignCurrency=String.raw`(?:(?<![A-Z])(?:${currencyCodes}|DOLAR(?:I)?|DOLLARS?|EUROS?|AVRO|DOVIZ)(?![A-Z])|(?!₺)\p{Sc})`;
+const foreignCurrency=String.raw`(?:(?<![A-Z])(?:${currencyCodes}|DOLAR(?:I)?|DOLLARS?|EUROS?|AVRO|D[OÖ]V[Iİı]Z)(?![A-Z])|(?!₺)\p{Sc})`;
 const tryCurrency=String.raw`(?:(?<![A-Z])(?:TL|TRY)(?![A-Z])|₺)`;
 const currency=String.raw`(?:${tryCurrency}|${foreignCurrency})`;
-const unit=String.raw`(?:\(\s*${currency}\s*\)|${currency})(?:[ \t]+KARSILIGI)?`;
+const unit=String.raw`(?:\(\s*${currency}\s*\)|${currency})(?:\s+KAR[SŞ][Iİı]L[Iİı][GĞ][Iİı])?`;
 const decimalAmount=String.raw`(?<![\d.,])(?:${enMoney}|${trMoney})(?![\d.,])`;
-const annotatedNumber=String.raw`(?:${decimalAmount}|(?<![\d.,])[+-]?\d+(?![\d.,]))`;
+const annotatedNumber=String.raw`(?:${decimalAmount}|(?<![\d.,/])[+-]?\d+(?![\d.,/]))`;
 const foreignPattern=new RegExp(foreignCurrency,'iu');
 const currencyPattern=new RegExp(currency,'iu');
 const tryUnitPattern=new RegExp(tryCurrency,'iu');
@@ -98,7 +98,7 @@ const currencyError=()=>Error('Ekstre tutarının para birimi belirsiz veya TRY 
 function annotatedTry(field,pattern,isQ,requireTry=false){
  // QNB also uses PEN as a legacy extraction of Peşin before an amount.
  const prefix=isQ?String.raw`(?!PEN\b)${unit}`:unit;
- const pairs=[...field.matchAll(new RegExp(String.raw`(${prefix})[ \t:]*(${annotatedNumber})|(${annotatedNumber})[ \t]*(${unit})`,'giu'))];
+ const pairs=[...field.matchAll(new RegExp(String.raw`(${prefix})[\s:]*(${annotatedNumber})|(${annotatedNumber})\s*(${unit})`,'giu'))];
  const firstDecimal=field.search(decimalPattern);
  if(!pairs.length&&!requireTry&&(firstDecimal<0||!currencyPattern.test(field.slice(firstDecimal))))return null;
 
@@ -116,11 +116,13 @@ function annotatedTry(field,pattern,isQ,requireTry=false){
   if(!tryPattern.test(before??after)){foreign=true;continue;}
   const value=prefixed??suffixed;
   if(selected||!validAmount.test(value))throw currencyError();
-  selected={index:before?end-value.length:pair.index};
+  selected={index:before?end-value.length:pair.index,value};
  }
  const remainder=field.slice(end);
  if(!selected||currencyPattern.test(remainder)||((foreign||requireTry||isQ)&&decimalPattern.test(remainder)))throw currencyError();
- return {...selected,foreign,start:first.index};
+ const closing=remainder.match(/^(?:\s*\))+/)?.[0]??'';
+ const opening=closing?beforeFirst.match(/\(\s*$/)?.[0]??'':'';
+ return {...selected,foreign,start:first.index-opening.length,end:end+closing.length};
 }
 
 function headerAmount(t,labels,pattern,isQ,requireTry){
@@ -189,11 +191,23 @@ function parseStatementRows(text,privateIdentities){
   const index=annotated?tokens.findIndex(token=>token.index===annotated.index):isQ?tokens.length-1:0;
   if(index<0||(annotated&&(tokens.length!==rawTokens.length||tokens[index][0]!==rawTokens[index][0])))throw currencyError();
   const token=tokens[index],rawToken=annotated?rawTokens[index]:isQ?rawTokens.at(-1):rawTokens[0];
-  const semanticDesc=body.slice(0,token.index).trim(),tail=body.slice(token.index+token[0].length);
-  const legacyTokens=[...legacyBody.matchAll(new RegExp(moneyPattern,'g'))];
-  const legacyToken=annotated?legacyTokens[index]:isQ?legacyTokens.at(-1):legacyTokens[0];
-  const oldDesc=legacyBody.slice(0,legacyToken?.index??token.index).trim();
-  const sourceDesc=maskPaymentIdentifiers(rawBody.slice(0,rawToken.index).trim());
+  const semanticDesc=body.slice(0,annotated?.start??token.index).trim();
+  const tail=body.slice(annotated?.end??token.index+token[0].length);
+  let rawStart=rawToken.index,legacyStart;
+  if(annotated){
+   // Re-read the block in each representation so glyph cleanup never shifts the raw source slice.
+   const rawAmount=annotatedTry(rawBody,pattern,isQ,true);
+   const legacyAmount=annotatedTry(legacyBody,pattern,isQ,true);
+   if(rawAmount.index!==rawToken.index||legacyAmount.value!==token[0]||
+      rawAmount.foreign!==annotated.foreign||legacyAmount.foreign!==annotated.foreign)throw currencyError();
+   rawStart=rawAmount.start;
+   legacyStart=legacyAmount.start;
+  }else{
+   const legacyTokens=[...legacyBody.matchAll(new RegExp(moneyPattern,'g'))];
+   legacyStart=(isQ?legacyTokens.at(-1):legacyTokens[0])?.index??token.index;
+  }
+  const oldDesc=legacyBody.slice(0,legacyStart).trim();
+  const sourceDesc=maskPaymentIdentifiers(rawBody.slice(0,rawStart).trim());
   const afterAmount=tail.match(/^\s*(\d{1,3}\/\d{1,3})(?:\s|$)/)?.[1];
   const beforeAmount=semanticDesc.match(/\b(\d{1,3}\/\d{1,3})\s*(?:Taksit)?$/i);
   const explicitBefore=beforeAmount&&!/\b(?:REF(?:ERANS)?|SIPARIS(?:\s+KODU)?|NO)\s*[:#-]?\s*$/i.test(semanticDesc.slice(0,beforeAmount.index));

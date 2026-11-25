@@ -335,7 +335,7 @@ async function run() {
     }
 
     const equivalent=usdOnly.replace('0.00 USD','0.00 TL')
-      .replaceAll('100.00 USD','100.00 USD / TL karsiligi: 3500.00');
+      .replaceAll('100.00 USD','100.00 USD / TL karsiligi: 3500.00')+' 01/03';
     await choose();
     await complete(equivalent,await token());
     await preview.getByText('Toplamlar doğrulandı',{exact:true}).waitFor();
@@ -347,6 +347,22 @@ async function run() {
     const converted=afterCurrencyTests.statements.find(s=>s.period==='2027-01');
     assert.equal(converted.debt,350000);
     assert.equal(converted.reconciliationStatus,'verified');
+    const originalMovement=afterCurrencyTests.transactions.find(t=>t.period==='2027-01');
+    assert.equal(originalMovement.installment,'01/03');
+    assert.equal(originalMovement.sourceDesc,'SENTETIK DOVIZ MARKET');
+    const reversed=equivalent.replace(
+      'SENTETIK DOVIZ MARKET 100.00 USD / TL karsiligi: 3500.00',
+      'SENTETIK DOVIZ MARKET TL 3500.00 / USD 100.00');
+    const plain=equivalent.replaceAll('100.00 USD / TL karsiligi: 3500.00','3500.00');
+    for(const text of [reversed,plain]){
+      await page.evaluate(text=>window.onPdfText(text),text);
+      await preview.getByText('Toplamlar doğrulandı',{exact:true}).waitFor();
+      await cardPicker.selectOption('synthetic-card');
+      await save.click();
+      const movements=JSON.parse((await snapshot())[0]).transactions.filter(t=>t.period==='2027-01');
+      assert.deepEqual(movements,[originalMovement]);
+      assert.equal(await preview.count(),0);
+    }
     assert.deepEqual(errors,[]);
     console.log('Statement and expense chart journeys passed; '+checks+' responsive checks');
   } finally {
