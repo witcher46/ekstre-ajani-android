@@ -20,8 +20,9 @@ export function paymentRows(s,asOf=C.today()){
  const manuals=s.transactions.filter(t=>t.kind==='payment'&&bankMovement(t,asOf));
  const manualIds=new Set(manuals.map(t=>t.id));
  const candidates=new Set(manuals.flatMap(t=>t.matchCandidates??[]));
- return [...manuals,...s.transactions.filter(t=>t.kind==='cardPayment'&&C.effective(t)&&
-  !candidates.has(t.id)&&!t.matchCandidates?.some(id=>manualIds.has(id)))];
+ const documents=s.transactions.filter(t=>t.kind==='cardPayment'&&C.effective(t)&&
+  !candidates.has(t.id)&&!t.matchCandidates?.some(id=>manualIds.has(id)));
+ return [...manuals,...documents,...C.postedSourcesForFuturePayments(s,asOf).values()];
 }
 
 export function periodFigures(s,period,account){

@@ -293,6 +293,17 @@ export function removeExpenseCategory(s,category,{moveRulesTo,removeRules=false}
 export const sourceOf=t=>t.source||(t.statement?'pdf':t.csvKey?'csv':'manual');
 export const isFutureManualCardPayment=(t,asOf)=>t.kind==='payment'&&sourceOf(t)==='manual'&&t.date>asOf;
 export const effective=t=>!t.linkedTo&&t.matchStatus!=='pending';
+export function postedSourcesForFuturePayments(s,asOf){
+ const future=new Set(s.transactions.filter(t=>isFutureManualCardPayment(t,asOf)&&effective(t)).map(t=>t.id));
+ const posted=new Map();
+ if(!future.size)return posted;
+ for(const row of s.transactions){
+  if(!future.has(row.linkedTo)||row.kind!=='cardPayment'||row.date>asOf)continue;
+  const source=sourceOf(row);
+  if(source==='pdf'||(source==='csv'&&!posted.has(row.linkedTo)))posted.set(row.linkedTo,row);
+ }
+ return posted;
+}
 const cardAccount=t=>t.kind==='payment'?t.target:t.account;
 const effectKind=t=>['payment','cardPayment'].includes(t.kind)?'cardPayment':t.kind;
 const sameTerms=(a,b)=>cardAccount(a)===cardAccount(b)&&effectKind(a)===effectKind(b)&&a.amount===b.amount&&(!a.installment||!b.installment||a.installment===b.installment);
@@ -514,10 +525,13 @@ export function cardStatus(s,account,{asOf=today()}={}){
  const a=s.accounts.find(a=>a.id===(typeof account==='string'?account:account.id));if(!a||a.type!=='card')throw Error('Kredi kartı bulunamadı.');
  const latest=s.statements.filter(st=>st.account===a.id).sort((x,y)=>y.cut.localeCompare(x.cut))[0];
  const currentAnchor=s.statements.filter(st=>st.account===a.id&&st.debt!==null).sort((x,y)=>y.cut.localeCompare(x.cut))[0];
- const rows=s.transactions.filter(t=>effective(t)&&!isFutureManualCardPayment(t,asOf)),anchored=latest&&latest.debt!==null;
- const dateOf=cardDates(s),afterCut=cardAfterCut(s,dateOf);
+ const posted=postedSourcesForFuturePayments(s,asOf),anchored=latest&&latest.debt!==null;
+ const rows=s.transactions.filter(t=>effective(t)&&(!isFutureManualCardPayment(t,asOf)||posted.has(t.id)));
+ const cardDate=cardDates(s);
+ // Keep the canonical identity so the statement anchor still recognizes its linked payment.
+ const afterCut=cardAfterCut(s,t=>posted.get(t.id)?.date??cardDate(t));
  let current=currentAnchor?currentAnchor.debt:a.opening;
- for(const t of rows)if((!t.installmentPlan||dateOf(t)<=asOf)&&(!currentAnchor||afterCut(t,currentAnchor)))current=addCents(current,ledgerEffect(t,a));
+ for(const t of rows)if((!t.installmentPlan||cardDate(t)<=asOf)&&(!currentAnchor||afterCut(t,currentAnchor)))current=addCents(current,ledgerEffect(t,a));
  const paidAfterCut=anchored?rows.filter(t=>cardAccount(t)===a.id&&effectKind(t)==='cardPayment'&&afterCut(t,latest)).reduce((n,t)=>addCents(n,t.amount),0):0;
  return {current,statementDebt:latest?.debt??null,statementRemaining:anchored?positiveCents(addCents(latest.debt,-paidAfterCut)):null,paidAfterCut,latest:latest||null,currentAnchor:currentAnchor||null,pending:s.transactions.filter(t=>t.matchStatus==='pending'&&cardAccount(t)===a.id).length};
 }

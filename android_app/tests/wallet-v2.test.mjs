@@ -58,6 +58,50 @@ test('the manual payment cutoff leaves future expenses and confirmed bank dates 
  }
 });
 
+
+test('linked PDF and CSV payments keep their posted card effect while the legacy bank date is still future',async t=>{
+ const {reportRows,advancedReports}=await import('../app/src/main/assets/reports.mjs');
+ const at=day=>new Date(2026,10,day,12).getTime();
+ t.mock.timers.enable({apis:['Date'],now:at(25)});
+ const initial=C.importStatement(base(),pdf([],{debt:10000}),'card');
+ const bank=initial.accounts[0];bank.opening=100000;
+ const payment=manual({date:'2026-11-26',period:'2026-11',amount:4000});
+ const documentDate='2026-11-24',period='2026-11';
+ const document=imported({date:documentDate,period,amount:4000});
+ const sources=[
+  C.importStatement(initial,pdf([document],{cut:documentDate,period,debt:null}),'card'),
+  C.importCsv(initial,[{date:documentDate,period,desc:'Synthetic payment',cents:4000,kind:'odeme',
+   category:'Card payment',transactionId:'synthetic-csv-payment'}],'card'),
+  C.importStatement(initial,pdf([document],{cut:'2026-11-23',period,debt:6000}),'card'),
+ ];
+ function verify(state,debt,remaining,withdrawal,cardPayment,cardIds,bankIds){
+  const card=C.cardStatus(state,'card'),report=advancedReports(state,period).current;
+  assert.deepEqual({
+   bank:C.balance(state,bank),card:card.current,remaining:card.statementRemaining,cardPayment:report.cardPayments,
+   bankPayment:report.cardCashPayments,cashOut:report.cashOut,expense:report.netExpense,
+  },{bank:bank.opening-withdrawal,card:debt,remaining,cardPayment,bankPayment:withdrawal,cashOut:withdrawal,expense:0});
+  assert.deepEqual(reportRows(state,[period],{accountId:'card'}).map(row=>row.id),cardIds);
+  assert.deepEqual(reportRows(state,[period],{accountId:'bank'}).map(row=>row.id),bankIds);
+ }
+ for(const posted of sources){
+  t.mock.timers.setTime(at(25));
+  const [row]=posted.transactions;
+  const remaining=C.cardStatus(posted,'card').statementRemaining;
+  verify(posted,6000,remaining,0,4000,[row.id],[]);
+  const linked=C.resolveCandidate(C.addTransaction(posted,payment),payment.id,'link',row.id);
+  const restored=C.readBackup(C.backupText(linked));
+  assert.equal(restored.transactions.find(t=>t.id===row.id).date,documentDate);
+  assert.equal(restored.transactions.find(t=>t.id===row.id).linkedTo,payment.id);
+  assert.equal(restored.transactions.find(t=>t.id===payment.id).date,payment.date);
+  t.mock.timers.setTime(at(24));
+  verify(restored,6000,remaining,0,4000,[row.id],[]);
+  t.mock.timers.setTime(at(25));
+  verify(restored,6000,remaining,0,4000,[row.id],[]);
+  t.mock.timers.setTime(at(26));
+  verify(restored,6000,remaining,4000,4000,[payment.id],[payment.id]);
+ }
+});
+
 test('a newer unknown statement keeps the last known debt anchor for current debt only',()=>{
  let s=C.importStatement(base(),pdf([tx({id:undefined,date:'2026-10-01',amount:10000,importKey:'oct'})]),'card');
  s=C.importStatement(s,pdf([tx({id:undefined,date:'2026-11-01',period:'2026-11',amount:20000,importKey:'nov'})],{period:'2026-11',cut:'2026-11-05',due:null,debt:null}),'card');
