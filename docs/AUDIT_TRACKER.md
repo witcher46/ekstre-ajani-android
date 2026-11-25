@@ -6,9 +6,9 @@ All entries OPEN at baseline: 1 P0, 5 P1, 11 P2, 7 P3. Severity follows the full
 
 | ID | Priority | Scope / observed defect | Closure criterion | State |
 |---|---|---|---|---|
-| D01 | P0 | MainActivity/app: corrupt slots 1/2, valid slot 3 inaccessible; external restore overwrites last good recovery | Real SQLite recovery succeeds; last good bytes protected, failed writes atomic | OPEN |
-| D02 | P1 | Failed load exports valid-looking empty JSON | Invalid load blocks ordinary export; valid empty wallet still exports | OPEN |
-| D04 | P2 | Missing export buffer after Activity recreation can truncate target | Check payload before opening target; existing bytes unchanged | OPEN |
+| D01 | P0 | MainActivity/app: corrupt slots 1/2, valid slot 3 inaccessible; external restore overwrites last good recovery | Real SQLite recovery succeeds; last good bytes protected, failed writes atomic | CLOSED (Phase 1A) |
+| D02 | P1 | Failed load exports valid-looking empty JSON | Invalid load blocks ordinary export; valid empty wallet still exports | CLOSED (Phase 1A) |
+| D04 | P2 | Missing export buffer after Activity recreation can truncate target | Check payload before opening target; existing bytes unchanged | CLOSED (Phase 1A) |
 | D03 | P2 | Ordinary stale save overwrites newer budget | Stale write rejected safely; current data unchanged | OPEN |
 | D05 | P2 | Demo replaces saved budget/category in otherwise empty wallet | Preserve all pre-existing settings or require explicit safe separate demo | OPEN |
 | D06 | P2 | Duplicate subscription/statement IDs accepted in backup | Reject ambiguous identifiers without changing existing wallet | OPEN |
@@ -30,6 +30,14 @@ All entries OPEN at baseline: 1 P0, 5 P1, 11 P2, 7 P3. Severity follows the full
 | U10 | P3 | Review checkbox label below 48px target | Accessible full-row touch target | OPEN |
 | A01 | P3 | Missing structuredClone leaves blank startup | Capability check and actionable update notice | OPEN |
 | A02 | P3 | Backup/version docs stale | Accurate supported formats/version docs | OPEN |
+
+## Phase 1A acceptance
+
+[PR #27](https://github.com/witcher46/ekstre-ajani-android/pull/27) merged at `dc96a02a1a18c547f7508ff6ba507801acbc674d`. Candidate `2da9d0295117725f20525e51c06557c2d28dffa7` passed `verify`, `android` and `upgrade`. [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45511972641/job/138861705865) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45511972641/job/138861706070) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45511972654/job/138861705976)
+
+- **D01** — Android 35 restored the synthetic 74,325-kuruş wallet after Activity recreation, preserved the readable copy from either backup slot and rolled back every slot after an injected write failure. [Android evidence](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45511972641/job/138861706070)
+- **D02** — WebView distinguished missing SQLite rows from empty or unreadable records. The browser recovery regression verified that invalid loads blocked export and a valid empty wallet could be exported. [Android evidence](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45511972641/job/138861706070) · [Browser evidence](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45511972641/job/138861705865)
+- **D04** — The Android 35 regression delivered a picker result after Activity recreation and verified that the existing destination retained every byte. [Android evidence](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45511972641/job/138861706070)
 
 ## Release gates still open
 - Valid reconciliation approval/history and freshness with complete synthetic independent-source inputs.

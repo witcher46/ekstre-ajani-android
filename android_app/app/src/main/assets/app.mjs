@@ -25,6 +25,7 @@ let pdfRequest=null;
 let actionTrigger=null,csvOpener=null;
 let state=W.normalizeWallet(C.empty()),detailId=null,expenseCategory=null,page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,toastTimer,loadFailed=false;
 let balanceDraft={},balanceReviewToken=null;
+let walletToken='';
 let balanceHistoryView={},balanceHistoryArchive=null,balanceHistoryLimit=20;
 window.hideBalanceApprovalDetails=()=>{
  if(!balanceHistoryView.reveal)return;
@@ -65,24 +66,33 @@ function verifiedCopy(raw){
 const tokenOf=raw=>raw===null?'':sha256(raw);
 function initialWallet(){
  const raw=readSlot(1);
- if(raw===null&&readSlot(3)===null&&readSlot(2)===null)return W.normalizeWallet(C.empty());
+ if(raw===null&&readSlot(3)===null&&readSlot(2)===null)return {raw,wallet:W.normalizeWallet(C.empty())};
  const copy=verifiedCopy(raw);
  if(!copy)throw Error('Güncel cüzdan doğrulanamadı.');
- return copy.wallet;
+ return copy;
 }
-try{state=initialWallet();}catch{loadFailed=true;errorNotice('Kayıtlar okunamadı. Kurtarma seçeneklerini incele.');}
+function setWallet(wallet,token){state=wallet;walletToken=token;}
+try{const {raw,wallet}=initialWallet();setWallet(wallet,tokenOf(raw));}
+catch{loadFailed=true;errorNotice('Kayıtlar okunamadı. Kurtarma seçeneklerini incele.');}
 function commit(next){
  if(loadFailed)throw Error('Kayıtlar okunamadığı için yazma kapalı.');
  next=W.normalizeWallet(next);
  const raw=C.backupText(next);
  if(window.Android){
-  if(!Android.save(raw))throw Error('Kayıt kaydedilemedi; değişiklik uygulanmadı.');
+  if(!Android.save(raw,walletToken)){
+   if(tokenOf(readSlot(1))!==walletToken){
+    const message='Cüzdan başka bir işlemde değişti. Bu değişiklik kaydedilmedi.';
+    if(confirm(message+' Kaydedilmemiş düzenlemeleri bırakıp güncel cüzdanı açmak ister misin?'))window.location.reload();
+    throw Error(message);
+   }
+   throw Error('Kayıt kaydedilemedi. Değişiklik uygulanmadı.');
+  }
  }else localStorage.setItem(key,raw);
- state=next;render();
+ setWallet(next,tokenOf(raw));render();
 }
 const copyLabel=slot=>slot===3?'Geri yükleme öncesi kopya':'Son kayıt öncesi kopya';
-function finishReplacement(wallet){
- state=wallet;loadFailed=false;
+function finishReplacement(wallet,raw){
+ setWallet(wallet,tokenOf(raw));loadFailed=false;
  pending=null;pdfRequest=null;history.length=0;detailId=null;
  balanceDraft={};balanceReviewToken=null;balanceHistoryArchive=null;balanceHistoryView={};
  page='home';render();focusMain();
@@ -103,7 +113,7 @@ function previewRecovery(slot){
   if(keepCurrent)localStorage.setItem(slot===3?key+'-previous':key+'-recovery',current);
   localStorage.setItem(key,selected.raw);
  }
- finishReplacement(w);notice('Cüzdan kurtarıldı.');
+ finishReplacement(w,selected.raw);notice('Cüzdan kurtarıldı.');
 }
 function restoreExternal(next){
  const wallet=displayedWallet(next),content=C.backupText(wallet);
@@ -122,11 +132,11 @@ function restoreExternal(next){
   if(slot===1||slot===2)localStorage.setItem(key+'-recovery',source);
   localStorage.setItem(key,content);
  }
- finishReplacement(wallet);notice('Yedek geri yüklendi.');
+ finishReplacement(wallet,content);notice('Yedek geri yüklendi.');
 }
 function validatedExport(){
  if(loadFailed)throw Error('Dışa aktarma kapalı. Önce cüzdanı kurtar.');
- try{return C.backupText(initialWallet());}
+ try{return C.backupText(initialWallet().wallet);}
  catch{
   loadFailed=true;render();
   throw Error('Güncel kayıt doğrulanamadı. Dışa aktarma kapalı. Kurtarma seçeneklerini incele.');
@@ -300,7 +310,7 @@ function render(){
  }else if(page==='review'){
  html=reviewPage();
  }else{
- html=`<h1>Ayarlar</h1><p class="lead">${esc(installedVersionLabel())}</p><button data-page="review">İnceleme ve kaynak bağlantıları</button><div class="panel"><h2>Veriler ve yedek</h2><p>Kayıtların bu cihazda saklanır. Uygulamayı kaldırmadan veya yeni bir deneme APK’sı kurmadan önce yedek al.</p><div class="actions"><button data-action="backup">Yedek dışa aktar</button><button data-action="restore">Yedek yükle</button></div><p class="notice">Bu sürüm Android JSON yedeklerini açar. Masaüstü .db yedeği doğrudan aktarılamaz; kart hareketleri için CSV aktarımını kullan.</p></div><button data-action="recover">Geri yükleme öncesi cüzdanı kurtar</button>${expenseCategoriesPanel()}${merchantRulesPanel()}<div class="panel"><h2>Gelir kategorileri</h2><p>${state.incomeCategories.map(esc).join(' · ')}</p><button data-action="incomeCategory">+ Gelir kategorisi</button></div><div class="panel"><h2>İlk deneme</h2><p>Örnek cüzdan yalnızca boş uygulamada açılır. Gerçek belgelerini yüklemeden önce temel işlevleri deneyebilirsin.</p><button data-action="demo">Örnek cüzdan oluştur</button></div><div class="panel"><h2>Bu sürümün kapsamı</h2><p>Hesaplar, işlemler, PDF/CSV aktarımı, kategori düzenleme, bütçe, aylık abonelik, rapor ve yedekleme. Çoklu profil, AI yorumu, otomatik eşleştirme, işlem bölme, gelişmiş kurallar ve arka plan hatırlatmaları henüz yoktur.</p></div>`;
+ html=`<h1>Ayarlar</h1><p class="lead">${esc(installedVersionLabel())}</p><button data-page="review">İnceleme ve kaynak bağlantıları</button><div class="panel"><h2>Veriler ve yedek</h2><p>Kayıtların bu cihazda saklanır. Uygulamayı kaldırmadan veya yeni bir deneme APK’sı kurmadan önce yedek al.</p><div class="actions"><button data-action="backup">Yedek dışa aktar</button><button data-action="restore">Yedek yükle</button></div><p class="notice">Bu sürüm Android JSON yedeklerini açar. Masaüstü .db yedeği doğrudan aktarılamaz; kart hareketleri için CSV aktarımını kullan.</p></div><button data-action="recover">Geri yükleme öncesi cüzdanı kurtar</button>${expenseCategoriesPanel()}${merchantRulesPanel()}<div class="panel"><h2>Gelir kategorileri</h2><p>${state.incomeCategories.map(esc).join(' · ')}</p><button data-action="incomeCategory">+ Gelir kategorisi</button></div><div class="panel"><h2>İlk deneme</h2><p>Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Gerçek belgelerini yüklemeden önce temel işlevleri deneyebilirsin.</p><button data-action="demo">Örnek cüzdan oluştur</button></div><div class="panel"><h2>Bu sürümün kapsamı</h2><p>Hesaplar, işlemler, PDF/CSV aktarımı, kategori düzenleme, bütçe, aylık abonelik, rapor ve yedekleme. Çoklu profil, AI yorumu, otomatik eşleştirme, işlem bölme, gelişmiş kurallar ve arka plan hatırlatmaları henüz yoktur.</p></div>`;
  }
  $('main').innerHTML=html;
  $('main').querySelector('h1')?.setAttribute('tabindex','-1');
@@ -478,8 +488,9 @@ function balanceRecordForm(role){
   const current=snapshot.state.accounts.find(row=>row.id===account.id);
   if(current?.type!==account.type||current.name!==account.name)throw Error('Hesap değişti. Hesabı yeniden açıp bilgileri kontrol et.');
   const next=addReviewedBalanceRecord(snapshot.state,account.id,role,data);
-  if(!window.Android.saveIfUnchanged(snapshot.token,C.backupText(next)))throw Error('Kayıt eklenemedi. Hesabı yeniden açıp güncel bilgileri kontrol et.');
-  state=displayedWallet(next);
+  const raw=C.backupText(next);
+  if(!window.Android.saveIfUnchanged(snapshot.token,raw))throw Error('Kayıt eklenemedi. Hesabı yeniden açıp güncel bilgileri kontrol et.');
+  setWallet(displayedWallet(next),tokenOf(raw));
   render();
  });
 }
@@ -488,20 +499,21 @@ function refreshBalanceWallet(){
  const snapshot=readBalanceApprovalSnapshot(window.Android);
  balanceReviewToken=snapshot?.token??null;
  if(!snapshot)return false;
- state=displayedWallet(snapshot.state);
+ setWallet(displayedWallet(snapshot.state),snapshot.token);
  return true;
 }
 
 function refreshBalanceHistory(next=page,id=detailId){
- let current=null;
+ let current=null,token='';
  if(window.Android){
-  current=readBalanceApprovalSnapshot(window.Android)?.state??null;
+  const snapshot=readBalanceApprovalSnapshot(window.Android);
+  if(snapshot){current=snapshot.state;token=snapshot.token;}
  }else{
   try{current=C.readBackup(localStorage.getItem(key)||C.backupText(C.empty()));}catch{}
  }
  if(current){
   balanceHistoryArchive=current;
-  state=displayedWallet(current);
+  setWallet(displayedWallet(current),token);
  }
  const archive=balanceHistoryArchive??state;
  const selected=next==='balanceApprovalDetail'&&archive.version===3?
@@ -605,7 +617,7 @@ function submitBalanceReview(event){
    $('balance-save').disabled=true;
    const result=saveBalanceApproval(window.Android,prepared,true);
    if(result.status==='saved'){
-    state=displayedWallet(result.state);
+    setWallet(displayedWallet(result.state),tokenOf(C.backupText(result.state)));
     showBalanceStep({saved:{accountName:prepared.accountName,date:prepared.comparison.evidence.observation.date}},'balance-review-saved');
    }else if(result.status==='clock-behind'){
     showBalanceStep({clockBehind:result.previousApprovedAt},'balance-clock-title');
@@ -703,7 +715,7 @@ const actions={
  cancelCategoryRemoval:closeModal,
  addAccount:()=>accountForm(),addTransaction:()=>transactionForm(),addIncome:()=>transactionForm(null,'income'),transfer:()=>transactionForm(null,'transfer'),payCard:()=>payCardForm(),incomePlan:()=>incomePlanForm(),
  incomeCategory:()=>modal('Gelir kategorisi ekle',field('name','Kategori adı','','text','required maxlength="80"'),f=>{const next=copy();next.incomeCategories.push(f.get('name').trim());commit(next);}),
- demo:()=>{if(state.accounts.length||state.transactions.length)throw Error('Örnek cüzdan yalnızca boş uygulamada açılır.');commit(C.demo());notice('Yapay örnek kayıtlar oluşturuldu.');},
+ demo:()=>{if(readSlot(1)!==null)throw Error('Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Mevcut verilerin korunuyor.');commit(C.demo());notice('Yapay örnek kayıtlar oluşturuldu.');},
  category:()=>modal('Kategori ekle',field('name','Kategori adı','','text','required maxlength="80"'),f=>commit(C.addExpenseCategory(state,f.get('name')))),
  budget:()=>modal('Aylık bütçe',field('period','Dönem',period,'month','required')+select('category','Kategori',options([['Toplam','Toplam'],...state.categories.filter(c=>c!=='Toplam').map(c=>[c,c])],'Toplam'))+field('amount','Bütçe (TL)','','text','inputmode="decimal" required'),f=>{const next=copy();next.budgets[f.get('period')+'|'+f.get('category')]=C.money(f.get('amount'));commit(next);}),
  subscription:()=>{if(!state.accounts.length)throw Error('Önce hesap ekle.');modal('Aylık abonelik',field('name','Abonelik adı','','text','required maxlength="80"')+field('amount','Tutar (TL)','','text','inputmode="decimal" required')+field('next','Sonraki ödeme',C.today(),'date','required')+select('account','Ödeme hesabı',accountOptions()),f=>{const next=copy();next.subscriptions.push({id:C.id(),name:f.get('name').trim(),amount:C.money(f.get('amount')),next:f.get('next'),account:f.get('account'),category:C.activeExpenseCategory(state,'Abonelik')});commit(next);});},

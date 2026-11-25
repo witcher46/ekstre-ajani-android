@@ -88,9 +88,19 @@ export function validate(s){
  if(s.version>=2)validateBalanceReconciliation(s);
  if(s.version===3)validateBalanceApprovals(s.balanceReconciliation.approvals);
  const txids=new Set();for(const t of s.transactions){if(!text(t.id)||txids.has(t.id)||!ids.has(t.account)||!validDate(t.date)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(t.period)||!text(t.desc,500)||!text(t.category)||!text(t.note??'',2000)||!cents(t.amount)||t.amount<0||!['expense','income','refund','cardPayment','payment','transfer'].includes(t.kind))throw Error('İşlem kaydı geçersiz.');if(['payment','transfer'].includes(t.kind)&&(!ids.has(t.target)||t.target===t.account))throw Error('Hedef hesap geçersiz.');if(t.installment&&!/^\d{1,3}\/\d{1,3}$/.test(t.installment))throw Error('Taksit geçersiz.');txids.add(t.id);}
- for(const st of s.statements)if(!text(st.id)||!ids.has(st.account)||!validDate(st.cut)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(st.period)||!(st.debt===null||cents(st.debt))||!(st.due===null||validDate(st.due)))throw Error('Ekstre kaydı geçersiz.');
+ const statementIds=new Set();
+ for(const st of s.statements){
+  if(!st||!text(st.id)||!ids.has(st.account)||!validDate(st.cut)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(st.period)||!(st.debt===null||cents(st.debt))||!(st.due===null||validDate(st.due)))throw Error('Ekstre kaydı geçersiz.');
+  if(statementIds.has(st.id))throw Error('Ekstre kimliği birden fazla kayıtta kullanılmış.');
+  statementIds.add(st.id);
+ }
  for(const [k,v] of Object.entries(s.budgets))if(!/^\d{4}-(0[1-9]|1[0-2])\|.{1,200}$/.test(k)||!cents(v)||v<0)throw Error('Bütçe kaydı geçersiz.');
- for(const r of s.subscriptions)if(!text(r.id)||!text(r.name)||!ids.has(r.account)||!validDate(r.next)||!cents(r.amount)||r.amount<=0)throw Error('Abonelik geçersiz.');
+ const subscriptionIds=new Set();
+ for(const r of s.subscriptions){
+  if(!r||!text(r.id)||!text(r.name)||!ids.has(r.account)||!validDate(r.next)||!cents(r.amount)||r.amount<=0)throw Error('Abonelik geçersiz.');
+  if(subscriptionIds.has(r.id))throw Error('Abonelik kimliği birden fazla kayıtta kullanılmış.');
+  subscriptionIds.add(r.id);
+ }
  if(s.categories.some(c=>!text(c)||!c.trim())||new Set(s.categories).size!==s.categories.length)throw Error('Kategori listesi geçersiz.');
  if(s.merchantCategoryRules!==undefined){
   if(!Array.isArray(s.merchantCategoryRules)||s.merchantCategoryRules.length>50000)throw Error('Satıcı kategori kuralları geçersiz.');
@@ -412,11 +422,14 @@ function matchingRows(rows,t){
 }
 function markCandidate(t,rows){if(t.matchStatus==='distinct'||t.linkedTo)return;const candidates=matchingRows(rows,t);if(candidates.length){t.matchStatus='pending';t.matchCandidates=candidates.map(r=>r.id);}}
 function validateKind(s,t){
- const a=s.accounts.find(a=>a.id===t.account),b=s.accounts.find(a=>a.id===t.target);
+ const a=s.accounts.find(a=>a.id===t.account);
  if(!a)throw Error('Önce bir hesap ekle.');
  if(t.kind==='income'&&a.type==='card')throw Error('Gelir banka veya nakit hesabına eklenir.');
  if(t.kind==='cardPayment'&&a.type!=='card')throw Error('Ekstre ödemesi bir kredi kartına ait olmalı.');
- if(['payment','transfer'].includes(t.kind)&&(!b||a.id===b.id||a.type==='card'||(t.kind==='payment'?b.type!=='card':b.type==='card')))throw Error('Transfer iki banka/nakit hesabı arasında; kart ödemesi banka/nakitten karta yapılır.');
+ if(t.kind==='payment'||t.kind==='transfer'){
+  const b=s.accounts.find(a=>a.id===t.target);
+  if(!b||a.id===b.id||a.type==='card'||(t.kind==='payment'?b.type!=='card':b.type==='card'))throw Error('Transfer iki banka/nakit hesabı arasında, kart ödemesi banka/nakitten karta yapılır.');
+ }else if(t.target!=null)throw Error('Hedef hesap bağlantısı yalnızca transfer veya kart borcu ödemesinde kullanılabilir.');
 }
 export function addTransaction(s,t,{editing=false}={}){
  validateKind(s,t);const next=structuredClone(s),row={...t,id:t.id||id(),period:t.period||t.date.slice(0,7),source:sourceOf(t)};

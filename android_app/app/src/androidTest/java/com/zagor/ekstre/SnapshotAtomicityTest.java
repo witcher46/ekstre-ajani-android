@@ -45,11 +45,82 @@ public class SnapshotAtomicityTest {
   return reference.get();
  }
 
+ static boolean saveFixture(MainActivity.Bridge bridge,String next){
+  String current=bridge.snapshotSlot(1);
+  return bridge.save(next,current==null?"":BalanceApprovalStorage.sha256(current));
+ }
+
+ @Test public void staleOrdinaryWritePreservesEverySnapshot() {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String recovery=wallet("recovery"),base=wallet("base"),stale=wallet("stale edit");
+  String newer=base.replace("\"budgets\":{}","\"budgets\":{\"2026-10|Toplam\":12345}");
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class);
+      SQLiteDatabase db=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)) {
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(bridge.save(recovery,""));
+   assertFalse(bridge.save(stale,""));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,base));
+   String expected=BalanceApprovalStorage.sha256(base);
+   assertTrue(bridge.save(newer,expected));
+   assertFalse(bridge.save(stale,expected));
+   assertEquals(newer,snapshot(db,1));
+   assertEquals(base,snapshot(db,2));
+   assertEquals(recovery,snapshot(db,3));
+  }
+ }
+
  private String snapshot(SQLiteDatabase database,int id) {
   try(Cursor rows=database.rawQuery("SELECT content FROM snapshots WHERE id=?",
       new String[]{String.valueOf(id)})){
    assertTrue("Synthetic snapshot "+id+" must exist",rows.moveToFirst());
    return rows.getString(0);
+  }
+ }
+
+ @Test public void duplicateBackupIdsPreserveEverySnapshot() {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String previous=wallet("previous"),current=wallet("current");
+  String valid=wallet("backup").replace("\"accounts\":[]",
+    "\"accounts\":[{\"id\":\"card\",\"name\":\"Synthetic\",\"type\":\"card\",\"opening\":0}]");
+  String subscription="{\"id\":\"sub\",\"name\":\"Synthetic\",\"account\":\"card\",\"next\":\"2026-10-15\",\"amount\":1500}";
+  String statement="{\"id\":\"statement\",\"account\":\"card\",\"cut\":\"2026-10-05\",\"period\":\"2026-10\",\"debt\":8000,\"due\":null}";
+  String duplicateSubscription=valid.replace("\"subscriptions\":[]", "\"subscriptions\":["+subscription+","+subscription+"]");
+  String duplicateStatement=valid.replace("\"statements\":[]", "\"statements\":["+statement+","+statement+"]");
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class);
+      SQLiteDatabase db=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)) {
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(saveFixture(bridge,previous));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
+   for(String invalid:new String[]{duplicateSubscription,duplicateStatement}) {
+    assertFalse(RecoverySafetyTest.restoreFixture(bridge,invalid));
+    assertEquals(current,snapshot(db,1));
+    assertEquals(previous,snapshot(db,2));
+    assertEquals(previous,snapshot(db,3));
+   }
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,valid));
+  }
+ }
+
+ @Test public void invalidBackupTargetPreservesEverySnapshot() {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  String previous=wallet("previous");
+  String current=wallet("current").replace("\"accounts\":[]", "\"accounts\":["
+    +"{\"id\":\"bank\",\"name\":\"Synthetic bank\",\"type\":\"bank\",\"opening\":10000},"
+    +"{\"id\":\"cash\",\"name\":\"Synthetic cash\",\"type\":\"cash\",\"opening\":0}]");
+  String expense="{\"id\":\"expense\",\"kind\":\"expense\",\"account\":\"bank\",\"date\":\"2026-10-01\","
+    +"\"period\":\"2026-10\",\"desc\":\"Synthetic expense\",\"amount\":2000,\"category\":\"Diğer\",\"target\":\"cash\"}";
+  String invalid=current.replace("\"transactions\":[]","\"transactions\":["+expense+"]");
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class);
+      SQLiteDatabase db=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)) {
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(saveFixture(bridge,previous));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,invalid));
+   assertEquals(current,snapshot(db,1));
+   assertEquals(previous,snapshot(db,2));
+   assertEquals(previous,snapshot(db,3));
+   String validTransfer=invalid.replace("\"kind\":\"expense\"","\"kind\":\"transfer\"");
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,validTransfer));
   }
  }
 
@@ -71,8 +142,8 @@ public class SnapshotAtomicityTest {
   String unicodeName=edited.replace("\"name\":\"Synthetic\"","\"name\":\"\u0085\"");
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
-   assertTrue(bridge.save(unicodeName));
-   assertTrue(bridge.save(original));
+   assertTrue(saveFixture(bridge,unicodeName));
+   assertTrue(saveFixture(bridge,original));
    assertTrue(RecoverySafetyTest.restoreFixture(bridge,edited));
    assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("\"accountId\":\"bank\"","\"accountId\":\"missing\"")));
    assertFalse(RecoverySafetyTest.restoreFixture(bridge,edited.replace("\"id\":\"bank\"","\"id\":123")
@@ -110,7 +181,7 @@ public class SnapshotAtomicityTest {
    scenario.recreate();
    MainActivity.Bridge reopened=bridge(scenario);
    assertEquals(edited,reopened.recovery());
-   assertTrue(reopened.save(reopened.recovery()));
+   assertTrue(saveFixture(reopened,reopened.recovery()));
    scenario.recreate();
    assertEquals(edited,bridge(scenario).load());
   }
@@ -129,7 +200,7 @@ public class SnapshotAtomicityTest {
   String large=small.substring(0,start)+rows+small.substring(end);
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
-   assertTrue(bridge.save(small));
+   assertTrue(saveFixture(bridge,small));
    assertTrue(RecoverySafetyTest.restoreFixture(bridge,large));
    assertEquals(large,bridge.load());
    assertEquals(small,bridge.recovery());
@@ -141,7 +212,7 @@ public class SnapshotAtomicityTest {
    char[] padding=new char[remaining/2];
    java.util.Arrays.fill(padding,'ü');
    String atLimit=prefix+new String(padding)+(remaining%2==1?"a":"")+suffix;
-   assertTrue(bridge.save(atLimit));
+   assertTrue(saveFixture(bridge,atLimit));
    assertFalse(RecoverySafetyTest.restoreFixture(bridge,atLimit+" "));
    assertEquals(atLimit,bridge.load());
    assertEquals(small,bridge.recovery());
@@ -153,7 +224,7 @@ public class SnapshotAtomicityTest {
   String first=wallet("first"),current=wallet("current"),candidate=wallet("candidate");
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)) {
    MainActivity.Bridge bridge=bridge(scenario);
-   assertTrue(bridge.save(first));
+   assertTrue(saveFixture(bridge,first));
    assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
    assertEquals(current,bridge.load());
    assertEquals(first,bridge.recovery());
@@ -198,7 +269,7 @@ public class SnapshotAtomicityTest {
   String first=wallet("first"),current=wallet("current"),candidate=wallet("candidate");
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)) {
    MainActivity.Bridge bridge=bridge(scenario);
-   assertTrue(bridge.save(first));
+   assertTrue(saveFixture(bridge,first));
    assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
    assertEquals(current,bridge.load());
    assertEquals(first,bridge.recovery());
@@ -209,7 +280,7 @@ public class SnapshotAtomicityTest {
       +" BEFORE INSERT ON snapshots WHEN NEW.id=1"
       +" BEGIN SELECT RAISE(ABORT, 'synthetic-save-failure'); END");
     try {
-     assertFalse("Forced SQLite write failure must reject a normal save",bridge.save(candidate));
+     assertFalse("Forced SQLite write failure must reject a normal save",saveFixture(bridge,candidate));
      assertEquals("Active wallet is intact",current,bridge.load());
      assertEquals("Recovery is intact",first,bridge.recovery());
      assertEquals("Previous snapshot update was rolled back",priorPrevious,snapshot(database,2));
@@ -217,7 +288,7 @@ public class SnapshotAtomicityTest {
     } finally {
      database.execSQL("DROP TRIGGER IF EXISTS "+TRIGGER);
     }
-    assertTrue("Normal saves work again after a failure",bridge.save(candidate));
+    assertTrue("Normal saves work again after a failure",saveFixture(bridge,candidate));
     assertEquals(candidate,bridge.load());
     assertEquals(current,snapshot(database,2));
     assertEquals(first,snapshot(database,3));
@@ -232,7 +303,7 @@ public class SnapshotAtomicityTest {
   String first=wallet("cas-first"),current=wallet("cas-current"),candidate=wallet("cas-candidate");
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
-   assertTrue(bridge.save(first));
+   assertTrue(saveFixture(bridge,first));
    assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
    String read=bridge.loadForCompare();
    assertEquals(current,read.substring(65));
@@ -263,7 +334,7 @@ public class SnapshotAtomicityTest {
   String first=wallet("cas-recovery"),current=wallet("cas-current"),candidate=wallet("cas-retry");
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
-   assertTrue(bridge.save(first));
+   assertTrue(saveFixture(bridge,first));
    assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
    String token=bridge.loadForCompare().substring(0,64);
    try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
@@ -291,7 +362,7 @@ public class SnapshotAtomicityTest {
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class);
       SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)){
    MainActivity.Bridge bridge=bridge(scenario);
-   assertTrue(bridge.save(current));
+   assertTrue(saveFixture(bridge,current));
    String token=bridge.loadForCompare().substring(0,64);
    java.util.concurrent.Future<Boolean> attempted;
    database.beginTransactionNonExclusive();
@@ -333,7 +404,7 @@ public class SnapshotAtomicityTest {
   var executor=Executors.newFixedThreadPool(2);
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
-   assertTrue(bridge.save(recovery));
+   assertTrue(saveFixture(bridge,recovery));
    assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
    String comparison=bridge.loadForCompare();
    assertEquals(current,comparison.substring(65));
@@ -370,15 +441,15 @@ public class SnapshotAtomicityTest {
   String initial=wallet("before-evidence");
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
-   assertTrue(bridge.save(initial));
+   assertTrue(saveFixture(bridge,initial));
    assertTrue(RecoverySafetyTest.restoreFixture(bridge,raw));
    assertEquals(raw,bridge.load());
    assertEquals(initial,bridge.recovery());
    String token=bridge.loadForCompare().substring(0,64);
    String emptyHistory=raw.replaceFirst("\"approvals\":\\[.*\\]\\}\\}$","\"approvals\":[]}}");
    assertNotEquals(raw,emptyHistory);
-   assertFalse(bridge.save(initial));
-   assertFalse(bridge.save(emptyHistory));
+   assertFalse(saveFixture(bridge,initial));
+   assertFalse(saveFixture(bridge,emptyHistory));
    assertFalse(bridge.saveIfUnchanged(token,emptyHistory));
    assertFalse(bridge.saveIfUnchanged(token,initial));
    assertFalse(bridge.recoverSnapshot(3,"0".repeat(64),token,true));
@@ -448,7 +519,7 @@ public class SnapshotAtomicityTest {
   String first=wallet("first"),current=wallet("current");
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
    MainActivity.Bridge bridge=bridge(scenario);
-   assertTrue(bridge.save(first));
+   assertTrue(saveFixture(bridge,first));
    assertTrue(RecoverySafetyTest.restoreFixture(bridge,current));
 
    String invalidVersion=wallet("unsupported").replace("\"version\":1","\"version\":3");

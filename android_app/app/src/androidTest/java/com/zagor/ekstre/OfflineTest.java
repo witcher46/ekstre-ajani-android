@@ -31,7 +31,7 @@ public class OfflineTest {
    js(a,"document.querySelector('[data-action=demo]').click()");
    assertEquals("3",js(a,"JSON.parse(Android.load()).transactions.length"));
    a.recreate();String persisted="";for(int i=0;i<40;i++){persisted=js(a,"document.body.innerText.includes('Market alışverişi')");if(persisted.equals("true"))break;Thread.sleep(250);}assertEquals("true",persisted);
-   assertEquals("false",js(a,"Android.save('{bad json')"));
+   assertEquals("false",js(a,"Android.save('{bad json',Android.loadForCompare().slice(0,64))"));
    assertEquals("3",js(a,"JSON.parse(Android.load()).transactions.length"));
   }
  }
@@ -50,7 +50,7 @@ public class OfflineTest {
    AtomicReference<MainActivity.Bridge> ref=new AtomicReference<>();a.onActivity(activity->ref.set(activity.new Bridge()));
    MainActivity.Bridge bridge=ref.get();
    String old="{\"format\":\"ekstre-android\",\"version\":1,\"accounts\":[],\"transactions\":[],\"statements\":[],\"budgets\":{},\"subscriptions\":[],\"categories\":[],\"legacyPadding\":\""+"x".repeat(3000000)+"\"}";
-   assertTrue(bridge.save(old));assertEquals(old,bridge.load());
+   assertTrue(SnapshotAtomicityTest.saveFixture(bridge,old));assertEquals(old,bridge.load());
    String restored=old.replace("legacyPadding","restoredPadding");
    assertTrue(RecoverySafetyTest.restoreFixture(bridge,restored));assertEquals(old,bridge.recovery());assertEquals(restored,bridge.load());
    assertFalse(RecoverySafetyTest.restoreFixture(bridge,"{bad json"));assertEquals(old,bridge.recovery());assertEquals(restored,bridge.load());
