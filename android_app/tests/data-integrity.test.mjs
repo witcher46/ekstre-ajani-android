@@ -173,6 +173,14 @@ test('F-B5 rejects an expense that assigns a fictitious cash credit',()=>{
   assert.deepEqual([C.balance(s,bank),C.balance(s,cash)],[10000,0]);
   const validExpense=C.readBackup(JSON.stringify({...s,transactions:[{...expense,target:null}]}));
   assert.deepEqual([C.balance(validExpense,bank),C.balance(validExpense,cash)],[8000,0]);
+  for(const target of [{foreign:true},'no-such-account']){
+    const row={...expense,target};
+    const raw=JSON.stringify({...s,transactions:[row]});
+    const legacy=C.readBackup(raw);
+    assert.equal(C.backupText(legacy),raw);
+    assert.deepEqual([C.balance(legacy,bank),C.balance(legacy,cash)],[8000,0]);
+    assert.throws(()=>C.addTransaction(s,row),/hedef hesap/i);
+  }
   const validTransfer=C.addTransaction(s,{...expense,kind:'transfer',target:'cash'});
   assert.deepEqual([C.balance(validTransfer,bank),C.balance(validTransfer,cash)],[8000,2000]);
 });

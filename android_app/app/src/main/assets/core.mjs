@@ -120,7 +120,8 @@ export function validate(s){
  const plans=new Map();
  const links=new Map(),byId=new Map(s.transactions.map(t=>[t.id,t]));
  for(const t of s.transactions){
-  validateKind(s,t);
+  // Legacy target metadata is inert unless it resolves to a ledger account.
+  validateKind(s,t,{allowInertTarget:true});
   if(t.installmentPlan!==undefined){
    if(!text(t.installmentPlan)||!t.installmentPlan||t.kind!=='expense'||!isCardTransaction(s,t)||sourceOf(t)!=='manual'||!t.installment||t.amount<=0)throw Error('Taksit planı kaydı geçersiz.');
    if(!plans.has(t.installmentPlan))plans.set(t.installmentPlan,[]);
@@ -421,7 +422,7 @@ function matchingRows(rows,t){
   !incompatible.has(r.id)&&(sameEconomic(r,t)||viaAliases.has(r.id)));
 }
 function markCandidate(t,rows){if(t.matchStatus==='distinct'||t.linkedTo)return;const candidates=matchingRows(rows,t);if(candidates.length){t.matchStatus='pending';t.matchCandidates=candidates.map(r=>r.id);}}
-function validateKind(s,t){
+function validateKind(s,t,{allowInertTarget=false}={}){
  const a=s.accounts.find(a=>a.id===t.account);
  if(!a)throw Error('Önce bir hesap ekle.');
  if(t.kind==='income'&&a.type==='card')throw Error('Gelir banka veya nakit hesabına eklenir.');
@@ -429,10 +430,10 @@ function validateKind(s,t){
  if(t.kind==='payment'||t.kind==='transfer'){
   const b=s.accounts.find(a=>a.id===t.target);
   if(!b||a.id===b.id||a.type==='card'||(t.kind==='payment'?b.type!=='card':b.type==='card'))throw Error('Transfer iki banka/nakit hesabı arasında, kart ödemesi banka/nakitten karta yapılır.');
- }else if(t.target!=null)throw Error('Hedef hesap bağlantısı yalnızca transfer veya kart borcu ödemesinde kullanılabilir.');
+ }else if(t.target!=null&&(!allowInertTarget||s.accounts.some(a=>a.id===t.target)))throw Error('Hedef hesap bağlantısı yalnızca transfer veya kart borcu ödemesinde kullanılabilir.');
 }
 export function addTransaction(s,t,{editing=false}={}){
- validateKind(s,t);const next=structuredClone(s),row={...t,id:t.id||id(),period:t.period||t.date.slice(0,7),source:sourceOf(t)};
+ validateKind(s,t,{allowInertTarget:editing});const next=structuredClone(s),row={...t,id:t.id||id(),period:t.period||t.date.slice(0,7),source:sourceOf(t)};
  if(!editing&&next.transactions.some(alias=>alias.linkedTo===row.id&&!sameEconomic(alias,row)))throw Error('Kaynakla bağlantılı bir tutar, tarih veya hesap değiştirilemez. Önce inceleme kutusundan bağlantıyı ayır.');
  if(!editing&&!row.statement&&!row.csvKey&&!row.matchStatus)markCandidate(row,next.transactions);
  next.transactions.push(row);return validate(next);

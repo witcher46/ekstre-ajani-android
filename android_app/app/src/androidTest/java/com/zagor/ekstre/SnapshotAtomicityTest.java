@@ -119,6 +119,11 @@ public class SnapshotAtomicityTest {
    assertEquals(current,snapshot(db,1));
    assertEquals(previous,snapshot(db,2));
    assertEquals(previous,snapshot(db,3));
+   for(String target:new String[]{"{\"foreign\":true}","\"no-such-account\""}){
+    String legacy=invalid.replace("\"target\":\"cash\"","\"target\":"+target);
+    assertTrue(RecoverySafetyTest.restoreFixture(bridge,legacy));
+    assertEquals(legacy,snapshot(db,1));
+   }
    String validTransfer=invalid.replace("\"kind\":\"expense\"","\"kind\":\"transfer\"");
    assertTrue(RecoverySafetyTest.restoreFixture(bridge,validTransfer));
   }

@@ -140,7 +140,8 @@ public class MainActivity extends Activity {
    JSONObject row=transactions.getJSONObject(i);
    String kind=row.optString("kind");
    if(!"payment".equals(kind)&&!"transfer".equals(kind)){
-    if(!row.isNull("target"))return false;
+    // Match the ledger's exact string lookup, without coercing legacy metadata.
+    if(row.opt("target") instanceof String targetId&&types.containsKey(targetId))return false;
     continue;
    }
    if(!(row.opt("account") instanceof String from)||!(row.opt("target") instanceof String to)||from.equals(to))return false;
