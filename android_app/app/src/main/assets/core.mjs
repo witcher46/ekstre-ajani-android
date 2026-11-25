@@ -291,6 +291,7 @@ export function removeExpenseCategory(s,category,{moveRulesTo,removeRules=false}
  return validate(next);
 }
 export const sourceOf=t=>t.source||(t.statement?'pdf':t.csvKey?'csv':'manual');
+export const isFutureManualCardPayment=(t,asOf)=>t.kind==='payment'&&sourceOf(t)==='manual'&&t.date>asOf;
 export const effective=t=>!t.linkedTo&&t.matchStatus!=='pending';
 const cardAccount=t=>t.kind==='payment'?t.target:t.account;
 const effectKind=t=>['payment','cardPayment'].includes(t.kind)?'cardPayment':t.kind;
@@ -513,7 +514,7 @@ export function cardStatus(s,account,{asOf=today()}={}){
  const a=s.accounts.find(a=>a.id===(typeof account==='string'?account:account.id));if(!a||a.type!=='card')throw Error('Kredi kartı bulunamadı.');
  const latest=s.statements.filter(st=>st.account===a.id).sort((x,y)=>y.cut.localeCompare(x.cut))[0];
  const currentAnchor=s.statements.filter(st=>st.account===a.id&&st.debt!==null).sort((x,y)=>y.cut.localeCompare(x.cut))[0];
- const rows=s.transactions.filter(effective),anchored=latest&&latest.debt!==null;
+ const rows=s.transactions.filter(t=>effective(t)&&!isFutureManualCardPayment(t,asOf)),anchored=latest&&latest.debt!==null;
  const dateOf=cardDates(s),afterCut=cardAfterCut(s,dateOf);
  let current=currentAnchor?currentAnchor.debt:a.opening;
  for(const t of rows)if((!t.installmentPlan||dateOf(t)<=asOf)&&(!currentAnchor||afterCut(t,currentAnchor)))current=addCents(current,ledgerEffect(t,a));
@@ -527,7 +528,12 @@ export function cashBalanceMovementEffect(row,account){
  return ledgerEffect(row,account);
 }
 
-export function balance(s,a){return a.type==='card'?cardStatus(s,a).current:s.transactions.filter(countsForCashBalance).reduce((n,t)=>addCents(n,ledgerEffect(t,a)),a.opening);}
+export function balance(s,a){
+ const asOf=today();
+ if(a.type==='card')return cardStatus(s,a,{asOf}).current;
+ return s.transactions.filter(t=>countsForCashBalance(t)&&!isFutureManualCardPayment(t,asOf))
+  .reduce((n,t)=>addCents(n,ledgerEffect(t,a)),a.opening);
+}
 
 // Reconstruct from an independently established end-of-day balance and the current ledger.
 export function balanceAt(state,accountId,date,{anchor}={}){

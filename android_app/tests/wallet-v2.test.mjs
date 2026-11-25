@@ -9,6 +9,55 @@ const manual=(extra={})=>tx({id:'manual',account:'bank',target:'card',date:'2026
 const imported=(extra={})=>tx({id:undefined,date:'2026-10-04',kind:'cardPayment',amount:100000,importKey:'payment',...extra});
 const wallet=()=>import('../app/src/main/assets/wallet.mjs');
 
+
+test('a restored future manual payment realizes once on its bank date without becoming an expense',async t=>{
+ const W=await wallet(),{reportRows,advancedReports}=await import('../app/src/main/assets/reports.mjs');
+ const at=day=>new Date(2026,10,day,12).getTime();
+ t.mock.timers.enable({apis:['Date'],now:at(25)});
+ const s=C.importStatement(base(),pdf([],{period:'2026-11',cut:'2026-11-05',due:'2026-11-30',debt:10000}),'card');
+ const bank=s.accounts[0];bank.opening=100000;
+ const payment=manual({date:'2026-11-26',period:'2026-11',amount:4000});
+ const legacy=C.readBackup(JSON.stringify({...s,transactions:[payment]}));
+ const anchor={accountId:bank.id,date:'2026-11-05',amountCents:bank.opening};
+ function verify(state,balance,debt,paid,ids){
+  const card=C.cardStatus(state,'card'),report=advancedReports(state,'2026-11').current;
+  assert.deepEqual([C.balance(state,bank),C.balanceAt(state,bank.id,C.today(),{anchor}).amountCents,
+   card.current,card.statementRemaining,card.paidAfterCut,report.cardPayments,report.cardCashPayments,
+   report.cashOut,report.netExpense],[balance,balance,debt,debt,paid,paid,paid,paid,0]);
+  assert.deepEqual(reportRows(state,['2026-11']).map(row=>row.id),ids);
+ }
+ verify(legacy,100000,10000,0,[]);
+ const sameDay=C.addTransaction(s,{...payment,date:'2026-11-25'});
+ verify(sameDay,96000,6000,4000,[payment.id]);
+ const reopened=C.readBackup(C.backupText(legacy));
+ assert.deepEqual(reopened.transactions,[payment]);
+ for(const day of [26,27]){
+  t.mock.timers.setTime(at(day));
+  verify(reopened,96000,6000,4000,[payment.id]);
+ }
+});
+
+test('the manual payment cutoff leaves future expenses and confirmed bank dates with PDF and CSV sources intact',async t=>{
+ const W=await wallet();
+ t.mock.timers.enable({apis:['Date'],now:new Date(2026,10,25,12)});
+ const initial=C.importStatement(base(),pdf([],{period:'2026-11',cut:'2026-11-05',debt:10000}),'card');
+ const expense=tx({date:'2026-11-26',period:'2026-11',account:'bank',amount:2000});
+ const sameDay=manual({date:'2026-11-25',period:'2026-11',amount:4000});
+ const s=C.addTransaction(C.addTransaction(initial,expense),sameDay);
+ for(const source of ['pdf','csv']){
+  const document=tx({id:source,source,kind:'cardPayment',date:'2026-11-26',period:'2026-11',amount:4000,
+   linkedTo:sameDay.id,matchStatus:'linked',...(source==='csv'?{csvKey:'synthetic-csv-payment'}:{})});
+  const restored=C.readBackup(JSON.stringify({...s,transactions:[...s.transactions,document]}));
+  assert.equal(C.cardEffectDate(restored,sameDay),source==='pdf'?document.date:sameDay.date);
+  assert.equal(C.balance(restored,restored.accounts[0]),1994000);
+  const card=C.cardStatus(restored,'card');
+  const report=W.periodFigures(restored,'2026-11');
+  assert.deepEqual([card.current,card.statementRemaining,report.cardPayments,report.cardCashPayments,report.netExpense],
+   [6000,6000,4000,4000,2000]);
+  assert.equal(restored.transactions.find(row=>row.id===source).date,document.date);
+ }
+});
+
 test('a newer unknown statement keeps the last known debt anchor for current debt only',()=>{
  let s=C.importStatement(base(),pdf([tx({id:undefined,date:'2026-10-01',amount:10000,importKey:'oct'})]),'card');
  s=C.importStatement(s,pdf([tx({id:undefined,date:'2026-11-01',period:'2026-11',amount:20000,importKey:'nov'})],{period:'2026-11',cut:'2026-11-05',due:null,debt:null}),'card');

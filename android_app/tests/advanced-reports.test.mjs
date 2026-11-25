@@ -179,7 +179,8 @@ test('legacy JSON keeps an unmatched statement payment separate from cash moveme
   });
 });
 
-test('a bank payment across the month boundary is counted once before and after matching', () => {
+test('a bank payment across the month boundary is counted once before and after matching', t => {
+  t.mock.timers.enable({apis:['Date'],now:new Date(2027,0,1,12)});
   const pdf = parseStatement([
     'QNB', 'Hesap Kesim Tarihi: 05/01/2027', '31/12/2026 ODEME 50.00',
   ].join('\n'));

@@ -3,7 +3,8 @@ import * as C from './core.mjs';
 const incomeCategories=['Maaş','Serbest çalışma','Diğer gelir'];
 const cardId=t=>t.kind==='payment'?t.target:t.account;
 const isPayment=t=>t.kind==='payment'||t.kind==='cardPayment';
-const bankMovement=t=>!t.linkedTo&&(C.effective(t)||(t.kind==='payment'&&t.matchStatus==='pending'));
+const bankMovement=(t,asOf)=>!t.linkedTo&&(C.effective(t)||(t.kind==='payment'&&t.matchStatus==='pending'))&&
+ !C.isFutureManualCardPayment(t,asOf);
 const pairs=m=>[...m].sort((a,b)=>C.compareCents(b[1],a[1]));
 const total=rows=>rows.reduce((n,t)=>C.addCents(n,t.amount),0);
 
@@ -15,8 +16,8 @@ export function normalizeWallet(s){
  return C.sanitizePdfSources(C.validate(next));
 }
 
-export function paymentRows(s){
- const manuals=s.transactions.filter(t=>t.kind==='payment'&&bankMovement(t));
+export function paymentRows(s,asOf=C.today()){
+ const manuals=s.transactions.filter(t=>t.kind==='payment'&&bankMovement(t,asOf));
  const manualIds=new Set(manuals.map(t=>t.id));
  const candidates=new Set(manuals.flatMap(t=>t.matchCandidates??[]));
  return [...manuals,...s.transactions.filter(t=>t.kind==='cardPayment'&&C.effective(t)&&
@@ -24,6 +25,7 @@ export function paymentRows(s){
 }
 
 export function periodFigures(s,period,account){
+ const asOf=C.today();
  const rows=C.rowsForPeriod(s,period).filter(t=>!account||t.account===account.id);
  const accountTypes=new Map(s.accounts.map(a=>[a.id,a.type]));
  const cats=new Map(),incomeCats=new Map();let income=0,spent=0,refunds=0,cardSpent=0,cashIn=0,cashOut=0,cardCashPayments=0,transfers=0;
@@ -41,7 +43,7 @@ export function periodFigures(s,period,account){
   }
   cats.set(t.category,category);
  }
- for(const t of s.transactions.filter(t=>bankMovement(t)&&t.date.slice(0,7)===period)){
+ for(const t of s.transactions.filter(t=>bankMovement(t,asOf)&&t.date.slice(0,7)===period)){
   if(t.kind==='transfer'){
    if(!account||t.account===account.id||t.target===account.id)transfers=C.addCents(transfers,t.amount);
    if(account&&t.account===account.id)cashOut=C.addCents(cashOut,t.amount);
@@ -57,7 +59,7 @@ export function periodFigures(s,period,account){
   if(t.kind==='income'||t.kind==='refund')cashIn=C.addCents(cashIn,t.amount);
   else if(t.kind==='expense'||t.kind==='payment')cashOut=C.addCents(cashOut,t.amount);
  }
- const payments=paymentRows(s).filter(t=>t.date.slice(0,7)===period&&(!account||(account.type==='card'?cardId(t)===account.id:t.account===account.id)));
+ const payments=paymentRows(s,asOf).filter(t=>t.date.slice(0,7)===period&&(!account||(account.type==='card'?cardId(t)===account.id:t.account===account.id)));
  const plannedIncome=total((s.incomePlans||[]).filter(p=>p.next.slice(0,7)===period&&(!account||p.account===account.id)));
  const netExpense=C.addCents(spent,-refunds);
  const categoryBreakdown=[...cats.values()].map(category=>({...category,net:C.addCents(category.spent,-category.refunds)}));
