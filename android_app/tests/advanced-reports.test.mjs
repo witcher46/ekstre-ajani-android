@@ -212,6 +212,53 @@ test('a bank payment across the month boundary is counted once before and after 
 });
 
 
+test('F-B1 preserves both statement payments while the bank match is pending', t => {
+  t.mock.timers.enable({apis:['Date'], now:new Date(2026,10,25,12)});
+  const pdf = parseStatement([
+    'QNB', 'Hesap Kesim Tarihi: 05/11/2026', 'Onceki Donem Hesap Ozeti Borcu: 180.00',
+    'Donem Borcu: 100.00', '03/11/2026 ODEME 40.00', '04/11/2026 ODEME 40.00',
+  ].join('\n'));
+  const statement = C.importStatement(base(), pdf, 'card');
+  const documentIds = statement.transactions.map(row => row.id);
+  assert.equal(new Set(documentIds).size, 2);
+  const payment = movement('actual-payment', 'bank', 'payment', '2026-11-06', 4_000, 'Kart', {target:'card'});
+  const pending = C.addTransaction(statement, payment);
+  const candidate = pending.transactions.find(row => row.id === payment.id);
+  assert.equal(candidate.matchStatus, 'pending');
+  assert.deepEqual(candidate.matchCandidates, documentIds);
+
+  const linked = C.resolveCandidate(pending, payment.id, 'link', documentIds[0]);
+  assert.equal(linked.transactions.find(row => row.id === documentIds[0]).linkedTo, payment.id);
+  const distinct = C.resolveCandidate(pending, payment.id, 'distinct');
+
+  for (const [state, cardPaid, cardDebt, pendingCount, cardIds] of [
+    [pending, 8_000, 10_000, 1, documentIds],
+    [linked, 8_000, 10_000, 0, [payment.id, documentIds[1]]],
+    [distinct, 12_000, 6_000, 0, [...documentIds, payment.id]],
+  ]) {
+    const month = '2026-11';
+    const {cardPayments, cardCashPayments, cashOut, netExpense} = advancedReports(state, month).current;
+    assert.deepEqual({cardPayments, cardCashPayments, cashOut, netExpense}, {
+      cardPayments:cardPaid, cardCashPayments:4_000, cashOut:4_000, netExpense:0,
+    });
+    assert.equal(advancedReports(state, month, {accountId:'card'}).current.cardPayments, cardPaid);
+    const bank = advancedReports(state, month, {accountId:'bank'}).current;
+    assert.deepEqual([bank.cardPayments, bank.cashOut, C.balance(state,state.accounts[0])], [4_000, 4_000, 96_000]);
+    const card = C.cardStatus(state, 'card');
+    assert.deepEqual([card.current, card.statementRemaining, card.paidAfterCut, card.pending],
+      [cardDebt, cardDebt, 10_000-cardDebt, pendingCount]);
+
+    const rows = accountId => reportRows(state, [month], {accountId}).map(row => row.id).sort();
+    assert.deepEqual(rows('card'), [...cardIds].sort());
+    assert.deepEqual(rows('bank'), [payment.id]);
+    assert.deepEqual(rows(''), [...new Set([...cardIds, payment.id])].sort());
+
+    const documents = state.transactions.filter(row => row.statement === statement.statements[0].id);
+    assert.deepEqual(documents.map(row => row.id), documentIds);
+    assert.equal(documents.reduce((sum, row) => sum + row.amount, 0), 8_000);
+  }
+});
+
 test('an earlier linked PDF or CSV payment keeps its card month after the bank date arrives', t => {
   const november30 = new Date(2026,10,30,12), december1 = new Date(2026,11,1,12);
   t.mock.timers.enable({apis:['Date'], now:november30});

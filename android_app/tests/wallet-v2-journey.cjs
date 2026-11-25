@@ -90,6 +90,89 @@ async function futureManualPaymentJourney(browser){
   }finally{await page.close();}
 }
 
+async function ambiguousStatementPaymentJourney(browser){
+  const page=await browser.newPage({timezoneId:'UTC'});
+  page.setDefaultTimeout(5000);
+  const bank={id:'fb1-bank',name:'Sentetik F-B1 banka',type:'bank',opening:100000};
+  const card={id:'fb1-card',name:'Sentetik F-B1 kart',type:'card',opening:0};
+  const wallet={format:'ekstre-android',version:1,accounts:[bank,card],transactions:[],
+    statements:[],budgets:{},subscriptions:[],categories:['Diğer']};
+  const pdf=[
+    'QNB', 'Hesap Kesim Tarihi: 05/11/2026', 'Onceki Donem Hesap Ozeti Borcu: 180.00',
+    'Donem Borcu: 100.00', '03/11/2026 ODEME 40.00', '04/11/2026 ODEME 40.00',
+  ].join('\n');
+  const read=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')));
+  const openCard=async()=>{
+    await page.locator('nav [data-page=wallet]').click();
+    await page.locator('[data-card-view=fb1-card]').click();
+  };
+  const metric=async name=>(await page.locator('[data-stat='+name+']').innerText()).match(/[\d.,]+/)?.[0];
+  try{
+    await serveAssets(page);
+    await page.clock.setFixedTime(new Date('2026-11-25T12:00:00Z'));
+    page.on('dialog',dialog=>dialog.accept());
+    await page.addInitScript(state=>{
+      if(!localStorage.getItem('ekstre-android-v1'))localStorage.setItem('ekstre-android-v1',JSON.stringify(state));
+    },wallet);
+    await page.goto('https://wallet.test/');
+    await page.evaluate(text=>window.onPdfText(text),pdf);
+    await page.locator('#import-account').selectOption(card.id);
+    await page.locator('[data-action=confirmImport]').click();
+    const documentIds=(await read()).transactions.map(row=>row.id);
+    assert.equal(new Set(documentIds).size,2);
+
+    await openCard();
+    await page.locator('[data-pay-card]').click();
+    await page.locator('#f-account').selectOption(bank.id);
+    await page.locator('#f-amount').fill('40');
+    await page.locator('#f-date').fill('2026-11-06');
+    await page.locator('#submit').click();
+    const payment=(await read()).transactions.find(row=>row.kind==='payment');
+    assert.deepEqual(payment.matchCandidates,documentIds);
+    assert.equal(await metric('cardStatementRemaining'),'100,00');
+    assert.equal(await metric('cardPaidAfterCut'),'0,00');
+    await page.getByText(/1 hareket eşleşme incelemesinde/).waitFor();
+
+    await page.locator('.card-statement-link').click();
+    assert.match(await page.locator('dt').getByText('Ödeme',{exact:true}).locator('..').innerText(),/80,00/);
+    await page.getByText('Bu ekstreyle ilişkili olası eşleşmeler inceleme kutusunda.').waitFor();
+    await page.locator('nav [data-page=home]').click();
+    await page.locator('[data-page=reports]').click();
+    assert.equal(await metric('cardPayments'),'80,00');
+    assert.equal(await metric('cardCashPayments'),'40,00');
+    assert.equal(await metric('cashOut'),'40,00');
+    assert.equal(await metric('netExpense'),'0,00');
+    await page.locator('#report-movements-toggle').click();
+    const rows=page.locator('#report-movements [data-edit]');
+    assert.deepEqual((await rows.evaluateAll(items=>items.map(item=>item.dataset.edit))).sort(),
+      [...documentIds,payment.id].sort());
+    await page.locator('#report-movements').getByText(/Banka hareketi kaydedildi; ikinci kart etkisi incelemede/).waitFor();
+    await page.locator('#f-report-account').selectOption(card.id);
+    assert.equal(await metric('cardPayments'),'80,00');
+    await page.locator('#f-report-account').selectOption(bank.id);
+    assert.equal(await metric('cardPayments'),'40,00');
+
+    await openCard();
+    await page.locator('.card-statement-link').click();
+    await page.locator('[data-page=review]').click();
+    const candidate=page.locator('[id="match-'+payment.id+'"]');
+    assert.deepEqual(await candidate.locator('option').evaluateAll(items=>items.map(item=>item.value)),documentIds);
+    await candidate.selectOption(documentIds[1]);
+    await page.locator('[data-link="'+payment.id+'"]').click();
+    const confirmed=(await read()).transactions;
+    assert.equal(confirmed.find(row=>row.id===documentIds[1]).linkedTo,payment.id);
+    assert.equal(confirmed.find(row=>row.id===documentIds[0]).linkedTo,undefined);
+    await openCard();
+    assert.equal(await metric('cardStatementRemaining'),'100,00');
+    await page.locator('nav [data-page=home]').click();
+    await page.locator('[data-page=reports]').click();
+    await page.locator('#f-report-account').selectOption('');
+    assert.equal(await metric('cardPayments'),'80,00');
+    assert.equal(await metric('cardCashPayments'),'40,00');
+    console.log('F-B1 wallet journey passed: PDF import, bank payment, reports and explicit match');
+  }finally{await page.close();}
+}
+
 async function reconciliationJourney(browser){
   const page=await browser.newPage({viewport:{width:320,height:480}});
   const errors=[];
@@ -622,6 +705,7 @@ async function reconciliationJourney(browser){
 }
 
 (async()=>{const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe'});try{
+ await ambiguousStatementPaymentJourney(browser);
  await futureManualPaymentJourney(browser);
  const page=await browser.newPage({viewport:{width:360,height:840}}),errors=[];page.setDefaultTimeout(3500);page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
  await serveAssets(page);
