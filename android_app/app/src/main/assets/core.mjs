@@ -501,15 +501,23 @@ export function cardEffectDate(s,t){
  const canonical=t.linkedTo?s.transactions.find(r=>r.id===t.linkedTo)||t:t;
  return cardDates(s)(canonical);
 }
+export function cardAfterCut(s,dateOf=cardDates(s)){
+ const statementByMovement=new Map();
+ for(const row of s.transactions)if(row.statement&&sourceOf(row)==='pdf'){
+  statementByMovement.set(row.linkedTo||row.id,row.statement);
+ }
+ // A PDF row and its linked records are one movement already included in that statement.
+ return (row,statement)=>dateOf(row)>statement.cut&&statementByMovement.get(row.linkedTo||row.id)!==statement.id;
+}
 export function cardStatus(s,account,{asOf=today()}={}){
  const a=s.accounts.find(a=>a.id===(typeof account==='string'?account:account.id));if(!a||a.type!=='card')throw Error('Kredi kartı bulunamadı.');
  const latest=s.statements.filter(st=>st.account===a.id).sort((x,y)=>y.cut.localeCompare(x.cut))[0];
  const currentAnchor=s.statements.filter(st=>st.account===a.id&&st.debt!==null).sort((x,y)=>y.cut.localeCompare(x.cut))[0];
  const rows=s.transactions.filter(effective),anchored=latest&&latest.debt!==null;
- const dateOf=cardDates(s);
+ const dateOf=cardDates(s),afterCut=cardAfterCut(s,dateOf);
  let current=currentAnchor?currentAnchor.debt:a.opening;
- for(const t of rows)if((!t.installmentPlan||dateOf(t)<=asOf)&&(!currentAnchor||dateOf(t)>currentAnchor.cut))current=addCents(current,ledgerEffect(t,a));
- const paidAfterCut=anchored?rows.filter(t=>dateOf(t)>latest.cut&&cardAccount(t)===a.id&&effectKind(t)==='cardPayment').reduce((n,t)=>addCents(n,t.amount),0):0;
+ for(const t of rows)if((!t.installmentPlan||dateOf(t)<=asOf)&&(!currentAnchor||afterCut(t,currentAnchor)))current=addCents(current,ledgerEffect(t,a));
+ const paidAfterCut=anchored?rows.filter(t=>cardAccount(t)===a.id&&effectKind(t)==='cardPayment'&&afterCut(t,latest)).reduce((n,t)=>addCents(n,t.amount),0):0;
  return {current,statementDebt:latest?.debt??null,statementRemaining:anchored?positiveCents(addCents(latest.debt,-paidAfterCut)):null,paidAfterCut,latest:latest||null,currentAnchor:currentAnchor||null,pending:s.transactions.filter(t=>t.matchStatus==='pending'&&cardAccount(t)===a.id).length};
 }
 const countsForCashBalance=t=>effective(t)||(t.matchStatus==='pending'&&t.kind==='payment'&&!t.linkedTo);
@@ -652,13 +660,13 @@ export function removeTransaction(s,tid){
  return validate(repairReferences(next));
 }
 function preferPdfAcrossCut(s){
- const dateOf=cardDates(s);
+ const afterCut=cardAfterCut(s);
  for(const row of s.transactions.filter(t=>t.matchStatus==='pending'&&sourceOf(t)==='pdf')){
   const latest=s.statements.filter(st=>st.account===row.account&&st.debt!==null).sort((a,b)=>b.cut.localeCompare(a.cut))[0];
   if(!latest)continue;
   const candidates=s.transactions.filter(t=>row.matchCandidates?.includes(t.id)&&effective(t)&&
    (row.kind==='cardPayment'||(row.kind==='expense'&&row.installment&&t.installmentPlan)));
-  if(!candidates.some(t=>(dateOf(t)>latest.cut)!==(dateOf(row)>latest.cut)))continue;
+  if(!candidates.some(t=>afterCut(t,latest)!==afterCut(row,latest)))continue;
   for(const t of candidates){
    t.matchStatus='pending';t.matchCandidates=[row.id];
   }
