@@ -387,6 +387,9 @@ function merchantRuleForm(rule){
   (rule?`<button type="button" class="danger" data-remove-rule="${esc(rule.id)}">Kuralı sil</button>`:''),
   f=>commit(C.saveMerchantRule(state,f.get('merchant'),f.get('category'),rule?.id)));
 }
+function rejectFutureCardPaymentDate(date){
+ if(date>C.today())throw Error('Gerçek kart ödeme tarihi gelecekte olamaz. Bugünün veya daha önceki bir tarihi seç.');
+}
 function transactionForm(existing,preset='expense'){
  if(!state.accounts.length){notice('Önce hesap veya kart ekle.');accountForm();return;}
  if(existing?.linkedTo){const canonical=state.transactions.find(t=>t.id===existing.linkedTo);if(canonical)return transactionForm(canonical);}
@@ -394,6 +397,7 @@ function transactionForm(existing,preset='expense'){
  const merchant=desc=>existing?.merchantName??existing?.sourceDesc??desc;
  modal(isEdit?'İşlem ayrıntısı':preset==='income'?'Gelir ekle':preset==='transfer'?'Transfer yap':'Gider ekle',select('kind','İşlem türü',options(Object.entries(kinds).filter(([k])=>k!=='cardPayment'||existing?.kind===k),existing?.kind||preset))+select('account','Hesap',accountOptions(()=>true,existing?.account||(page==='account'?detailId:undefined)))+`<div id="target-fields"></div>`+field('desc','Açıklama',existing?.desc||'','text','required maxlength="500"')+field('amount','Tutar (TL)',existing?existing.amount/100:'','text','inputmode="decimal" required')+field('date','Gerçek işlem tarihi',existing?.date||C.today(),'date','required')+(existing?.installmentPlan?'<p class="notice">Taksit planına bağlı. Açıklama, kategori ve not düzenlenebilir.</p>':locked?`<p class="notice">Kaynak: ${esc(C.sourceOf(existing))} · Ekstre dönemi: ${esc(existing.period)}<br>Orijinal açıklama: ${esc(existing.sourceDesc??existing.desc)}</p>`:'')+select('category','Kategori',categoryOptions(existing?.kind||preset,existing?.category))+`<div id="category-suggestion"><p id="category-advice" role="status"></p><button id="choose-category" type="button" hidden>Önerilen kategoriyi seç</button><label><input name="remember-category" type="checkbox"> Bu satıcı için kategori önerisini hatırla</label></div><div id="installment-fields"></div>`+field('note','Not',existing?.note||'','text','maxlength="2000"')+`<label><input name="reviewed" type="checkbox" ${existing?.reviewed?'checked':''}> İncelendi</label>`+(existing?`<button type="button" class="danger" data-delete="${esc(existing.id)}">${existing.installmentPlan?'Taksit planını sil':'İşlemi sil'}</button>`:''),f=>{
   const kind=locked?existing.kind:f.get('kind'),t={...existing,id:existing?.id||C.id(),account:locked?existing.account:f.get('account'),kind,desc:f.get('desc').trim(),amount:C.money(f.get('amount')),date:f.get('date'),period:existing&&(locked||existing.date===f.get('date'))?existing.period:f.get('date').slice(0,7),category:['payment','transfer','cardPayment'].includes(kind)?kinds[kind]:f.get('category'),note:f.get('note'),reviewed:f.get('reviewed')==='on'};
+  if(kind==='payment'&&C.sourceOf(t)==='manual')rejectFutureCardPaymentDate(t.date);
   if(['payment','transfer'].includes(kind))t.target=f.get('target');else delete t.target;
   const count=f.get('installmentCount')?.trim();
   if(!locked){const installment=f.get('installment')?.trim();if(count&&installment)throw Error('Taksit planı veya tek taksit bilgisi gir.');if(kind==='expense'&&installment){const [a,b]=installment.split('/').map(Number);if(!/^\d{1,3}\/\d{1,3}$/.test(installment)||a<1||b<a)throw Error('Taksidi 1/6 gibi yaz; mevcut taksit toplamdan büyük olamaz.');t.installment=installment;}else delete t.installment;}
@@ -441,12 +445,19 @@ function payCardForm(cardId,{sourceId=''}={}){
  const card=cards.find(a=>a.id===cardId)||cards[0],status=W.cardDetail(state,card.id),suggested=status.statementRemaining>0?status.statementRemaining:status.debt;
  const source=sources.find(account=>account.id===sourceId);
  modal('Kart borcu öde',select('target','Ödenecek kredi kartı',options(cards.map(a=>[a.id,a.name]),card.id))+select('account','Paranın çıktığı banka / nakit hesabı',options([['','Kaynak hesabı seç'],...sources.map(a=>[a.id,a.name])],source?.id??''))+field('amount','Ödenen tutar (TL)',suggested?C.decimalMoney(suggested):'','text','inputmode="decimal" required')+field('date','Gerçek ödeme tarihi',C.today(),'date','required')+'<p class="notice">Banka / nakit bakiyesi azalır, kart borcu kapanır. Bu ödeme yeni bir gider değildir. Ekstrede aynı ödeme varsa incelemede eşleştir.</p>',f=>{
-  if(!f.get('account'))throw Error('Kaynak hesabı seç.');commit(C.addTransaction(state,{id:C.id(),kind:'payment',account:f.get('account'),target:f.get('target'),amount:C.money(f.get('amount')),date:f.get('date'),period:f.get('date').slice(0,7),desc:accountName(f.get('target'))+' borç ödemesi',category:'Kart ödemesi',note:''}));
+  const date=f.get('date');
+  rejectFutureCardPaymentDate(date);
+  if(!f.get('account'))throw Error('Kaynak hesabı seç.');
+  commit(C.addTransaction(state,{id:C.id(),kind:'payment',account:f.get('account'),target:f.get('target'),amount:C.money(f.get('amount')),date,period:date.slice(0,7),desc:accountName(f.get('target'))+' borç ödemesi',category:'Kart ödemesi',note:''}));
  },'Ödemeyi kaydet');
  $('f-target').onchange=()=>{const d=W.cardDetail(state,$('f-target').value);$('f-amount').value=C.decimalMoney(d.statementRemaining>0?d.statementRemaining:d.debt);};
 }
 function attachPaymentForm(tid){const t=state.transactions.find(t=>t.id===tid);if(!t)return;
- modal('Ekstre ödemesine kaynak bağla',`<p>${esc(t.desc)} · ${fmt(t.amount)}</p><p>Yalnız paranın hangi hesaptan çıktığını biliyorsan bağla. Kaynağı bilinmeyen ekstre ödemesi gelir sayılmaz. Zaten kaydettiğin banka ödemesi varsa inceleme kutusunda eşleştir.</p>`+select('account','Kaynak banka / nakit',options([['','Kaynak hesabı seç'],...state.accounts.filter(a=>a.type!=='card').map(a=>[a.id,a.name])],''))+field('paidOn','Bankadan paranın çıktığı tarih',t.date,'date','required'),f=>commit(W.attachPaymentSource(state,tid,f.get('account'),{paidOn:f.get('paidOn')})),'Kaynağı bağla');
+ modal('Ekstre ödemesine kaynak bağla',`<p>${esc(t.desc)} · ${fmt(t.amount)}</p><p>Yalnız paranın hangi hesaptan çıktığını biliyorsan bağla. Kaynağı bilinmeyen ekstre ödemesi gelir sayılmaz. Zaten kaydettiğin banka ödemesi varsa inceleme kutusunda eşleştir.</p>`+select('account','Kaynak banka / nakit',options([['','Kaynak hesabı seç'],...state.accounts.filter(a=>a.type!=='card').map(a=>[a.id,a.name])],''))+field('paidOn','Bankadan paranın çıktığı tarih',t.date,'date','required'),f=>{
+  const paidOn=f.get('paidOn');
+  rejectFutureCardPaymentDate(paidOn);
+  commit(W.attachPaymentSource(state,tid,f.get('account'),{paidOn}));
+ },'Kaynağı bağla');
 }
 function incomePlanForm(){if(!state.accounts.some(a=>a.type!=='card'))throw Error('Önce bir banka veya nakit hesabı ekle.');
  modal('Düzenli gelir planla',field('name','Gelir adı','','text','required maxlength="200"')+select('account','Gelirin geleceği hesap',accountOptions(a=>a.type!=='card'))+field('amount','Beklenen tutar (TL)','','text','inputmode="decimal" required')+field('next','Planlanan gelir tarihi',C.today(),'date','required')+select('category','Gelir kategorisi',categoryOptions('income','Maaş'))+'<p class="notice">Plan oluşturmak bakiye veya aylık geliri artırmaz. Para geldiğinde “Gelir alındı” ile gerçek tarihi kaydet.</p>',f=>commit(W.addIncomePlan(state,{name:f.get('name').trim(),account:f.get('account'),amount:C.money(f.get('amount')),next:f.get('next'),category:f.get('category')})));

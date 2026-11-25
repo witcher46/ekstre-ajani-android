@@ -14,6 +14,82 @@ function serveAssets(page){
   });
 }
 
+
+async function futureManualPaymentJourney(browser){
+  const page=await browser.newPage({timezoneId:'UTC'});
+  page.setDefaultTimeout(3500);
+  const error=page.locator('#form-error'),date=page.locator('#f-date'),submit=page.locator('#submit');
+  const read=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')));
+  const notice=/Gerçek kart ödeme tarihi gelecekte olamaz/;
+  const bank={id:'fs1-bank',name:'Sentetik F-S1 banka',type:'bank',opening:100000};
+  const card={id:'fs1-card',name:'Sentetik F-S1 kart',type:'card',opening:0};
+  const future='2026-11-26',today='2026-11-25';
+  const wallet={format:'ekstre-android',version:1,accounts:[bank,card],transactions:[],
+    statements:[{id:'fs1-statement',account:card.id,period:'2026-11',cut:'2026-11-05',debt:10000,due:'2026-11-30'}],
+    budgets:{},subscriptions:[],categories:['Diğer']};
+  async function restore(state){
+    await page.locator('#backup-file').setInputFiles({name:'synthetic-fs1.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(state))});
+    await page.waitForFunction(count=>JSON.parse(localStorage.getItem('ekstre-android-v1'))?.transactions.length===count,state.transactions.length);
+  }
+  async function openCard(){
+    await page.locator('nav [data-page=wallet]').click();
+    await page.locator('[data-card-view="'+card.id+'"]').click();
+  }
+  async function assertMetric(metric,value){
+    const text=await page.locator('[data-stat='+metric+']').innerText();
+    assert.equal(text.match(/[\d.,]+/)?.[0],value,metric);
+  }
+  async function assertFigures(cash,debt,paid){
+    await page.locator('nav [data-page=home]').click();
+    for(const [metric,value] of [['cash',cash],['cardDebt',debt],['netExpense','0,00']]){
+      await assertMetric(metric,value);
+    }
+    await page.locator('[data-page=reports]').click();
+    await assertMetric('cardCashPayments',paid);
+    await assertMetric('cardPayments',paid);
+    await openCard();
+    await assertMetric('cardStatementRemaining',debt);
+  }
+  try{
+    await serveAssets(page);
+    await page.clock.setFixedTime(new Date(today+'T12:00:00Z'));
+    page.on('dialog',dialog=>dialog.accept());
+    await page.goto('https://wallet.test/');
+    await restore(wallet);
+    await openCard();
+    await page.locator('[data-pay-card]').click();
+    await page.locator('#f-account').selectOption(bank.id);
+    await page.locator('#f-amount').fill('40');
+    await date.fill(future);
+    await submit.click();
+    assert.match(await error.textContent(),notice);
+    assert.deepEqual((await read()).transactions,[]);
+    await date.fill(today);
+    await submit.click();
+    const [payment]=(await read()).transactions;
+    assert.deepEqual([payment.kind,payment.date,payment.amount],['payment',today,4000]);
+    await assertFigures('960,00','60,00','40,00');
+    await page.locator('[data-edit="'+payment.id+'"]').click();
+    await date.fill(future);
+    await submit.click();
+    assert.match(await error.textContent(),notice);
+    assert.deepEqual((await read()).transactions,[payment]);
+    await page.locator('#close').click();
+
+    const legacy={...payment,id:'fs1-legacy',date:future};
+    await page.locator('#backup-file').setInputFiles({name:'synthetic-fs1-legacy.json',mimeType:'application/json',
+      buffer:Buffer.from(JSON.stringify({...wallet,transactions:[legacy]}))});
+    await page.waitForFunction(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')).transactions[0]?.id==='fs1-legacy');
+    assert.deepEqual((await read()).transactions,[legacy]);
+    await assertFigures('1.000,00','100,00','0,00');
+    await page.clock.setFixedTime(new Date(future+'T12:00:00Z'));
+    await page.reload();
+    await assertFigures('960,00','60,00','40,00');
+    assert.deepEqual((await read()).transactions,[legacy]);
+    console.log('F-S1 wallet journey passed: real payment entry/edit, legacy restore and realization date');
+  }finally{await page.close();}
+}
+
 async function reconciliationJourney(browser){
   const page=await browser.newPage({viewport:{width:320,height:480}});
   const errors=[];
@@ -546,6 +622,7 @@ async function reconciliationJourney(browser){
 }
 
 (async()=>{const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe'});try{
+ await futureManualPaymentJourney(browser);
  const page=await browser.newPage({viewport:{width:360,height:840}}),errors=[];page.setDefaultTimeout(3500);page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
  await serveAssets(page);
  await page.goto('https://wallet.test/');const read=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')));
@@ -569,7 +646,7 @@ async function reconciliationJourney(browser){
  await page.locator('nav [data-page=wallet]').click();await account('Sentetik ikinci kart','card','0');s=await read();const card2=s.accounts.at(-1).id;
  const sourcePdf='QNB\nHesap Kesim Tarihi: 05/10/2026\nOnceki Donem Hesap Ozeti Borcu: 1000.00\nDonem Borcu: 400.00\n04/10/2026 ODEME TESEKKUR 600.00';await page.evaluate(t=>window.onPdfText(t),sourcePdf);await page.locator('#import-account').selectOption(card2);await page.locator('[data-action=confirmImport]').click();s=await read();const debtBefore=await page.evaluate(async id=>{const C=await import('./core.mjs');return C.cardStatus(JSON.parse(localStorage.getItem('ekstre-android-v1')),id).current;},card2);assert.equal(debtBefore,40000);
  const bankBefore=await page.evaluate(async id=>{const C=await import('./core.mjs'),s=JSON.parse(localStorage.getItem('ekstre-android-v1'));return C.balance(s,s.accounts.find(a=>a.id===id));},bank);
- await page.locator('nav [data-page=wallet]').click();await page.locator(`[data-card-view="${card2}"]`).click();await page.locator('[data-bind-payment]').click();await page.locator('[name=account]').selectOption(bank);await page.locator('[name=paidOn]').fill('2026-10-07');await page.locator('#submit').click();assert.equal(await page.locator('[data-bind-payment]').count(),0);assert.equal(await page.evaluate(async id=>{const C=await import('./core.mjs'),s=JSON.parse(localStorage.getItem('ekstre-android-v1'));return C.balance(s,s.accounts.find(a=>a.id===id));},bank),bankBefore-60000);assert((await page.locator('[data-stat=cardDebt]').innerText()).includes('400,00'));
+ await page.locator('nav [data-page=wallet]').click();await page.locator(`[data-card-view="${card2}"]`).click();await page.locator('[data-bind-payment]').click();await page.locator('[name=account]').selectOption(bank);await page.locator('[name=paidOn]').fill('2099-01-01');await page.locator('#submit').click();assert.match(await page.locator('#form-error').textContent(),/Gerçek kart ödeme tarihi gelecekte olamaz/);assert.deepEqual(await read(),s);await page.locator('[name=paidOn]').fill('2026-10-07');await page.locator('#submit').click();assert.equal(await page.locator('[data-bind-payment]').count(),0);assert.equal(await page.evaluate(async id=>{const C=await import('./core.mjs'),s=JSON.parse(localStorage.getItem('ekstre-android-v1'));return C.balance(s,s.accounts.find(a=>a.id===id));},bank),bankBefore-60000);assert((await page.locator('[data-stat=cardDebt]').innerText()).includes('400,00'));
  const attached=await read();await page.evaluate(t=>window.onPdfText(t),sourcePdf);await page.locator('#import-account').selectOption(card2);await page.locator('[data-action=confirmImport]').click();assert.equal((await read()).transactions.length,attached.transactions.length);
  const mismatch=sourcePdf.replace('400.00','500.00');await page.evaluate(t=>window.onPdfText(t),mismatch);assert(await page.locator('[data-action=confirmImport]').isDisabled());assert.equal((await read()).transactions.length,attached.transactions.length);await page.locator('[data-action=cancelImport]').click();
  assert.deepEqual(errors,[]);await page.locator('nav [data-page=home]').click();await page.locator('#period').fill('2026-10');await page.screenshot({path:path.join(out,'overview.png'),fullPage:true});fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['salary income','card spending','card detail payment','no duplicate expense','PDF match and repeat','planned income excluded','received income actual date and account','unverified import consent','discount type','import edit and reimport preserves source category note','v1 restore identifiers balances unknown fields','reload','legacy linked period note edit','unknown payment bank attachment actual date','source attachment survives reimport','mismatch preview blocked'],errors},null,2));console.log('16 wallet v2 user flows passed');

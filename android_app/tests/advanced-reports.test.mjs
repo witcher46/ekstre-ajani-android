@@ -179,7 +179,8 @@ test('legacy JSON keeps an unmatched statement payment separate from cash moveme
   });
 });
 
-test('a bank payment across the month boundary is counted once before and after matching', () => {
+test('a bank payment across the month boundary is counted once before and after matching', t => {
+  t.mock.timers.enable({apis:['Date'],now:new Date(2027,0,1,12)});
   const pdf = parseStatement([
     'QNB', 'Hesap Kesim Tarihi: 05/01/2027', '31/12/2026 ODEME 50.00',
   ].join('\n'));
@@ -189,20 +190,74 @@ test('a bank payment across the month boundary is counted once before and after 
   assert.equal(pending.transactions.find(row => row.id === payment.id).matchStatus, 'pending');
   const linked = C.resolveCandidate(pending, payment.id, 'link', statement.transactions[0].id);
 
-  for (const state of [pending, linked]) {
+  for (const [state, prior] of [[pending,0],[linked,5_000]]) {
     const {current, previous, totals} = advancedReports(state, '2027-01');
-    assert.equal(previous.cardPayments, 0);
-    assert.equal(current.cardPayments, 5_000);
+    assert.equal(previous.cardPayments, prior);
+    assert.equal(current.cardPayments, 5_000-prior);
     assert.equal(current.cardCashPayments, 5_000);
     assert.equal(current.cashOut, 5_000);
     assert.equal(totals.spent, 0);
     assert.equal(totals.cardPayments, 5_000);
   }
-  for (const state of [pending, linked]) {
-    assert.deepEqual(reportRows(state, ['2026-12'], {accountId:'card'}), []);
-    for (const accountId of ['', 'bank', 'card']) {
-      assert.deepEqual(reportRows(state, ['2027-01'], {accountId}).map(row => row.id), [payment.id]);
+  const reportIds = (state,month,accountId) => reportRows(state,[month],{accountId}).map(row=>row.id);
+  assert.deepEqual(reportIds(pending,'2026-12','card'),[]);
+  assert.deepEqual(reportIds(pending,'2027-01','card'),[payment.id]);
+  assert.deepEqual(reportIds(linked,'2026-12','card'),[statement.transactions[0].id]);
+  assert.deepEqual(reportIds(linked,'2027-01','card'),[]);
+  for(const state of [pending,linked]){
+    for(const accountId of ['', 'bank']){
+      assert.deepEqual(reportIds(state,'2027-01',accountId),[payment.id]);
     }
+  }
+});
+
+
+test('an earlier linked PDF or CSV payment keeps its card month after the bank date arrives', t => {
+  const november30 = new Date(2026,10,30,12), december1 = new Date(2026,11,1,12);
+  t.mock.timers.enable({apis:['Date'], now:november30});
+  const october = {bank:'QNB', period:'2026-10', cut:'2026-10-05', due:null, debt:10_000, rows:[]};
+  const initial = C.importStatement(base(), october, 'card');
+  const november = parseStatement('QNB\nHesap Kesim Tarihi: 30/11/2026\n30/11/2026 ODEME 40.00');
+  const settled = C.importStatement(initial, {...november,debt:6_000,rows:[]}, 'card');
+  const posted = [
+    C.importStatement(initial, november, 'card'),
+    C.importCsv(settled, [{date:'2026-11-30', period:'2026-11', desc:'Sentetik ödeme', cents:4_000,
+      kind:'odeme', category:'Kart ödemesi', transactionId:'synthetic-month-boundary'}], 'card'),
+  ];
+  const bank = initial.accounts.find(account => account.id === 'bank');
+  const payment = movement('legacy-bank', 'bank', 'payment', '2026-12-01', 4_000, 'Kart ödemesi', {target:'card'});
+  const values = (state,accountId,field) => {
+    const {previous,current,totals} = advancedReports(state,'2026-12',{accountId});
+    return [previous[field],current[field],totals[field]];
+  };
+  const ids = (state,month,accountId) => reportRows(state,[month],{accountId}).map(row => row.id);
+  for (const imported of posted) {
+    t.mock.timers.setTime(november30.getTime());
+    const [source] = imported.transactions;
+    const legacy = C.readBackup(C.backupText(C.resolveCandidate(
+      C.addTransaction(imported,payment),payment.id,'link',source.id)));
+    assert.equal(C.balance(legacy,bank),100_000);
+    assert.equal(C.cardStatus(legacy,'card').current,6_000);
+    assert.deepEqual(values(legacy,'card','cardPayments'),[4_000,0,4_000]);
+    assert.deepEqual(values(legacy,'bank','cashOut'),[0,0,0]);
+
+    t.mock.timers.setTime(december1.getTime());
+    assert.deepEqual(values(legacy,'card','cardPayments'),[4_000,0,4_000]);
+    assert.deepEqual(values(legacy,'','cardPayments'),[4_000,0,4_000]);
+    assert.deepEqual(values(legacy,'bank','cardPayments'),[0,4_000,4_000]);
+    assert.deepEqual(values(legacy,'','cardCashPayments'),[0,4_000,4_000]);
+    assert.deepEqual(values(legacy,'bank','cashOut'),[0,4_000,4_000]);
+    assert.deepEqual(values(legacy,'','netExpense'),[0,0,0]);
+    assert.equal(C.balance(legacy,bank),96_000);
+    const card = C.cardStatus(legacy,'card');
+    assert.equal(card.current,6_000);
+    assert.equal(card.statementRemaining,source.source==='csv'?6_000:null);
+    assert.equal(C.cardEffectDate(legacy,source),'2026-11-30');
+    assert.deepEqual(ids(legacy,'2026-11','card'),[source.id]);
+    assert.deepEqual(ids(legacy,'2026-12','card'),[]);
+    assert.deepEqual(ids(legacy,'2026-11','bank'),[]);
+    assert.deepEqual(ids(legacy,'2026-12','bank'),[payment.id]);
+    assert.deepEqual(ids(legacy,'2026-12',''),[payment.id]);
   }
 });
 

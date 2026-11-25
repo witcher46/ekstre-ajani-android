@@ -67,10 +67,13 @@ export function reportRows(state, periods, {accountId = '', category} = {}) {
     return calendarRows.filter(row => (!accountId || row.account === accountId) &&
       row.category === category && (row.kind === 'expense' || row.kind === 'refund'));
   }
-  // Match the payment totals, including a known bank outflow awaiting linkage.
+  const account=state.accounts.find(account=>account.id===accountId);
+  const bankAccount=account?.type==='card'?undefined:account?.id;
+  // The unfiltered cash-flow drilldown includes each leg in the month it was recorded.
   const rows = [
     ...calendarRows.filter(row => row.kind !== 'payment' && row.kind !== 'cardPayment'),
-    ...paymentRows(state).filter(row => months.has(row.date.slice(0,7))),
+    ...paymentRows(state,C.today(),{bankAccount,includeBankMovements:!accountId})
+      .filter(row => months.has(row.date.slice(0,7))),
   ];
   return rows.filter(row => {
     const belongsToAccount = !accountId || row.account === accountId;
