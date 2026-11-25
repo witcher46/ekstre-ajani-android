@@ -238,13 +238,14 @@ test('partial, refund, overpaid and prior-debt cases use independent cents expec
   const o=W.overview(s,'2026-10');for(const key of ['cash','debt','credit','netWorth','netExpense'])assert.equal(o[key==='debt'?'cardDebt':key==='credit'?'cardCredit':key],f[key],key);
  }
 });
-test('pending cross-cut bank payment remains in actual-month cash report after link',async()=>{
+test('linking a cross-cut payment preserves the bank month and uses the earlier document month for the card',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date(2026,10,1,12)});
  const W=await wallet();let s=C.addTransaction(base(),manual({date:'2026-11-01'}));
  s=C.importStatement(s,pdf([imported({date:'2026-10-30'})],{cut:'2026-10-31'}),'card');
  assert.equal(W.overview(s,'2026-11').cardPayments,100000);assert.equal(W.overview(s,'2026-10').cardPayments,0);
  const p=s.transactions.find(t=>t.matchStatus==='pending');s=C.resolveCandidate(s,p.id,'link',p.matchCandidates[0]);
  assert.equal(W.overview(s,'2026-11').cashOut,100000);assert.equal(W.overview(s,'2026-10').cashOut,0);
- assert.equal(W.overview(s,'2026-11').cardPayments,100000);
+ assert.equal(W.overview(s,'2026-11').cardPayments,0);assert.equal(W.overview(s,'2026-10').cardPayments,100000);
 });
 test('v1 normalization clones, preserves identifiers and unknown values, and defaults only optional fields',async()=>{
  const W=await wallet(),s=base();s.extra={nested:['original',123]};s.accounts[0].custom='account';s.transactions.push(tx({id:'legacy-id',legacy:{a:1}}));

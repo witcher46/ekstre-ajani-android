@@ -31,7 +31,7 @@ Manuel taksit planında ilk taksit tarihini kullanıcı seçer. PDF’deki taksi
 
 Bir hareket, borç tahminine dayanak olan ekstreye dahilse kaynak işlem tarihi kesimden sonra olsa bile borca ikinci kez eklenmez veya borçtan ikinci kez düşülmez. Onaylanmış kaynak bağlantıları aynı hareketin kimliğini korur. Ekran, tarih tutarsızlığını gösterir ve kaynaktaki tarihi korur. Son ekstrede dönem borcu bilinmiyorsa tahmin önceki bilinen borçtan başlayabilir. Son ekstreye dahil bir hareket, o kesimden sonraki yeni hareket toplamına girmez.
 
-Banka veya nakit hesabından yapılan gerçek kart ödemesi bugünün ya da önceki bir günün tarihiyle kaydedilir. Yedekten açılan ileri tarihli manuel ödemenin kaydı ve tarihi korunur. Banka veya nakit çıkışı kendi tarihinde bir kez yansır. Bu tarihe kadar kart borcuna ve ödeme raporuna yalnızca varsa tarihi gelmiş, bağlantısı onaylanmış PDF veya CSV ödemesi yansır. Banka çıkışı gerçekleştiğinde bağlı hareket tek ödeme olarak sayılmaya devam eder. Kaynak tarihleri ve ekstre dayanağı korunur.
+Banka veya nakit hesabından yapılan gerçek kart ödemesi bugünün ya da önceki bir günün tarihiyle kaydedilir. Yedekten açılan ileri tarihli manuel ödemenin kaydı ve tarihi korunur. Banka veya nakit çıkışı kendi tarihinde bir kez yansır. Bu tarihe kadar kart borcuna ve ödeme raporuna yalnızca varsa tarihi gelmiş, bağlantısı onaylanmış PDF veya CSV ödemesi yansır. Onaylı belge banka çıkışından önceki bir aya aitse kart ödeme toplamı belge ayında kalır. Banka hareketi kendi ayında banka hesabına ve nakit çıkışına bir kez yazılır. Kaynak tarihleri ve ekstre dayanağı korunur.
 
 ## Ürün kararı bekleyen alanlar
 

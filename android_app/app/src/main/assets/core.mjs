@@ -293,14 +293,22 @@ export function removeExpenseCategory(s,category,{moveRulesTo,removeRules=false}
 export const sourceOf=t=>t.source||(t.statement?'pdf':t.csvKey?'csv':'manual');
 export const isFutureManualCardPayment=(t,asOf)=>t.kind==='payment'&&sourceOf(t)==='manual'&&t.date>asOf;
 export const effective=t=>!t.linkedTo&&t.matchStatus!=='pending';
-export function postedSourcesForFuturePayments(s,asOf){
- const future=new Set(s.transactions.filter(t=>isFutureManualCardPayment(t,asOf)&&effective(t)).map(t=>t.id));
- const posted=new Map();
- if(!future.size)return posted;
+export function postedCardPaymentSources(s,asOf){
+ const payments=new Map();
  for(const row of s.transactions){
-  if(!future.has(row.linkedTo)||row.kind!=='cardPayment'||row.date>asOf)continue;
+  if(row.kind==='payment'&&sourceOf(row)==='manual'&&effective(row))payments.set(row.id,row);
+ }
+ const posted=new Map();
+ if(!payments.size)return posted;
+ for(const row of s.transactions){
+  if(!payments.has(row.linkedTo)||row.kind!=='cardPayment'||row.date>asOf)continue;
   const source=sourceOf(row);
   if(source==='pdf'||(source==='csv'&&!posted.has(row.linkedTo)))posted.set(row.linkedTo,row);
+ }
+ for(const [id,document] of posted){
+  const bank=payments.get(id);
+  // Keep a posted card payment in its original month when the bank outflow arrives later.
+  if(bank.date<=asOf&&document.date.slice(0,7)>=bank.date.slice(0,7))posted.delete(id);
  }
  return posted;
 }
@@ -500,18 +508,18 @@ export function setTransactionCategory(s,id,category){
  return validate({...s,transactions:s.transactions.map(t=>t===row?{...t,category}:t)});
 }
 function ledgerEffect(t,a){let n=0;if(t.account===a.id)n=a.type==='card'?(t.kind==='expense'?t.amount:['refund','cardPayment'].includes(t.kind)?-t.amount:0):(['income','refund'].includes(t.kind)?t.amount:-t.amount);if(t.target===a.id)n+=a.type==='card'?-t.amount:t.amount;return n;}
-export function cardDates(s){
+export function cardDates(s,posted){
  const cuts=new Map(s.statements.map(st=>[st.id,st.cut]));
  const pdfDates=new Map();
  for(const t of s.transactions)if(sourceOf(t)==='pdf'&&!pdfDates.has(t.linkedTo||t.id)){
   const date=t.kind==='expense'&&t.installment&&t.date.slice(0,7)!==t.period?cuts.get(t.statement)??t.date:t.date;
   pdfDates.set(t.linkedTo||t.id,date);
  }
- return t=>pdfDates.get(t.linkedTo||t.id)??t.date;
+ return t=>posted?.get(t.linkedTo||t.id)?.date??pdfDates.get(t.linkedTo||t.id)??t.date;
 }
 export function cardEffectDate(s,t){
  const canonical=t.linkedTo?s.transactions.find(r=>r.id===t.linkedTo)||t:t;
- return cardDates(s)(canonical);
+ return cardDates(s,postedCardPaymentSources(s,today()))(canonical);
 }
 export function cardAfterCut(s,dateOf=cardDates(s)){
  const statementByMovement=new Map();
@@ -525,11 +533,9 @@ export function cardStatus(s,account,{asOf=today()}={}){
  const a=s.accounts.find(a=>a.id===(typeof account==='string'?account:account.id));if(!a||a.type!=='card')throw Error('Kredi kartı bulunamadı.');
  const latest=s.statements.filter(st=>st.account===a.id).sort((x,y)=>y.cut.localeCompare(x.cut))[0];
  const currentAnchor=s.statements.filter(st=>st.account===a.id&&st.debt!==null).sort((x,y)=>y.cut.localeCompare(x.cut))[0];
- const posted=postedSourcesForFuturePayments(s,asOf),anchored=latest&&latest.debt!==null;
+ const posted=postedCardPaymentSources(s,asOf),anchored=latest&&latest.debt!==null;
  const rows=s.transactions.filter(t=>effective(t)&&(!isFutureManualCardPayment(t,asOf)||posted.has(t.id)));
- const cardDate=cardDates(s);
- // Keep the canonical identity so the statement anchor still recognizes its linked payment.
- const afterCut=cardAfterCut(s,t=>posted.get(t.id)?.date??cardDate(t));
+ const cardDate=cardDates(s,posted),afterCut=cardAfterCut(s,cardDate);
  let current=currentAnchor?currentAnchor.debt:a.opening;
  for(const t of rows)if((!t.installmentPlan||cardDate(t)<=asOf)&&(!currentAnchor||afterCut(t,currentAnchor)))current=addCents(current,ledgerEffect(t,a));
  const paidAfterCut=anchored?rows.filter(t=>cardAccount(t)===a.id&&effectKind(t)==='cardPayment'&&afterCut(t,latest)).reduce((n,t)=>addCents(n,t.amount),0):0;
