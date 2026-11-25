@@ -244,6 +244,21 @@ async function run() {
     const token=()=>page.evaluate(()=>window.pdfRequests.at(-1));
     const complete=(text,id)=>page.evaluate(([text,id])=>window.onPdfText(text,id),[text,id]);
     const nativeError=(message,id)=>page.evaluate(([message,id])=>window.onPdfError(message,id),[message,id]);
+
+    const dateFixture=fs.readFileSync(path.join(__dirname,'fixtures/pdf-parser-audit/qnb.synthetic.txt'),'utf8');
+    const unsupportedDates=[
+      dateFixture.replace('ParaPuan','2026-10-05 SENTETIK ALISVERIS 40.00\n2026-10-05 SENTETIK IADE -40.00\nParaPuan'),
+      dateFixture.replace('SENTETIK MARKET 100.00','SENTETIK MARKET\n2026-10-05 SENTETIK BASKA ALISVERIS 100.00'),
+    ];
+    for(const text of unsupportedDates){
+      await choose();
+      await complete(text,await token());
+      assert.match(await page.locator('#error-announcement').textContent(),/işlem tarihi biçimi/i);
+      assert.equal(await preview.count(),0);
+      assert.equal(await save.count(),0);
+      assert.deepEqual(await snapshot(),beforePdfErrors);
+    }
+
     await choose();
     const first=await token();
     assert.equal(typeof first,'string');

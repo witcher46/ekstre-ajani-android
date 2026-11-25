@@ -66,6 +66,12 @@ function legacyDescription(s,inst){
 }
 const rowPatterns=[numeric,named].map(p=>new RegExp('^'+p+'(?:\\s+(.*))?$'));
 const rowMatch=line=>rowPatterns.map(p=>line.match(p)).find(Boolean);
+const numericDateStart=/^(?:\d{4}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{1,2}|\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*(?:\d{4}|\d{2}))(?!\d|[.,]\d)/;
+function matchMovementStart(line){
+ const match=rowMatch(line);
+ if(!match&&numericDateStart.test(line))throw Error('Ekstrede tanınmayan işlem tarihi biçimi var; kısmi kayıt yapılmadı.');
+ return match;
+}
 const previousLabels='O?nceki\\s+D[o]?nem\\s+Hesap\\s+O?zeti\\s+Borcu(?:nuz)?|O?nceki\\s+D[o]?nem\\s+Borcu(?:nuz)?|O?nceki\\s+Hesap\\s+O?zeti\\s+Borcu(?:nuz)?|O?nceki\\s+Ekstre\\s+Borcu(?:nuz)?';
 const qnbCarryover='Onceki\\s+Donem\\s+Bakiyeniz';
 const debtLabels='(?:(?:Bu|Toplam)\\s+)?D[o]?nem\\s+Borcu(?:nuz)?|Hesap\\s+O?zeti\\s+Borcu(?:nuz)?|Ekstre\\s+Borcu(?:nuz)?';
@@ -169,14 +175,14 @@ function parseStatementRows(text,privateIdentities){
  let foreignMovement=false,implicitMovement=false;
  for(let i=0;i<movementEnd;i++){
   const line=lines[i].trim().replace(/\s+/g,' ');
-  const nextLine=lines[i+1]?.trim();
-  const m=rowMatch(line);if(!m)continue;
+  const nextLine=i+1<movementEnd?lines[i+1].trim():null;
+  const m=matchMovementStart(line);if(!m)continue;
   const d=date(...m.slice(1,4));if(!d)throw Error('Ekstrede geçersiz işlem tarihi var; kısmi kayıt yapılmadı.');
   let body=m[4]||'';
   let legacyBody=rowMatch(legacyLines[i].trim().replace(/\s+/g,' '))?.[4]??body;
   let rawBody=rawLines[i].trim().replace(/^\d{1,2}(?:[/.]\d{1,2}[/.]\d{4}|\s+\S+\s+\d{4})(?:\s+|$)/,'');
-  if(!new RegExp(moneyPattern).test(body)&&body&&nextLine&&!rowMatch(nextLine)&&!rowStop.test(nextLine)&&
-     !boundary.test(nextLine)&&!/(?:^|\s)Siparis\s+(?:Kodu|No)\b/i.test(nextLine)){
+  if(!new RegExp(moneyPattern).test(body)&&body&&nextLine&&!matchMovementStart(nextLine)&&!rowStop.test(nextLine)&&
+     !/(?:^|\s)Siparis\s+(?:Kodu|No)\b/i.test(nextLine)){
    body+=' '+nextLine;legacyBody+=' '+legacyLines[i+1].trim();rawBody+='\n'+rawLines[i+1].trim();i++;
   }
   const tokens=[...body.matchAll(new RegExp(moneyPattern,'g'))],rawTokens=[...rawBody.matchAll(new RegExp(moneyPattern,'g'))];

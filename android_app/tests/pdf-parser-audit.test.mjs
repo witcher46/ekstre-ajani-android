@@ -48,6 +48,38 @@ test('Yapı Kredi keeps the interest row after a repeated column heading', () =>
   assert.equal(parsed.reconciliation.difference, 0);
 });
 
+test('QNB rejects unrecognized dates even when the omitted rows cancel out', () => {
+  const withRows = date => qnb.replace(
+    'ParaPuan', date + ' SENTETIK ALISVERIS 40.00\n' + date + ' SENTETIK IADE -40.00\nParaPuan',
+  );
+  const supported = parseStatement(withRows('05/10/2026'));
+  assert.deepEqual(movements(supported), [...expected, ['expense', 4000, ''], ['refund', 4000, '']]);
+  assert.deepEqual(supported.rows.slice(-2).map(row => row.date), ['2026-10-05', '2026-10-05']);
+  assert.equal(supported.reconciliation.status, 'verified');
+
+  for (const date of ['2026-10-05', '05-10-2026', '05/10/26']) {
+    assert.throws(() => parseStatement(withRows(date)), /işlem tarihi biçimi.*kısmi kayıt/);
+  }
+});
+
+test('QNB cannot take the amount of an unrecognized date row for the preceding movement', () => {
+  const text = qnb.replace(
+    'SENTETIK MARKET 100.00',
+    'SENTETIK MARKET\n2026-10-05 SENTETIK BASKA ALISVERIS 100.00',
+  );
+  assert.throws(() => parseStatement(text), /işlem tarihi biçimi.*kısmi kayıt/);
+});
+
+test('QNB keeps wrapped movements across pages and ignores unrecognized dates in rewards', () => {
+  const text = qnb.replace('SENTETIK MARKET 100.00', 'SENTETIK MARKET\n100.00')
+    .replace('04/10/2026 ODEME', '\f\nİşlem Tarihi Açıklama Tutar\n04/10/2026 ODEME')
+    .replace('05/10/2026 SENTETIK PUAN', '2026-10-05 SENTETIK PUAN');
+  const parsed = parseStatement(text);
+  assert.deepEqual(movements(parsed), expected);
+  assert.equal(parsed.rows[0].sourceDesc, 'SENTETIK MARKET');
+  assert.equal(parsed.reconciliation.status, 'verified');
+});
+
 test('synthetic PDF replay preserves edits and mismatched statements preserve the wallet', () => {
   const parsed = parseStatement(qnb);
   const initial = importStatement(wallet(), parsed, 'card');
