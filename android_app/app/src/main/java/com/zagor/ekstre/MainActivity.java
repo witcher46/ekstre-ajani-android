@@ -40,6 +40,11 @@ public class MainActivity extends Activity {
  private static final int PDF=101,FILE=102,EXPORT=103;
  private static final String HOME="https://appassets.androidplatform.net/assets/index.html";
  private static final int BACKUP_LIMIT=32000000;
+ private static final int REMINDER_PERMISSION=104;
+ private final java.util.concurrent.atomic.AtomicBoolean reminderLaunch=new java.util.concurrent.atomic.AtomicBoolean();
+ private final BroadcastReceiver reminderDateReceiver=new BroadcastReceiver(){
+  @Override public void onReceive(Context context,Intent intent){refreshReminderUi();}
+ };
  @Override public void onCreate(Bundle b){
   super.onCreate(b);
   if(Build.VERSION.SDK_INT>=33)setRecentsScreenshotEnabled(false);
@@ -47,6 +52,7 @@ public class MainActivity extends Activity {
   getWindow().setStatusBarColor(0xff11181e);getWindow().setNavigationBarColor(0xff11181e);
   db=openOrCreateDatabase("wallet.db",MODE_PRIVATE,null);
   db.execSQL("CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY, content TEXT NOT NULL)");
+  reminderLaunch.set(ReminderScheduler.OPEN_ACTION.equals(getIntent().getAction()));
   PDFBoxResourceLoader.init(getApplicationContext());
   getWindow().getDecorView().setBackgroundColor(0xff11181e);
   web=new WebView(this);web.setBackgroundColor(0xff11181e);setContentView(web);
@@ -293,6 +299,42 @@ public class MainActivity extends Activity {
   }catch(Exception|StackOverflowError e){return false;}
  }
  public class Bridge {
+  @JavascriptInterface public String reminderSnoozes(){return ReminderScheduler.snoozes(db);}
+  @JavascriptInterface public String reminderStatus(){
+   if(!ReminderScheduler.enabled(db))return "off";
+   return ReminderScheduler.canNotify(MainActivity.this)?"on":"blocked";
+  }
+  @JavascriptInterface public boolean replaceReminderSchedule(String token,String before,String next,String plan){
+   synchronized(ReminderScheduler.LOCK){
+    try {
+     db.beginTransaction();
+     try {
+      if(!slotToken(readSlot(1)).equals(token)||!ReminderScheduler.replacePlan(db,before,next,plan))return false;
+      db.setTransactionSuccessful();
+     }finally{db.endTransaction();}
+    }catch(JSONException|RuntimeException e){return false;}
+    try {
+     if(!before.equals(next))ReminderScheduler.cancel(MainActivity.this,true);
+     ReminderScheduler.arm(MainActivity.this,db);
+    }catch(RuntimeException e){android.util.Log.w("Reminders","Could not arm reminder alarm");}
+    return true;
+   }
+  }
+  @JavascriptInterface public void setRemindersEnabled(boolean enabled){
+   synchronized(ReminderScheduler.LOCK){ReminderScheduler.setEnabled(MainActivity.this,db,enabled);}
+   runOnUiThread(()->{
+    if(isFinishing()||isDestroyed())return;
+    if(enabled&&Build.VERSION.SDK_INT>=33&&!ReminderScheduler.permissionGranted(MainActivity.this)){
+     requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},REMINDER_PERMISSION);
+    }
+    refreshReminderUi();
+   });
+  }
+  @JavascriptInterface public void openReminderSettings(){
+   runOnUiThread(()->startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,getPackageName())));
+  }
+  @JavascriptInterface public boolean takeReminderLaunch(){return reminderLaunch.getAndSet(false);}
   @JavascriptInterface public int textZoom(){return textZoom;}
   @JavascriptInterface public String versionName(){
    try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}
@@ -301,7 +343,7 @@ public class MainActivity extends Activity {
   @JavascriptInterface public String load(){synchronized(MainActivity.this){return readSnapshot(1);}}
   @JavascriptInterface public String loadForCompare(){return readForCompare();}
   @JavascriptInterface public boolean saveIfUnchanged(String token,String content){
-   return token!=null&&token.matches("[a-f0-9]{64}")&&writeSnapshot(content,token,true);
+   return token!=null&&token.matches("[a-f0-9]{64}")&&ReminderScheduler.walletWrite(MainActivity.this,()->writeSnapshot(content,token,true));
   }
   @JavascriptInterface public String snapshotSlot(int slot){
    if(slot<1||slot>3)throw new IllegalArgumentException("Invalid snapshot slot");
@@ -312,14 +354,14 @@ public class MainActivity extends Activity {
    }
   }
   @JavascriptInterface public boolean recoverSnapshot(int slot,String source,String current,boolean keepCurrent){
-   return replaceReviewed(current,slot,source,null,keepCurrent);
+   return ReminderScheduler.walletWrite(MainActivity.this,()->replaceReviewed(current,slot,source,null,keepCurrent));
   }
   @JavascriptInterface public boolean restoreChecked(String current,int slot,String source,String content){
-   return content!=null&&replaceReviewed(current,slot,source,content,false);
+   return content!=null&&ReminderScheduler.walletWrite(MainActivity.this,()->replaceReviewed(current,slot,source,content,false));
   }
   @JavascriptInterface public String recovery(){synchronized(MainActivity.this){return readSnapshot(3);}}
   @JavascriptInterface public boolean save(String content,String token){
-   return token!=null&&(token.isEmpty()||token.matches("[a-f0-9]{64}"))&&writeSnapshot(content,token,false);
+   return token!=null&&(token.isEmpty()||token.matches("[a-f0-9]{64}"))&&ReminderScheduler.walletWrite(MainActivity.this,()->writeSnapshot(content,token,false));
   }
   @JavascriptInterface public void pickPdf(String request){runOnUiThread(()->{
    if(request==null||request.isEmpty())return;
@@ -398,6 +440,31 @@ public class MainActivity extends Activity {
     try(PDDocument pdf=PDDocument.load(bytes.toByteArray())){if(pdf.getNumberOfPages()>100)throw new IOException("PDF en fazla 100 sayfa olabilir.");PDFTextStripper stripper=new PDFTextStripper();stripper.setSortByPosition(true);String text=stripper.getText(pdf);if(text.trim().isEmpty())throw new IOException("PDF metin içermiyor. Taranmış belgeler desteklenmiyor.");if(text.length()>3_000_000)throw new IOException("PDF metni çok büyük.");callback("onPdfText",text,request);}
    }catch(Exception e){callback("onPdfError","PDF okunamadı. Şifresiz, metin içeren banka PDF’i seç. "+(e instanceof IOException?e.getMessage():""),request);}
   });
+ }
+
+ private void refreshReminderUi(){
+  if(web!=null)web.evaluateJavascript("window.onRemindersChanged?.()",null);
+ }
+ @Override protected void onStart(){
+  super.onStart();
+  IntentFilter dates=new IntentFilter(Intent.ACTION_DATE_CHANGED);
+  dates.addAction(Intent.ACTION_TIME_CHANGED);
+  dates.addAction(Intent.ACTION_TIMEZONE_CHANGED);
+  if(Build.VERSION.SDK_INT>=33)registerReceiver(reminderDateReceiver,dates,Context.RECEIVER_NOT_EXPORTED);
+  else registerReceiver(reminderDateReceiver,dates);
+ }
+ @Override protected void onResume(){super.onResume();refreshReminderUi();}
+ @Override protected void onStop(){unregisterReceiver(reminderDateReceiver);super.onStop();}
+ @Override protected void onNewIntent(Intent intent){
+  super.onNewIntent(intent);
+  if(ReminderScheduler.OPEN_ACTION.equals(intent.getAction())){
+   reminderLaunch.set(true);
+   web.evaluateJavascript("if(typeof window.showReminders==='function'&&Android.takeReminderLaunch()===true)window.showReminders()",null);
+  }
+ }
+ @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
+  super.onRequestPermissionsResult(request,permissions,results);
+  if(request==REMINDER_PERMISSION)refreshReminderUi();
  }
  @Override protected void onPause(){
   if(web!=null)web.evaluateJavascript("window.hideBalanceApprovalDetails?.()",null);

@@ -36,6 +36,7 @@ jobs:
           node android_app/tests/wallet-v2-journey.cjs
           node android_app/tests/account-history-journey.cjs
           node android_app/tests/focus-navigation-journey.cjs
+          node android_app/tests/reminder-journey.cjs
           node android_app/tests/statement-ux.cjs
       - name: Upload statement UI screenshots
         if: github.event_name == 'pull_request' && github.head_ref == 'feature/android-statement-ux'

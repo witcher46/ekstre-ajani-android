@@ -10,10 +10,11 @@ async function startupJourney(browser,url){
   {name:'structuredClone missing without a bridge',missingClone:true},
   {name:'wallet module unavailable',missingModule:true,withBridge:true},
   {name:'valid wallet',withBridge:true},
+  {name:'invalid reminder bridge results',withBridge:true,invalidReminders:true},
   {name:'corrupt wallet',withBridge:true,corrupt:true},
  ];
  for(const scenario of cases){
-  const {name,missingClone,missingModule,withBridge,corrupt}=scenario;
+  const {name,missingClone,missingModule,withBridge,corrupt,invalidReminders}=scenario;
   const page=await browser.newPage({viewport:{width:360,height:780}});
   const slots={1:corrupt?broken:good,3:good};
   const appRequests=[],pageErrors=[];
@@ -23,13 +24,15 @@ async function startupJourney(browser,url){
   page.on('pageerror',error=>pageErrors.push(error.message));
   try{
    if(missingModule)await page.route('**/wallet.mjs',route=>route.abort());
-   await page.addInitScript(({missingClone,withBridge,slots})=>{
+   await page.addInitScript(({missingClone,withBridge,invalidReminders,slots})=>{
     if(missingClone)delete window.structuredClone;
-    const io=window.startupIO={reads:[],writes:[],storageWrites:[],slots};
+    const io=window.startupIO={reads:[],reminderReads:[],writes:[],storageWrites:[],slots};
     if(withBridge){
      window.Android=new Proxy({
       snapshotSlot(slot){io.reads.push(slot);return slots[slot];},
       load(){io.reads.push(1);return slots[1];},
+      reminderStatus(){io.reminderReads.push('reminderStatus');return invalidReminders?false:'off';},
+      takeReminderLaunch(){io.reminderReads.push('takeReminderLaunch');return invalidReminders?'true':false;},
      },{
       get(target,method){
        return target[method]||((...args)=>{io.writes.push([method,...args]);return false;});
@@ -43,7 +46,7 @@ async function startupJourney(browser,url){
       return original.apply(this,args);
      };
     }
-   },{missingClone,withBridge,slots});
+   },{missingClone,withBridge,invalidReminders,slots});
    await page.goto(url+'/index.html');
    const guidance=page.getByText(/Google Play Store/);
    if(missingClone||missingModule){
@@ -70,6 +73,8 @@ async function startupJourney(browser,url){
    }
    assert.deepEqual(pageErrors,[],name);
    const io=await page.evaluate(()=>window.startupIO);
+   assert.deepEqual(io.reminderReads,withBridge&&!missingClone&&!missingModule&&!corrupt?
+    ['reminderStatus','takeReminderLaunch']:[],name);
    assert.deepEqual(io.writes,[],name);
    assert.deepEqual(io.storageWrites,[],name);
    assert.deepEqual(io.slots,slots,name);
