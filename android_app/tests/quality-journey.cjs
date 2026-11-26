@@ -114,6 +114,84 @@ async function categorySuggestionsJourney(browser) {
   }
 }
 
+async function csvCategorySuggestionsJourney(browser) {
+  const page = await browser.newPage();
+  try {
+    await routeWallet(page);
+    await page.goto('https://wallet.test/');
+    const sentinel = 'Sentetik ölçüm kuralı';
+    await page.evaluate(async sentinel => {
+      const C = await import('/core.mjs');
+      const W = await import('/wallet.mjs');
+      const wallet = C.empty();
+      wallet.accounts.push({id:'synthetic-csv-card',name:'Sentetik kart',type:'card',opening:0});
+      wallet.merchantCategoryRules = [
+        ['MİGROS','Market / Gıda'], ['MIGROS 1234 İZMİR','Giyim'],
+        ['METRO MARKET 5432 ANKARA','Giyim'], ['METRO MARKET 6789 BURSA','Giyim'],
+        ['POS 5432 ANKARA','Giyim'], ['SENTETİK 7777 VAN','Giyim'], [sentinel,'Giyim'],
+      ].map(([merchant,category],i) => ({id:'rule-'+i,merchant,category}));
+      localStorage.setItem('ekstre-android-v1',C.backupText(W.normalizeWallet(wallet)));
+    }, sentinel);
+    await page.reload();
+    await page.locator('[data-page=import]').first().click();
+    const rows = [
+      ['migros / 1234 izmir','Diğer','harcama','Giyim'],
+      ['MIGROS 5678 BURSA','Eğitim','harcama','Eğitim'],
+      ['METRO MARKET 9999 İZMİR','Giyim','harcama','Giyim'],
+      ['MİGROS','Diğer','harcama','Diğer'],
+      ['METRO MARKET 9999 İZMİR','Diğer','indirim','Giyim'],
+      ['POS 5432 ANKARA','Diğer','harcama','Diğer'],
+      ['POS 5678 İZMİR','Diğer','harcama','Diğer'],
+      ['METRO MARKET 1234 BİLİNMİYOR','Diğer','harcama','Diğer'],
+      ['METRO TURİZM 1234 İZMİR','Diğer','harcama','Diğer'],
+      ['SENTETİK 7777 VAN','Diğer','odeme','Diğer'],
+      ['METRO MARKET 2222 VAN','Giyim','harcama','Giyim'],
+      ['migros / 1234 izmir','Eğitim','harcama','Giyim'],
+    ];
+    const header = 'bank,kart,period,date,desc,amount_cents,category,tur,transaction_id';
+    const records = rows.map(([desc,category,kind],i) =>
+      ['QNB','Sentetik kaynak','2026-10','2026-10-04',desc,(i+1)*(kind==='indirim'?-100:100),category,kind,'csv-'+i].join(','));
+    await page.evaluate(sentinel => {
+      const normalize = String.prototype.normalize;
+      let reads = 0;
+      String.prototype.normalize = function (...args) {
+        if (String(this) === sentinel) reads++;
+        return normalize.apply(this,args);
+      };
+      window.finishRuleCount = () => {
+        String.prototype.normalize = normalize;
+        return reads;
+      };
+    }, sentinel);
+    await page.locator('#csv-file').setInputFiles({
+      name:'sentetik-kategori.csv',mimeType:'text/csv',buffer:Buffer.from([header,...records].join('\n')),
+    });
+    const dialog = page.getByRole('dialog',{name:'CSV aktarımı'});
+    await dialog.waitFor();
+    const reads = await page.evaluate(() => window.finishRuleCount());
+    const choices = dialog.locator('[data-category-suggestion]');
+    assert.deepEqual(await choices.evaluateAll(fields => fields.map(field =>
+      [field.labels[0].textContent.trim(),field.value,field.checked])), [
+      ['migros / 1234 izmir · Öneriyi seç: Giyim','Giyim',false],
+      ['MİGROS · Öneriyi seç: Market / Gıda','Market / Gıda',false],
+      ['METRO MARKET 9999 İZMİR · Öneriyi seç: Giyim','Giyim',false],
+      ['POS 5432 ANKARA · Öneriyi seç: Giyim','Giyim',false],
+    ]);
+    await choices.nth(0).check();
+    await choices.nth(2).check();
+    await dialog.locator('[name=card-0]').selectOption('synthetic-csv-card');
+    await dialog.getByRole('button',{name:'Kaydet'}).click();
+    await dialog.waitFor({state:'hidden'});
+    const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem('ekstre-android-v1')).transactions);
+    assert.deepEqual(Object.fromEntries(persisted.map(row => [row.csvSourceId,row.category])),
+      Object.fromEntries(rows.map((row,i) => ['csv-'+i,row[3]])));
+    assert.equal(reads,1,'the CSV preview normalizes a saved rule only once');
+    console.log('CSV category preview: indexed rule work, suggestion order, ambiguity and selected overrides passed');
+  } finally {
+    await page.close();
+  }
+}
+
 async function quickAddJourney(page) {
   const add = page.getByRole('button',{name:'Ekle',exact:true});
   const menu = page.getByRole('dialog',{name:'Hızlı Ekle'});
@@ -391,6 +469,7 @@ async function advancedReportsJourney(page) {
 (async () => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.CHROME_PATH || undefined});
   try {
+    await csvCategorySuggestionsJourney(browser);
     await categorySuggestionsJourney(browser);
     const page = await browser.newPage({viewport:{width:320,height:720}});
     page.setDefaultTimeout(4000);
