@@ -47,7 +47,7 @@ final class BalanceApprovalStorage {
    if (nextVersion < 3) return true;
    JSONObject oldSection = current == null ? null : current.optJSONObject("balanceReconciliation");
    if (oldSection != null && oldSection.has("approvals")) return false;
-   if (nextVersion == 4) return !mayAppend && next.getJSONObject("balanceReconciliation").getJSONArray("approvals").length() == 0;
+   if (nextVersion >= 4) return !mayAppend && next.getJSONObject("balanceReconciliation").getJSONArray("approvals").length() == 0;
    return mayAppend;
   }
   if (nextVersion < 3) return false;

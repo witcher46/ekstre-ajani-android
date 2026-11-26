@@ -112,7 +112,7 @@ public class MainActivity extends Activity {
  private boolean supportsSnapshot(JSONObject wallet)throws JSONException{
   if(!"ekstre-android".equals(wallet.opt("format"))||!(wallet.opt("version") instanceof Number))return false;
   double version=wallet.getDouble("version");
-  if(version!=1&&version!=2&&version!=3&&version!=4)return false;
+  if(version!=1&&version!=2&&version!=3&&version!=4&&version!=5)return false;
   for(String name:new String[]{"accounts","transactions","statements","subscriptions","categories"})wallet.getJSONArray(name);
   wallet.getJSONObject("budgets");
   if(!hasDistinctIds(wallet.getJSONArray("statements"))||!hasDistinctIds(wallet.getJSONArray("subscriptions")))return false;
@@ -120,7 +120,8 @@ public class MainActivity extends Activity {
   if(version==1)return true;
   return validBalanceObservations(wallet)&&(version<3 ||
    BalanceApprovalStorage.validApprovals(wallet.getJSONObject("balanceReconciliation").getJSONArray("approvals")))&&
-   (version!=4||ExpenseAllocationStorage.validSnapshot(wallet));
+   (version<4||ExpenseAllocationStorage.validSnapshot(wallet))&&
+   (version<5||SavingsGoalStorage.validSnapshot(wallet));
  }
  private boolean hasDistinctIds(JSONArray rows)throws JSONException{
   if(rows.length()>50000)return false;
@@ -252,7 +253,8 @@ public class MainActivity extends Activity {
        (mayAppendApproval&&expectedToken.equals(BalanceApprovalStorage.sha256(content))))return false;
     JSONObject before=current==null?null:new JSONObject(current);
     if(!BalanceApprovalStorage.preservesHistory(before,candidate,mayAppendApproval)||
-       !ExpenseAllocationStorage.validWrite(before,candidate,mayAppendApproval))return false;
+       !ExpenseAllocationStorage.validWrite(before,candidate,mayAppendApproval)||
+       !SavingsGoalStorage.validWrite(before,candidate,mayAppendApproval))return false;
     copySlot(1,2);
     db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});
     db.setTransactionSuccessful();

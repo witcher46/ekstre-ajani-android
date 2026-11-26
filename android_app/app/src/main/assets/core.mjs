@@ -81,12 +81,13 @@ function validateBalanceReconciliation(state){
 
 export function validate(s){
  if(!s||s.format!=='ekstre-android')throw Error('Bu dosya Android cüzdan yedeği değil.');
- if(![1,2,3,4].includes(s.version))throw Error('Bu Android cüzdan yedeği sürümü desteklenmiyor.');
+ if(![1,2,3,4,5].includes(s.version))throw Error('Bu Android cüzdan yedeği sürümü desteklenmiyor.');
  for(const k of ['accounts','transactions','statements','subscriptions','categories'])if(!Array.isArray(s[k])||s[k].length>50000)throw Error('Yedek yapısı veya boyutu geçersiz.');
  if(!s.budgets||typeof s.budgets!=='object'||Array.isArray(s.budgets))throw Error('Bütçe verisi geçersiz.');
  const ids=new Set();for(const a of s.accounts){if(!text(a.id)||ids.has(a.id)||!text(a.name)||!a.name.trim()||!['card','bank','cash'].includes(a.type)||!cents(a.opening))throw Error('Hesap kaydı geçersiz.');ids.add(a.id);}
  if(s.version>=2)validateBalanceReconciliation(s);
  if(s.version>=3)validateBalanceApprovals(s.balanceReconciliation.approvals);
+ if(s.version===5)validateSavingsGoals(s);
  const txids=new Set();for(const t of s.transactions){if(!text(t.id)||txids.has(t.id)||!ids.has(t.account)||!validDate(t.date)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(t.period)||!text(t.desc,500)||!text(t.category)||!text(t.note??'',2000)||!cents(t.amount)||t.amount<0||!['expense','income','refund','cardPayment','payment','transfer'].includes(t.kind))throw Error('İşlem kaydı geçersiz.');if(['payment','transfer'].includes(t.kind)&&(!ids.has(t.target)||t.target===t.account))throw Error('Hedef hesap geçersiz.');if(t.installment&&!/^\d{1,3}\/\d{1,3}$/.test(t.installment))throw Error('Taksit geçersiz.');txids.add(t.id);}
  const statementIds=new Set();
  for(const st of s.statements){
@@ -142,7 +143,7 @@ export function validate(s){
   if(t.csvBatchId!==undefined&&(!text(t.csvBatchId)||!t.csvBatchId.trim()||sourceOf(t)!=='csv'||t.csvSourceId!==undefined))throw Error('CSV aktarım kimliği geçersiz.');
  }
  validateLinkGroups(s,links);
- if(s.version===4)validateExpenseAllocations(s,byId,links);
+ if(s.version>=4)validateExpenseAllocations(s,byId,links);
  if(s.csvDismissals!==undefined){
   if(!Array.isArray(s.csvDismissals)||s.csvDismissals.length>50000)throw Error('CSV inceleme kayıtları geçersiz.');
   const cardIds=new Set(s.accounts.filter(a=>a.type==='card').map(a=>a.id));
@@ -289,7 +290,7 @@ export function renameExpenseCategory(s,category,newName){
 
 export function removeExpenseCategory(s,category,{moveRulesTo,removeRules=false}={}){
  if(!s.categories.includes(category))throw Error('Gider kategorisi bulunamadı.');
- if(s.version===4&&Object.values(s.expenseAllocations).some(parts=>parts.some(part=>part.category===category))){
+ if(s.version>=4&&Object.values(s.expenseAllocations).some(parts=>parts.some(part=>part.category===category))){
   throw Error('Bu kategori bir gider bölümünde kullanılıyor. Önce ilgili bölümleri düzenle.');
  }
  const categories=s.categories.filter(c=>c!==category);
@@ -321,7 +322,7 @@ export function canAllocateExpense(s,t){
  return allocationParent(t)&&!s.transactions.some(row=>row.linkedTo===t.id);
 }
 export function allocationsFor(s,t){
- return s.version===4&&Object.hasOwn(s.expenseAllocations,t.id)?s.expenseAllocations[t.id]:undefined;
+ return s.version>=4&&Object.hasOwn(s.expenseAllocations,t.id)?s.expenseAllocations[t.id]:undefined;
 }
 export function expenseCategoryAmounts(s,t){
  if(t.kind!=='expense'&&t.kind!=='refund')return [];
@@ -351,22 +352,25 @@ function validateExpenseAllocations(s,byId,links){
   if(remaining!==0)throw allocationError();
  }
 }
+function prepareExpenseAllocationStorage(next,conflictMessage){
+ if(next.version>=4)return;
+ if(Object.hasOwn(next,'expenseAllocations')||
+    (next.version===1&&Object.hasOwn(next,'balanceReconciliation'))||
+    (next.version===2&&Object.hasOwn(next.balanceReconciliation,'approvals'))){
+  throw Error(conflictMessage);
+ }
+ next.expenseAllocations={};
+ next.balanceReconciliation={observations:[],...next.balanceReconciliation,approvals:next.balanceReconciliation?.approvals??[]};
+ next.version=4;
+}
+
 function applyExpenseAllocations(next,id,allocations){
  if(allocations===undefined)return;
  if(allocations===null){
-  if(next.version===4)delete next.expenseAllocations[id];
+  if(next.version>=4)delete next.expenseAllocations[id];
   return;
  }
- if(next.version<4){
-  if(Object.hasOwn(next,'expenseAllocations')||
-     (next.version===1&&Object.hasOwn(next,'balanceReconciliation'))||
-     (next.version===2&&Object.hasOwn(next.balanceReconciliation,'approvals'))){
-   throw Error('Eski yedekteki ayrılmış alanlar korunuyor. Bu gider bölümlere ayrılamadı.');
-  }
-  next.expenseAllocations={};
-  next.balanceReconciliation={observations:[],...next.balanceReconciliation,approvals:next.balanceReconciliation?.approvals??[]};
-  next.version=4;
- }
+ prepareExpenseAllocationStorage(next, 'Eski yedekteki ayrılmış alanlar korunuyor. Bu gider bölümlere ayrılamadı.');
  // Legacy IDs can include names such as "__proto__".
  next.expenseAllocations={...next.expenseAllocations,[id]:structuredClone(allocations)};
 }
@@ -654,6 +658,59 @@ export function balance(s,a){
   .reduce((n,t)=>addCents(n,ledgerEffect(t,a)),a.opening);
 }
 
+export const isSavingsAccount=account=>account.type==='bank'||account.type==='cash';
+export const savingsGoals=state=>state.version===5?state.savingsGoals:[];
+
+function validateSavingsGoals(state){
+ const goals=state.savingsGoals;
+ if(!Array.isArray(goals)||goals.length>50000)throw Error('Birikim hedefleri bölümü geçersiz.');
+ const accounts=new Set(state.accounts.filter(isSavingsAccount).map(account=>account.id));
+ const ids=new Set();
+ for(const goal of goals){
+  if(!goal||typeof goal.id!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(goal.id)||ids.has(goal.id)||
+     !text(goal.name)||!goal.name.trim()||!accounts.has(goal.account)||
+     !validDate(goal.due)||!cents(goal.target)||goal.target<=0||!cents(goal.reserved)||goal.reserved<0){
+   throw Error('Birikim hedefinin adını, vadesini, tutarlarını ve banka veya nakit hesabını kontrol et.');
+  }
+  ids.add(goal.id);
+ }
+}
+
+export function saveSavingsGoal(state,goal){
+ const next=structuredClone(state);
+ if(next.version<5){
+  const conflict='Eski yedekteki ayrılmış alanlar korunuyor. Birikim hedefi kaydedilemedi.';
+  if(Object.hasOwn(next,'savingsGoals'))throw Error(conflict);
+  prepareExpenseAllocationStorage(next,conflict);
+  next.version=5;
+  next.savingsGoals=[];
+ }
+ const index=next.savingsGoals.findIndex(row=>row.id===goal.id);
+ if(index<0)next.savingsGoals.push({...goal});
+ else next.savingsGoals[index]={...next.savingsGoals[index],...goal};
+ return validate(next);
+}
+
+export function removeSavingsGoal(state,id){
+ if(!savingsGoals(state).some(goal=>goal.id===id))throw Error('Birikim hedefi bulunamadı.');
+ return validate({...state,savingsGoals:state.savingsGoals.filter(goal=>goal.id!==id)});
+}
+
+export function savingsGoalWarnings(state){
+ const totals=new Map();
+ for(const goal of savingsGoals(state)){
+  totals.set(goal.account,addCents(totals.get(goal.account)??0,goal.reserved));
+ }
+ const warnings=[];
+ for(const account of state.accounts){
+  const reserved=totals.get(account.id);
+  if(!reserved)continue;
+  const available=positiveCents(balance(state,account));
+  if(reserved>available)warnings.push({account,reserved,excess:addCents(reserved,-available)});
+ }
+ return warnings;
+}
+
 // Reconstruct from an independently established end-of-day balance and the current ledger.
 export function balanceAt(state,accountId,date,{anchor}={}){
  if(!validDate(date))throw Error('Geçerli bir bakiye tarihi seç.');
@@ -790,7 +847,7 @@ export function removeTransaction(s,tid){
   next.csvDismissals.push([csvKeyFor(removedRow),removedRow.csvBatchId??null]);
  }
  next.transactions=next.transactions.filter(t=>!removed.has(t.id));
- if(next.version===4)for(const id of removed)delete next.expenseAllocations[id];
+ if(next.version>=4)for(const id of removed)delete next.expenseAllocations[id];
  return validate(repairReferences(next));
 }
 function collectAmbiguousStatementPayments(s){

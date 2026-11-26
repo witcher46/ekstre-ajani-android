@@ -104,6 +104,82 @@ async function expenseAllocationAvailabilityJourney(browser){
   }
 }
 
+async function savingsGoalsJourney(browser){
+  const page=await browser.newPage({viewport:{width:320,height:480}});
+  const errors=[];
+  page.setDefaultTimeout(3500);
+  page.on('pageerror',error=>errors.push(error.message));
+  const wallet={
+    format:'ekstre-android',version:1,
+    accounts:[
+      {id:'bank',name:'Sentetik birikim bankası',type:'bank',opening:90000},
+      {id:'other-bank',name:'Sentetik ikinci banka',type:'bank',opening:50000},
+    ],
+    transactions:[
+      {id:'income',account:'bank',date:'2026-11-01',period:'2026-11',kind:'income',amount:10000,desc:'Sentetik gelir',category:'Diğer gelir',source:'manual'},
+    ],
+    statements:[],budgets:{},subscriptions:[],categories:['Diğer'],
+  };
+  try{
+    await serveAssets(page);
+    await page.addInitScript(initial=>localStorage.setItem('ekstre-android-v1',JSON.stringify(initial)),wallet);
+    await page.goto('https://wallet.test/');
+    await page.locator('[data-stat=cash]').waitFor();
+    const totals=await page.locator('main [data-stat]').allTextContents();
+    const dialog=page.getByRole('dialog');
+    const read=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')));
+    const addGoal=async(name,account,reserved)=>{
+      await page.getByRole('button',{name:'Hedef ekle',exact:true}).click();
+      await dialog.getByLabel('Hedef adı').fill(name);
+      await dialog.getByLabel('Banka veya nakit hesabı').selectOption(account);
+      await dialog.getByLabel('Hedef tutarı (TL)').fill('2000');
+      await dialog.getByLabel('Hedef tarihi').fill('2026-12-31');
+      await dialog.getByLabel('Ayırdığım tutar (TL)').fill(reserved);
+      await dialog.getByRole('button',{name:'Kaydet',exact:true}).click();
+      await dialog.waitFor({state:'hidden'});
+    };
+    const assertLedger=async()=>{
+      const {accounts,transactions}=await read();
+      assert.deepEqual(accounts,wallet.accounts);
+      assert.deepEqual(transactions,wallet.transactions);
+    };
+
+    await page.locator('nav [data-page=plan]').click();
+    await page.getByRole('button',{name:'Birikim hedefleri',exact:true}).click();
+    await page.getByRole('heading',{name:'Birikim hedefleri',exact:true}).waitFor();
+    await addGoal('Acil durum','bank','600');
+    await addGoal('Tatil','bank','500');
+    await addGoal('Diğer hedef','other-bank','500');
+    const warning=page.locator('main').getByRole('alert');
+    assert.equal(await warning.count(),1);
+    assert.match(await warning.innerText(),/Sentetik birikim bankası hesabında fazla ayırma/);
+    assert.match(await warning.innerText(),/1\.100,00/);
+    assert.match(await warning.innerText(),/100,00.*aşıyor/);
+    await assertLedger();
+
+    await page.evaluate(()=>{document.documentElement.style.fontSize='200%';});
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    const edit=page.getByRole('button',{name:'Tatil hedefini düzenle',exact:true});
+    await edit.click();
+    await dialog.getByLabel('Ayırdığım tutar (TL)').fill('400');
+    await dialog.getByRole('button',{name:'Kaydet',exact:true}).click();
+    await dialog.waitFor({state:'hidden'});
+    assert(await edit.evaluate(button=>button===document.activeElement));
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    assert.equal(await warning.count(),0);
+    assert.deepEqual((await read()).savingsGoals.map(({account,reserved})=>[account,reserved]),[
+      ['bank',60000],['bank',40000],['other-bank',50000],
+    ]);
+    await assertLedger();
+    await page.locator('nav [data-page=home]').click();
+    assert.deepEqual(await page.locator('main [data-stat]').allTextContents(),totals);
+    assert.deepEqual(errors,[]);
+    console.log('Savings goals preserve the ledger and warn per account at 320px with enlarged text');
+  }finally{
+    await page.close();
+  }
+}
+
 async function futureManualPaymentJourney(browser){
   const page=await browser.newPage({timezoneId:'UTC'});
   page.setDefaultTimeout(3500);
@@ -802,6 +878,7 @@ async function reconciliationJourney(browser){
 }
 
 (async()=>{const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe'});try{
+ await savingsGoalsJourney(browser);
  await ambiguousStatementPaymentJourney(browser);
  await ambiguousStatementPaymentJourney(browser,{bankFirst:true});
  await futureManualPaymentJourney(browser);

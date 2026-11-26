@@ -10,6 +10,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
@@ -74,6 +75,39 @@ public class SnapshotAtomicityTest {
       new String[]{String.valueOf(id)})){
    assertTrue("Synthetic snapshot "+id+" must exist",rows.moveToFirst());
    return rows.getString(0);
+  }
+ }
+
+ @Test public void savingsGoalPromotionUsesCasAndRestoresSplitAndGoalTogether() throws Exception {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  JSONObject legacy=new JSONObject(wallet("split")).put("version",4)
+    .put("accounts",new JSONArray("[{\"id\":\"bank\",\"name\":\"Synthetic bank\",\"type\":\"bank\",\"opening\":100000}]"))
+    .put("transactions",new JSONArray("[{\"id\":\"expense\",\"account\":\"bank\",\"kind\":\"expense\",\"desc\":\"Synthetic\",\"date\":\"2026-11-01\",\"period\":\"2026-11\",\"category\":\"Food\",\"amount\":1000}]"))
+    .put("categories",new JSONArray("[\"Food\",\"Travel\"]"))
+    .put("balanceReconciliation",new JSONObject("{\"observations\":[],\"approvals\":[]}"))
+    .put("expenseAllocations",new JSONObject("{\"expense\":[{\"category\":\"Food\",\"amount\":600},{\"category\":\"Travel\",\"amount\":400}]}"));
+  String split=legacy.toString();
+  JSONObject goals=new JSONObject(split).put("version",5).put("savingsGoals",
+    new JSONArray("[{\"id\":\"goal\",\"name\":\"Synthetic goal\",\"account\":\"bank\",\"target\":200000,\"due\":\"2026-12-31\",\"reserved\":50000}]"));
+  String candidate=goals.toString();
+  JSONObject invalid=new JSONObject(candidate);
+  invalid.getJSONArray("savingsGoals").getJSONObject(0).put("account","missing");
+  String future=new JSONObject(candidate).put("version",6).toString();
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class);
+      SQLiteDatabase db=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null)) {
+   MainActivity.Bridge bridge=bridge(scenario);
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,split));
+   assertFalse(bridge.save(candidate,""));
+   assertTrue(saveFixture(bridge,candidate));
+   assertFalse(saveFixture(bridge,split));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,invalid.toString()));
+   assertFalse(RecoverySafetyTest.restoreFixture(bridge,future));
+   assertEquals(candidate,snapshot(db,1));
+   assertEquals(split,snapshot(db,2));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,split));
+   assertTrue(RecoverySafetyTest.restoreFixture(bridge,candidate));
+   assertEquals(candidate,snapshot(db,1));
+   assertEquals(split,snapshot(db,3));
   }
  }
 

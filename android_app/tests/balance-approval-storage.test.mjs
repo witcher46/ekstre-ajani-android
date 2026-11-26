@@ -63,6 +63,17 @@ test('normal saves preserve v1 and v2 while v3 round-trips the exact historical 
   assert.equal(comparison.evidence.differenceCents,'-18014398509482082');
 });
 
+test('a savings goal preserves stored approval evidence and the reconciliation result',()=>{
+  const {v3,observation,options,comparison} = fixture();
+  const edited = C.saveSavingsGoal(v3, {
+    id:'goal', name:'Sentetik hedef', account:bank.id, due:'2026-12-31', target:200000, reserved:50000,
+  });
+  const restored = C.readBackup(C.backupText(edited));
+  assert.equal(restored.version,5);
+  assert.deepEqual(restored.balanceReconciliation,v3.balanceReconciliation);
+  assert.deepEqual(compareBalanceObservation(restored,observation.id,options),comparison);
+});
+
 test('historical evidence does not require the live observation or movement to remain',()=>{
   const {v3,approval,observation} = fixture();
   const changed = C.removeBalanceObservation(v3,observation.id);

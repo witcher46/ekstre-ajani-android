@@ -7,7 +7,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-/** Snapshot and transition validation for v4 expense allocations. */
+/** Snapshot and transition validation for expense allocations introduced in v4. */
 final class ExpenseAllocationStorage {
  private static final long MAX_AMOUNT=1_000_000_000_000L;
  private static final String[] EXCLUDED={"statement","csvKey","csvSourceId","csvBatchId","importKey",
@@ -82,16 +82,17 @@ final class ExpenseAllocationStorage {
  }
 
  static boolean validWrite(JSONObject before,JSONObject after,boolean mayAppendApproval)throws JSONException{
-  boolean wasV4=before!=null&&before.getDouble("version")==4;
-  if(after.getDouble("version")!=4)return !wasV4;
+  boolean hadAllocations=before!=null&&before.getDouble("version")>=4;
+  double nextVersion=after.getDouble("version");
+  if(nextVersion<4)return !hadAllocations;
   JSONObject next=after.getJSONObject("expenseAllocations");
-  if(!wasV4&&(mayAppendApproval||next.length()==0||
+  if(!hadAllocations&&(mayAppendApproval||(nextVersion==4&&next.length()==0)||
       (before!=null&&(before.has("expenseAllocations")||
        (before.getDouble("version")==1&&before.has("balanceReconciliation"))))))return false;
   if(before==null)return true;
   var affected=new HashSet<String>();
   next.keys().forEachRemaining(affected::add);
-  if(wasV4)before.getJSONObject("expenseAllocations").keys().forEachRemaining(affected::add);
+  if(hadAllocations)before.getJSONObject("expenseAllocations").keys().forEachRemaining(affected::add);
   if(affected.isEmpty())return true;
   Transactions old=Transactions.read(before),updated=Transactions.read(after);
   for(String id:affected){

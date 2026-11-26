@@ -10,7 +10,7 @@ export const NAV_ITEMS=Object.freeze([
   Object.freeze(['plan','◷','Plan']),
   Object.freeze(['import','↓','Ekstre']),
 ]);
-const SUBPAGE_PARENT=Object.freeze({account:'wallet',balanceReview:'wallet',balanceApprovalHistory:'wallet',balanceApprovalDetail:'wallet',incomePlans:'plan',statement:'import',review:'transactions'});
+const SUBPAGE_PARENT=Object.freeze({account:'wallet',balanceReview:'wallet',balanceApprovalHistory:'wallet',balanceApprovalDetail:'wallet',incomePlans:'plan',savingsGoals:'plan',statement:'import',review:'transactions'});
 
 export const activeBottomPage=page=>SUBPAGE_PARENT[page]||page;
 
