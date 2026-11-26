@@ -448,7 +448,14 @@ function matchingRows(rows,t){
  return rows.filter(r=>r.id!==t.id&&effective(r)&&sourceOf(r)!==sourceOf(t)&&
   !incompatible.has(r.id)&&(sameEconomic(r,t)||viaAliases.has(r.id)));
 }
-function markCandidate(t,rows){if(t.matchStatus==='distinct'||t.linkedTo)return;const candidates=matchingRows(rows,t);if(candidates.length){t.matchStatus='pending';t.matchCandidates=candidates.map(r=>r.id);}}
+function markCandidate(t,rows,{requireManual=false}={}){
+ if(t.matchStatus==='distinct'||t.linkedTo)return;
+ const candidates=matchingRows(rows,t);
+ if(candidates.length&&(!requireManual||candidates.some(r=>sourceOf(r)==='manual'))){
+  t.matchStatus='pending';
+  t.matchCandidates=candidates.map(r=>r.id);
+ }
+}
 function validateKind(s,t,{allowInertTarget=false}={}){
  const a=s.accounts.find(a=>a.id===t.account);
  if(!a)throw Error('Önce bir hesap ekle.');
@@ -742,12 +749,18 @@ function preferPdfAcrossCut(s){
  }
  return s;
 }
+const legacyMatchKey=t=>JSON.stringify([cardAccount(t),effectKind(t),t.amount]);
 export function reviewLegacy(s){
  const next=structuredClone(s),candidates=next.transactions.filter(t=>t.matchStatus!=='distinct');
- for(const t of candidates){
-  if(t.matchStatus||t.linkedTo||sourceOf(t)==='manual')continue;
-  const matches=matchingRows(candidates,t);
-  if(t.kind==='cardPayment'||sourceOf(t)==='csv'||matches.some(r=>sourceOf(r)==='manual'))markCandidate(t,candidates);
+ const imports=candidates.filter(t=>!t.matchStatus&&!t.linkedTo&&sourceOf(t)!=='manual');
+ if(imports.length){
+  const byTerms=new Map();
+  // Validated aliases share these terms with their targets. Keep ledger order in each group.
+  for(const row of candidates)appendToGroup(byTerms,legacyMatchKey(row),row);
+  for(const t of imports){
+   const requireManual=t.kind!=='cardPayment'&&sourceOf(t)!=='csv';
+   markCandidate(t,byTerms.get(legacyMatchKey(t)),{requireManual});
+  }
  }
  return repairReferences(preferPdfAcrossCut(next));
 }
