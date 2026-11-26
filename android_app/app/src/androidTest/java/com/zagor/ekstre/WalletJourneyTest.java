@@ -7,7 +7,11 @@ import android.net.Uri;
 import android.os.Environment;
 import android.os.SystemClock;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.view.*;
+import android.webkit.JsResult;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -420,6 +424,130 @@ public class WalletJourneyTest {
   assertNotNull("Restore asks before replacing wallet",confirm);
   confirm.click();
  }
+ @Test public void backupRestoreDownloadsFilenameAndProviderProbe()throws Exception{
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  ContentResolver resolver=context.getContentResolver();
+  String raw="{\"format\":\"ekstre-android\",\"version\":1,\"accounts\":[{\"id\":\"synthetic-bank\","
+   +"\"name\":\"Sentetik Şubat hesabı\",\"type\":\"bank\",\"opening\":74325}],\"transactions\":[],"
+   +"\"statements\":[],\"subscriptions\":[],\"categories\":[\"Diğer\"],\"budgets\":{}}";
+  byte[] payload=raw.getBytes(StandardCharsets.UTF_8);
+  AtomicReference<Uri> pickedUri=new AtomicReference<>();
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('#settings[data-page=settings]')");
+   a.onActivity(activity->{
+    WebView view=web(activity);
+    WebChromeClient appClient=view.getWebChromeClient();
+    view.setWebChromeClient(new WebChromeClient(){
+     @Override public boolean onShowFileChooser(WebView w,ValueCallback<Uri[]> callback,FileChooserParams params){
+      return appClient.onShowFileChooser(w,uris->{
+       pickedUri.set(uris!=null&&uris.length==1?uris[0]:null);
+       callback.onReceiveValue(uris);
+      },params);
+     }
+     @Override public boolean onJsConfirm(WebView w,String url,String message,JsResult result){
+      return appClient.onJsConfirm(w,url,message,result);
+     }
+    });
+   });
+   js(a,"""
+    (() => {
+      let selected;
+      document.querySelector('#backup-file').addEventListener('change', event => {
+        selected=event.target.files[0];
+        window.backupProbe=selected?{name:selected.name,type:selected.type,size:selected.size}:null;
+      },true);
+      for(const method of ['text','arrayBuffer']){
+        const read=File.prototype[method];
+        File.prototype[method]=function(){
+          const result=read.call(this);
+          const probe=this===selected?window.backupProbe:null;
+          if(probe)result.then(value=>{
+            probe.readBytes=typeof value==='string'?new TextEncoder().encode(value).length:value.byteLength;
+          },error=>{probe.readError=error.name;});
+          return result;
+        };
+      }
+    })()
+    """);
+   var failures=new java.util.ArrayList<String>();
+   for(String[] testCase:new String[][]{
+    {"ascii","backup-restore-control.json","application/json"},
+    {"generated","ekstre-ajani-yedek.json","application/json"},
+    {"duplicate","ekstre-ajani-yedek (1).json","application/json"},
+    {"punctuation","Ekstre Yedek #1 %25.json","application/json"},
+    {"unicode","Ekstre Şubat Yedeği.json","application/json"},
+    {"alternate-mime","backup-restore-control.json","application/octet-stream"}
+   }){
+    Uri entry=document(testCase[1],testCase[2],payload);
+    try{
+     Uri selected=probeBackupDownload(a,resolver,entry,pickedUri,raw,payload.length,testCase[0],failures);
+     if(testCase[0].equals("generated")){
+      ContentValues rename=new ContentValues();
+      rename.put(MediaStore.MediaColumns.DISPLAY_NAME,"Ekstre-Yedek-Kopya.json");
+      assertEquals("Rename the same synthetic Download entry",1,resolver.update(entry,rename,null,null));
+      Uri renamed=probeBackupDownload(a,resolver,entry,pickedUri,raw,payload.length,"renamed-entry",failures);
+      android.util.Log.i("BackupRestoreProbe","rename selectedSameUri="+(selected!=null&&selected.equals(renamed)));
+     }
+    }finally{resolver.delete(entry,null,null);}
+   }
+   assertTrue(String.join("\n",failures),failures.isEmpty());
+  }
+ }
+
+ private Uri probeBackupDownload(ActivityScenario<MainActivity> a,ContentResolver resolver,Uri entry,
+                                 AtomicReference<Uri> pickedUri,String raw,int expectedBytes,String label,
+                                 java.util.List<String> failures)throws Exception{
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  JSONObject stored=backupDocumentMetadata(resolver,entry);
+  boolean sourceBytesMatch=raw.equals(readDocument(context,entry));
+  String name=stored.getString("name");
+  pickedUri.set(null);
+  js(a,"window.backupProbe=null;document.querySelector('#error-announcement').textContent=''");
+  openBackupPicker(a);selectDownload(name);
+  UiObject2 confirm=device.wait(Until.findObject(By.res("android:id/button1")
+   .text(java.util.regex.Pattern.compile("(?iu)onayla"))),10000);
+  if(confirm!=null){
+   UiObject2 cancel=device.findObject(By.res("android:id/button2"));
+   assertNotNull("Restore confirmation can be cancelled",cancel);
+   cancel.click();
+   assertTrue("Restore dialog closes",device.wait(Until.gone(By.res("android:id/button2")),5000));
+  }
+  Uri selected=pickedUri.get();
+  boolean bytesMatch=false;
+  JSONObject provider=new JSONObject();
+  if(selected!=null){
+   try{provider=backupDocumentMetadata(resolver,selected);}
+   catch(Exception error){provider.put("metadataError",error.getClass().getSimpleName());}
+   try{
+    String actual=readDocument(context,selected);
+    provider.put("readBytes",actual.getBytes(StandardCharsets.UTF_8).length);
+    bytesMatch=raw.equals(actual);
+   }
+   catch(Exception error){provider.put("readError",error.getClass().getSimpleName());}
+  }
+  String observation=label+" expectedBytes="+expectedBytes+" source="+stored
+   +" selected="+provider+" authority="+(selected==null?"none":selected.getAuthority())
+   +" sourceBytesMatch="+sourceBytesMatch+" nativeBytesMatch="+bytesMatch+" web="+js(a,"window.backupProbe")
+   +" confirmed="+(confirm!=null)
+   +" jsonEof="+js(a,"document.querySelector('#error-announcement').textContent==='Unexpected end of JSON input'");
+  android.util.Log.i("BackupRestoreProbe",observation);
+  if(!sourceBytesMatch||!bytesMatch||confirm==null)failures.add(observation);
+  return selected;
+ }
+
+ private JSONObject backupDocumentMetadata(ContentResolver resolver,Uri uri)throws Exception{
+  String[] fields={OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE};
+  JSONObject metadata=new JSONObject().put("mime",resolver.getType(uri));
+  try(var row=resolver.query(uri,fields,null,null,null)){
+   if(row!=null&&row.moveToFirst()){
+    int name=row.getColumnIndex(OpenableColumns.DISPLAY_NAME),size=row.getColumnIndex(OpenableColumns.SIZE);
+    if(name>=0&&!row.isNull(name))metadata.put("name",row.getString(name));
+    if(size>=0&&!row.isNull(size))metadata.put("size",row.getLong(size));
+   }
+  }
+  return metadata;
+ }
+
  @Test public void restorePreviousTrialBackup()throws Exception{
   String path=InstrumentationRegistry.getArguments().getString("previousTrialBackup");
   assumeTrue("Requires the synthetic snapshot from the installed 0.3.0 trial",path!=null);
