@@ -142,7 +142,7 @@ export function renderBalanceApprovalHistory({accountName,entries,reveal=false,u
    '<section class="panel"><p>Bu hesap için kayıtlı onay bulunmuyor.</p></section>':
   selected?historyDetail(selected,reveal,movementLimit):'<p class="warning">Seçilen onay bu hesabın kayıtlı geçmişinde bulunamıyor.</p>';
  return `<div class="wallet-v2 balance-history" id="${id}">
-  ${renderBackLink(backTitle)}
+  ${renderBackLink(backTitle,'balanceHistoryBack')}
   <h1>${heading}</h1><p class="lead">${esc(accountName)}</p>
   ${unavailable?'<p class="warning" role="alert">Güncel kayıtlar okunamadı. Geçmişte saklanan kanıt gösteriliyor, güncellik değerlendirilemiyor.</p>':''}
   ${commonControls(reveal)}

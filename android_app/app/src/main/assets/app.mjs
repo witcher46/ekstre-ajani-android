@@ -689,6 +689,10 @@ function submitBalanceReview(event){
  }
 }
 
+function handleBackClick(){
+ if(!window.handleBack())go(backFallback().page,null,null,{recordHistory:false});
+}
+
 const actions={
  applyCategorySuggestion:event=>{
   if(!actionTrigger.isConnected)return;
@@ -718,7 +722,9 @@ const actions={
   if(account?.type==='card')payCardForm(account.id);
   else payCardForm(undefined,{sourceId:account?.id});
  },
- back:()=>{if(!window.handleBack())go(backFallback().page,null,null,{recordHistory:false});},
+ back:handleBackClick,
+ balanceBack:handleBackClick,
+ balanceHistoryBack:handleBackClick,
  balanceHistoryReveal:()=>{
   balanceHistoryView.reveal=!balanceHistoryView.reveal;
   render();$('balance-history-reveal')?.focus({preventScroll:true});

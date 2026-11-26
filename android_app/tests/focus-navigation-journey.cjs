@@ -210,7 +210,7 @@ async function checkBackNavigation(browser){
     };
     const statement='QNB · 2026-10',card='Sentetik <kart> & kredi',renamedCard=card+' yeni',bank='Sentetik banka';
     const back=button('.back-link');
-    const deferReview=button('[data-action=back]').first();
+    const deferReview=page.getByRole('button',{name:'Sonra incele'});
     async function checkBack(control,destination,expectedName=destination){
       const visible=expectedName===destination?'← '+destination:expectedName;
       check('visible Back label to '+destination,await control.innerText(),visible);
@@ -289,6 +289,7 @@ async function checkBackNavigation(browser){
     await page.locator('#search').fill('Sentetik');
     const openReview=button('[data-page=review]');
     await openReview.click();
+    assert.equal(await deferReview.count(),1,'quality journey review deferral locator is unique');
     await checkBack(deferReview,'İşlemler','Sonra incele · İşlemler');
     check('transaction query restored',await page.locator('#search').inputValue(),'Sentetik');
     check('review opener restored',await focused(openReview),true);
@@ -300,22 +301,24 @@ async function checkBackNavigation(browser){
     await importedStatement.click();
     await checkFallback(back,'Ekstreler');
 
-    for(const route of ['balance-review','balance-history']){
+    for(const [route,action] of [['balance-review','balanceBack'],['balance-history','balanceHistoryBack']]){
       await home();
       await tab('wallet');
       const walletBank=button('[data-account-view="synthetic-bank"]');
       await walletBank.click();
       const opener=button('[data-'+route+']');
       await opener.click();
-      await checkBack(back,bank);
+      const balanceBack=button('[data-action="'+action+'"]');
+      assert.equal(await balanceBack.count(),1,'existing '+action+' selector finds the Back button');
+      await checkBack(balanceBack,bank);
       check(route+' opener restored',await focused(opener),true);
       await opener.click();
-      await checkFallback(back,'Cüzdanım');
+      await checkFallback(balanceBack,'Cüzdanım');
     }
 
     assert.deepEqual(errors,[]);
     assert.deepEqual(failures,[],'U08 Back labels, destinations, and history');
-    console.log('U08 Back destinations, empty history, opener/scroll/query restoration, and modal-first native Back passed');
+    console.log('U08 Back destinations, legacy balance actions, unique review deferral, empty history, opener/scroll/query restoration, and modal-first native Back passed');
   }finally{
     await page.close();
   }

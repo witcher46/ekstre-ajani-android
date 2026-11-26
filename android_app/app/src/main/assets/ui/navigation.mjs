@@ -14,8 +14,8 @@ const SUBPAGE_PARENT=Object.freeze({account:'wallet',balanceReview:'wallet',bala
 
 export const activeBottomPage=page=>SUBPAGE_PARENT[page]||page;
 
-export function renderBackLink(title){
-  return `<button type="button" class="back-link" data-action="back"><span aria-hidden="true">←</span> ${esc(title)}</button>`;
+export function renderBackLink(title,action='back'){
+  return `<button type="button" class="back-link" data-action="${esc(action)}"><span aria-hidden="true">←</span> ${esc(title)}</button>`;
 }
 
 export function renderBottomNavigation(page){
