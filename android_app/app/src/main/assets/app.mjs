@@ -223,10 +223,16 @@ function expenseCategorySuggestion(row,lookup=merchant=>C.categorySuggestion(sta
  const suggestion=lookup(row.merchantName??row.sourceDesc??row.desc);
  return suggestion&&suggestion.category!==row.category?suggestion:null;
 }
+const categorySuggestionReasons={
+ exact:'Bu satıcı için kaydettiğin kategori kuralı eşleşti.',
+ parent:'Bu satıcı için kaydettiğin genel kategori kuralı eşleşti.',
+ sibling:'Başka bir numaralı şube için kaydettiğin kategori kuralı bu kategoriyi öneriyor.',
+ 'parent-and-sibling':'Satıcının genel kategori kuralı ile başka bir numaralı şube için kaydettiğin kural aynı kategoriyi öneriyor.',
+};
 function categorySuggestionRow(row,edit,index,lookup){
  const suggestion=expenseCategorySuggestion(row,lookup);
  if(!suggestion)return edit;
- const reason=suggestion.match==='merchant'?'Bu satıcı için kaydettiğin kategori kuralı eşleşti.':'Bu satıcının numaralı şubeleri için kayıtlı kategori kuralları aynı kategoriyi öneriyor.';
+ const reason=categorySuggestionReasons[suggestion.source];
  const descriptionId=`transaction-category-advice-${index}`;
  return `<div class="transaction-with-suggestion">${edit}
  <div class="transaction-category-suggestion">

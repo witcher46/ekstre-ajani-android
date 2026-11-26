@@ -186,38 +186,46 @@ function branchMerchantName(key){
 export function suggestCategory(s,merchant){
  return categorySuggestion(s,merchant)?.category??null;
 }
+function mergeBranchRule(current,category,source){
+ if(current===undefined)return {category,source};
+ if(current===null||current.category!==category)return null;
+ if(current.source!==source)current.source='parent-and-sibling';
+ return current;
+}
 export function categorySuggestion(s,merchant){
  return matchCategory(merchant,()=>merchantRule(s,merchant),name=>{
-  const categories=new Set();
+  let match;
   for(const rule of s.merchantCategoryRules??[]){
    const key=merchantKey(rule.merchant);
-   if(key===name||branchMerchantName(key)===name)categories.add(rule.category);
-   if(categories.size>1)return null;
+   if(key===name)match=mergeBranchRule(match,rule.category,'parent');
+   else if(branchMerchantName(key)===name)match=mergeBranchRule(match,rule.category,'sibling');
+   if(match===null)return null;
   }
-  return categories.values().next().value??null;
+  return match;
  });
 }
-function matchCategory(merchant,exactRule,branchCategory){
+function matchCategory(merchant,exactRule,branchMatch){
  const key=merchantKey(merchant),exact=exactRule(key);
- if(exact)return {category:exact.category,match:'merchant'};
+ if(exact)return {category:exact.category,match:'merchant',source:'exact'};
  const name=branchMerchantName(key);
  if(!name)return null;
- const category=branchCategory(name);
- return category===null?null:{category,match:'branch'};
+ const branch=branchMatch(name);
+ return branch?.category==null?null:{category:branch.category,match:'branch',source:branch.source};
 }
 export function indexCategorySuggestions(s){
  const rules=new Map(),branches=new Map();
- const record=(name,category)=>{
-  if(!branches.has(name))branches.set(name,category);
-  else if(branches.get(name)!==category)branches.set(name,null);
+ const record=(name,category,source)=>{
+  const previous=branches.get(name);
+  const next=mergeBranchRule(previous,category,source);
+  if(next!==previous)branches.set(name,next);
  };
  for(const rule of s.merchantCategoryRules??[]){
   const key=merchantKey(rule.merchant),name=branchMerchantName(key);
   if(!rules.has(key))rules.set(key,rule);
-  record(key,rule.category);
-  if(name)record(name,rule.category);
+  record(key,rule.category,'parent');
+  if(name)record(name,rule.category,'sibling');
  }
- return merchant=>matchCategory(merchant,key=>rules.get(key),name=>branches.get(name)??null);
+ return merchant=>matchCategory(merchant,key=>rules.get(key),name=>branches.get(name));
 }
 export function saveMerchantRule(s,merchant,category,ruleId){
  const next=structuredClone(s);

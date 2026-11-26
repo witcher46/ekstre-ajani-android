@@ -122,9 +122,33 @@ test('the transaction list index preserves exact, branch, ambiguous and generic 
   for(const merchant of ['MİGROS','MIGROS 1234 IZMIR','MIGROS 5678 BURSA','METRO MARKET 1234 IZMIR','POS 1234 IZMIR','POS 5432 ANKARA','METRO TURIZM 1234 IZMIR']){
     assert.deepEqual(lookup(merchant),C.categorySuggestion(state,merchant));
   }
-  assert.deepEqual(lookup('METRO MARKET 1234 IZMIR'),{category:'Giyim',match:'branch'});
-  assert.deepEqual(lookup('MIGROS 1234 IZMIR'),{category:'Diğer',match:'merchant'});
+  assert.deepEqual(lookup('METRO MARKET 1234 IZMIR'),{category:'Giyim',match:'branch',source:'sibling'});
+  assert.deepEqual(lookup('MIGROS 1234 IZMIR'),{category:'Diğer',match:'merchant',source:'exact'});
   assert.equal(lookup('MIGROS 5678 BURSA'),null);
+});
+
+test('direct and indexed category suggestions identify the rules that supplied the category', () => {
+  const parent=['Sentetik Marketim','Giyim'];
+  const sibling=['Sentetik Marketim 456 Izmir','Giyim'];
+  const conflictingSibling=['Sentetik Marketim 789 Bursa','Ulaşım'];
+  const merchant='Sentetik Marketim 123 Ankara';
+  const cases=[
+    [[parent],{category:'Giyim',match:'branch',source:'parent'}],
+    [[sibling],{category:'Giyim',match:'branch',source:'sibling'}],
+    [[parent,sibling],{category:'Giyim',match:'branch',source:'parent-and-sibling'}],
+    [[sibling,parent],{category:'Giyim',match:'branch',source:'parent-and-sibling'}],
+    [[parent,sibling,conflictingSibling],null],
+    [[parent,conflictingSibling],null],
+    [[sibling,conflictingSibling],null],
+    [[parent,conflictingSibling,[merchant,'Eğitim']],{category:'Eğitim',match:'merchant',source:'exact'}],
+    [[['Sentetik Marketim Ek 456 Izmir','Giyim']],null],
+  ];
+  for(const [rules,expected] of cases){
+    const state=rules.reduce((wallet,[name,category])=>C.saveMerchantRule(wallet,name,category),C.empty());
+    assert.deepEqual(C.categorySuggestion(state,merchant),expected,JSON.stringify(rules));
+    assert.deepEqual(C.indexCategorySuggestions(state)(merchant),expected,JSON.stringify(rules));
+    assert.equal(C.suggestCategory(state,merchant),expected?.category??null);
+  }
 });
 
 test('the transaction list normalizes stored rules once for all visible suggestions', () => {

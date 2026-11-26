@@ -15,6 +15,46 @@ async function routeWallet(page) {
   });
 }
 
+async function categorySuggestionReasonsJourney(browser) {
+  const page=await browser.newPage();
+  try {
+    await routeWallet(page);
+    await page.goto('https://wallet.test/');
+    const cases=[
+      ['parent','Sentetik Marketim',[['','Giyim']],'Giyim','Bu satıcı için kaydettiğin genel kategori kuralı eşleşti.'],
+      ['sibling','Sentetik Dükkân',[[' 456 Izmir','Giyim']],'Giyim','Başka bir numaralı şube için kaydettiğin kategori kuralı bu kategoriyi öneriyor.'],
+      ['agree','Sentetik Bakkal',[['','Giyim'],[' 456 Izmir','Giyim']],'Giyim','Satıcının genel kategori kuralı ile başka bir numaralı şube için kaydettiğin kural aynı kategoriyi öneriyor.'],
+      ['exact','Sentetik Giyim',[['','Giyim'],[' 456 Izmir','Ulaşım'],[' 123 Ankara','Eğitim']],'Eğitim','Bu satıcı için kaydettiğin kategori kuralı eşleşti.'],
+      ['conflict','Sentetik Kitapçı',[['','Giyim'],[' 456 Izmir','Ulaşım']],null,null],
+      ['unmatched','Sentetik Kırtasiye',[],null,null],
+    ];
+    await page.evaluate(async cases=>{
+      const C=await import('/core.mjs');
+      const W=await import('/wallet.mjs');
+      let wallet=C.empty();
+      const date=C.today();
+      wallet.accounts.push({id:'test-card',name:'Sentetik kart',type:'card',opening:0});
+      for(const [id,merchant,rules] of cases){
+        wallet.transactions.push({id,account:'test-card',date,period:date.slice(0,7),desc:merchant+' 123 Ankara',kind:'expense',category:'Diğer',amount:4500,source:'manual'});
+        for(const [suffix,category] of rules)wallet=C.saveMerchantRule(wallet,merchant+suffix,category);
+      }
+      localStorage.setItem('ekstre-android-v1',C.backupText(W.normalizeWallet(wallet)));
+    },cases);
+    await page.reload();
+    await page.locator('nav [data-page=transactions]').click();
+    for(const [id,,,category,reason] of cases){
+      const row=page.locator('[data-edit='+id+']');
+      await row.waitFor();
+      const advice=page.locator('.transaction-with-suggestion').filter({has:row}).locator('.transaction-category-suggestion p');
+      if(reason)assert.deepEqual((await advice.innerText()).split('\n'),['Mevcut kategori: Diğer','Önerilen kategori: '+category,reason],id);
+      else assert.equal(await advice.count(),0,id);
+    }
+    console.log('Category suggestion reasons: parent, sibling, agreement, exact precedence, conflict and no match passed');
+  } finally {
+    await page.close();
+  }
+}
+
 async function categorySuggestionsJourney(browser) {
   const page=await browser.newPage({viewport:{width:320,height:720},hasTouch:true});
   page.setDefaultTimeout(4000);
@@ -47,7 +87,7 @@ async function categorySuggestionsJourney(browser) {
     assert.equal(await dialog.getByLabel('Kategori',{exact:true}).inputValue(),'');
     await dialog.getByRole('button',{name:'Kaydet'}).click();
     assert.equal(await saved(),before);
-    assert.match(await panel.innerText(),/Mevcut kategori: Diğer[\s\S]*Önerilen kategori: Giyim[\s\S]*numaralı şubeleri/);
+    assert.match(await panel.innerText(),/Mevcut kategori: Diğer[\s\S]*Önerilen kategori: Giyim[\s\S]*numaralı şube/);
     assert.match(await apply.getAttribute('aria-describedby'),/^transaction-category-advice-/);
     assert.equal(await saved(),before);
     assert.equal(await page.evaluate(()=>[...document.querySelectorAll('.transaction-category-suggestion button')].every(button=>{
@@ -470,6 +510,7 @@ async function advancedReportsJourney(page) {
   const browser = await chromium.launch({headless:true, executablePath:process.env.CHROME_PATH || undefined});
   try {
     await csvCategorySuggestionsJourney(browser);
+    await categorySuggestionReasonsJourney(browser);
     await categorySuggestionsJourney(browser);
     const page = await browser.newPage({viewport:{width:320,height:720}});
     page.setDefaultTimeout(4000);
