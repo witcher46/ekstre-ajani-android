@@ -17,6 +17,82 @@ async function serveWallet(page){
   });
 }
 
+async function checkTransactionEmptyStates(browser){
+  const fixture=require('./fixtures/android-0.2.0.json');
+  const row={id:'u06-bank-expense',account:'synthetic-bank',date:'2026-11-02',
+    period:'2026-11',kind:'expense',amount:100,category:'Sentetik özel kategori',desc:'Sentetik market'};
+  const wallet={...fixture,transactions:[row],statements:[]};
+  const page=await browser.newPage({timezoneId:'UTC',viewport:{width:360,height:640}});
+  try{
+    page.setDefaultTimeout(5000);
+    const errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    await serveWallet(page);
+    const goToTransactions=async()=>{
+      await page.goto('https://wallet.test/');
+      await page.locator('nav [data-page=transactions]').click();
+    };
+    const list=page.locator('#transactions-list');
+    const search=page.getByRole('searchbox');
+    const transaction=list.getByRole('button',{name:/Sentetik market/});
+    async function expectEmpty(title,context){
+      assert.equal(await list.locator('.empty b').textContent(),title,context);
+      assert.equal(await list.getByRole('button').count(),0,context);
+    }
+
+    await goToTransactions();
+    await expectEmpty('Buradan başlayalım','fresh wallet');
+    assert.equal(await list.locator('.empty p').textContent(),
+      'Henüz işlem yok. Hesap ekleyebilir veya bir ekstre aktarabilirsin.');
+
+    await page.addInitScript(wallet=>localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet)),wallet);
+    await goToTransactions();
+    assert.equal(await search.inputValue(),'');
+    await transaction.waitFor();
+
+    await search.focus();
+    for(const [key,value] of [['x','x'],['y','xy']]){
+      await page.keyboard.press(key);
+      assert.equal(await search.inputValue(),value,'typing continues after the list rerenders');
+      assert.equal(await search.evaluate(el=>el===document.activeElement),true,'search retains keyboard focus');
+    }
+    await expectEmpty('Eşleşen işlem bulunamadı','search with no matches');
+    await page.keyboard.press('Control+a');
+    await page.keyboard.press('Backspace');
+    await transaction.waitFor();
+    assert.equal(await search.evaluate(el=>el===document.activeElement),true,'clearing search retains keyboard focus');
+    await page.keyboard.press('Space');
+    assert.equal(await search.inputValue(),' ');
+    await transaction.waitFor();
+    await page.keyboard.press('Backspace');
+
+    const kind=page.locator('#f-kind-filter');
+    await kind.selectOption('income');
+    await expectEmpty('Eşleşen işlem bulunamadı','transaction type with no matches');
+    await kind.selectOption('');
+    await transaction.waitFor();
+
+    const period=page.locator('#period');
+    await period.fill('2026-10');
+    await expectEmpty('Bu kapsamda işlem yok','month without transactions');
+    await search.fill('market');
+    await expectEmpty('Bu kapsamda işlem yok','search within an empty month');
+    await search.clear();
+    await period.fill('2026-11');
+    await transaction.waitFor();
+
+    const scope=page.locator('#f-view-mode');
+    await scope.selectOption('statement');
+    await expectEmpty('Bu kapsamda işlem yok','statement scope excludes the bank transaction');
+    await scope.selectOption('calendar');
+    await transaction.waitFor();
+    assert.deepEqual(errors,[]);
+    console.log('U06 first-use copy, period and statement scope, search and filter no-match, and keyboard recovery passed');
+  }finally{
+    await page.close();
+  }
+}
+
 async function checkShowMore(browser){
   const fixture=require('./fixtures/android-0.2.0.json');
   const sample=fixture.transactions[0],statement=fixture.statements[0];
@@ -156,6 +232,7 @@ async function checkDialog(page,opener,expectedTitle){
 (async()=>{
   const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||undefined});
   try{
+    await checkTransactionEmptyStates(browser);
     await checkShowMore(browser);
     const failures=[];
     for(const scale of [100,200]){
