@@ -1,6 +1,6 @@
 # Ekstre Ajanı — Android
 
-Android uygulaması Java/WebView tabanlıdır; verileri cihazda tutar ve desteklenen PDF/CSV ekstrelerini yerel olarak işler. Mevcut proje sürümü 0.2.0 deneme hattıdır. Eski kurulu uygulama veya imza anahtarı bu depoya dahil değildir.
+Android uygulaması Java/WebView tabanlıdır; verileri cihazda tutar ve desteklenen PDF/CSV ekstrelerini yerel olarak işler. **Ayarlar**, kurulu APK’nın sürüm adını Android paket bilgisinden alır. Kaynak ağacındaki Gradle paketleri ve sürümleri [Android dağıtım belgesinde](docs/ANDROID_DISTRIBUTION.md#paket-ve-sürüm-politikası) listelenir. Eski kurulu uygulama veya imza anahtarı bu depoya dahil değildir.
 
 ## Gereksinimler ve derleme
 
@@ -24,6 +24,6 @@ Chrome/Playwright, tarayıcı akışları için; Android 35 emülatörü, enstr�
 
 ## Veri ve sözleşmeler
 
-Uygulama verisi cihazdaki uygulama alanında SQLite olarak tutulur; JSON yedeği `format="ekstre-android"`, `version=1` kullanır. Gerçek yedek, PDF, CSV, imzalama anahtarı veya APK Git'e eklenmez. Ortak finans kuralları [`docs/FINANCIAL_BEHAVIOR_CONTRACT.md`](docs/FINANCIAL_BEHAVIOR_CONTRACT.md), taşıma notları [`docs/DATA_FORMATS_AND_MIGRATIONS.md`](docs/DATA_FORMATS_AND_MIGRATIONS.md) içindedir.
+Uygulama verisi cihazdaki uygulama alanında SQLite olarak tutulur. Uygulama `format="ekstre-android"` biçimindeki v1, v2 ve v3 JSON yedeklerini açar. Dışa aktarma, kaydedilmiş cüzdanın JSON sürümünü korur. Gerçek yedek, PDF, CSV, imzalama anahtarı veya APK Git'e eklenmez. Ortak finans kuralları [`docs/FINANCIAL_BEHAVIOR_CONTRACT.md`](docs/FINANCIAL_BEHAVIOR_CONTRACT.md), taşıma notları [`docs/DATA_FORMATS_AND_MIGRATIONS.md`](docs/DATA_FORMATS_AND_MIGRATIONS.md) içindedir.
 
 `archive/` ile başlayan dallar geçmiş Android sürüm geçmişi ve eski mobil PWA kaynaklarını saklar; varsayılan `main` yerel Android uygulamasıdır.

@@ -5,8 +5,16 @@ Her uygulama kendi yerel deposuna sahiptir. Bunlar otomatik eşitlenmez; taşım
 | Platform | Yerel şema/depo | Yedek biçimi | Mevcut taşıma sınırı |
 |---|---|---|---|
 | Windows masaüstü | SQLite `PRAGMA user_version=4`; dosya kullanıcı profilinin yerel uygulama veri klasöründedir | SQLite veritabanı ve yerel kurtarma kopyaları | Bu depodaki masaüstü şeması `db.py` içinde sürümlenir. Web aktarımı yalnızca doğrulanmış SQLite v4 dosyasını salt okunur işler; parola/kimlik bilgileri aktarılmaz. |
-| Android | Uygulamaya özel yerel SQLite | JSON `format="ekstre-android"`, `version=1` veya `version=2` | Eski v1 kayıtlar korunur. İlk bakiye gözlemi Android yedeğini v2 yapar. Eski Android ve v1 web aktarımı için [gözlemli yedek geçiş sözleşmesine](ANDROID_ACCOUNT_BALANCE_RECONCILIATION_PHASE_2_STORAGE.md) bak. Otomatik senkronizasyon yoktur. |
+| Android | Uygulamaya özel yerel SQLite | JSON `format="ekstre-android"`, `version` değeri `1`, `2` veya `3` | v1, v2 ve v3 geri yüklenebilir. Dışa aktarma, kaydedilmiş cüzdanın JSON sürümünü korur. |
 | Web | Tarayıcı IndexedDB veritabanı sürüm 2 | Web JSON yedeği `version=2` | IndexedDB v1→v2 göçü ve eski web JSON v1 geri yüklemesi desteklenir. Android JSON v1 ve masaüstü SQLite v4 aktarımı önizleme ile yapılır. |
+
+## Android JSON sürümleri
+
+- **v1** yeni cüzdanın başlangıç biçimidir. Olağan düzenlemeler cüzdanın, geri yükleme ise seçilen yedeğin JSON sürümünü korur.
+- **v2**, v1 cüzdana ilk bakiye gözlemi kaydedildiğinde oluşur ve `balanceReconciliation.observations` dizisini taşır. Son gözlem silinse de cüzdan v2 olarak kalır. [Gözlem saklama sözleşmesi](ANDROID_ACCOUNT_BALANCE_RECONCILIATION_PHASE_2_STORAGE.md)
+- **v3**, v2 cüzdanda ilk mutabakat onayı kalıcı olarak kaydedildiğinde oluşur. Sürüm geçişi ve onay aynı atomik yazmada kaydedilir. v3 yedeği gözlemlerin yanında `balanceReconciliation.approvals` dizisini taşır. Gözlem düzenleme veya silme v3’ü ve onay geçmişini korur. [Onay saklama sözleşmesi](ANDROID_ACCOUNT_BALANCE_RECONCILIATION_PHASE_2_APPROVAL_STORAGE.md)
+
+**Ayarlar → Yedek dışa aktar**, kaydedilmiş cüzdanın JSON sürümünü dosyaya yazar. **Ayarlar → Yedek yükle**, sürümü yazmadan önce doğrular. Yalnız v1 destekleyen Android okuyucuları v2 ve v3 dosyalarını, en çok v2 destekleyenler ise v3 dosyalarını mevcut cüzdanı değiştirmeden reddeder. v2 veya v3 dosyasını geri yüklemek için o JSON sürümünü destekleyen bir Android APK’sı gerekir. Android v1 ile sınırlı web aktarımı v2 ve v3 dosyalarını açamaz.
 
 ## Güvenli taşıma ilkeleri
 
