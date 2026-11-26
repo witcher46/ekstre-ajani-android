@@ -340,7 +340,9 @@ async function run() {
     const ambiguous=usdOnly.replace('100.00 USD','100.00 USD 3500.00');
     await page.evaluate(()=>{window.Android={pickPdf:id=>window.pdfRequests.push(id)};});
     const beforeCurrencyTests=await snapshot();
-    for(const text of [usdOnly,ambiguous]){
+    const yapi=fs.readFileSync(path.join(__dirname,'fixtures/pdf-parser-audit/yapi-kredi.synthetic.txt'),'utf8')
+      .replace('100,00 0,00','100,00 TL 0,00');
+    for(const text of [usdOnly,ambiguous,yapi.replace('100,00 TL','100,00 USD')]){
       await choose();
       await complete(text,await token());
       assert.match(await page.locator('#error-announcement').textContent(),/para birimi/i);
@@ -378,6 +380,23 @@ async function run() {
       assert.deepEqual(movements,[originalMovement]);
       assert.equal(await preview.count(),0);
     }
+    await page.evaluate(()=>{window.Android={pickPdf:id=>window.pdfRequests.push(id)};});
+    await choose();
+    await complete(yapi,await token());
+    assert.equal(await preview.count(),1,await page.locator('#error-announcement').textContent());
+    await preview.getByText('Toplamlar doğrulandı',{exact:true}).waitFor();
+    await page.evaluate(()=>{delete window.Android;});
+    await cardPicker.selectOption(newCard);
+    await save.click();
+    assert.equal(await preview.count(),0,await page.locator('#error-announcement').textContent());
+    const yapiWallet=JSON.parse((await snapshot())[0]);
+    const yapiStatement=yapiWallet.statements.find(s=>s.account===newCard&&s.bank==='Yapı Kredi'&&s.period==='2026-10');
+    assert.ok(yapiStatement);
+    assert.deepEqual(yapiWallet.transactions.filter(t=>t.statement===yapiStatement.id).map(t=>t.amount),
+      [10000,8500,1000,2000]);
+    assert.equal(yapiStatement.debt,25500);
+    assert.equal(yapiStatement.reconciliationStatus,'verified');
+
     assert.deepEqual(errors,[]);
     console.log('Statement and expense chart journeys passed; '+checks+' responsive checks');
   } finally {

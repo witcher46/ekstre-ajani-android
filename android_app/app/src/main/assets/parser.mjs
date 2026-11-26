@@ -201,10 +201,10 @@ function parseStatementRows(text,privateIdentities){
   const tail=body.slice(annotated?.end??token.index+token[0].length);
   let rawStart=rawToken.index,legacyStart;
   if(annotated){
-   // Re-read the block in each representation so glyph cleanup never shifts the raw source slice.
-   const rawAmount=annotatedTry(rawBody,pattern,isQ,true);
-   const legacyAmount=annotatedTry(legacyBody,pattern,isQ,true);
-   if(rawAmount.index!==rawToken.index||legacyAmount.value!==token[0]||
+   // Use the same currency rules in each representation and require the same annotation.
+   const rawAmount=annotatedTry(rawBody,pattern,isQ,foreignContext);
+   const legacyAmount=annotatedTry(legacyBody,pattern,isQ,foreignContext);
+   if(rawAmount?.index!==rawToken.index||legacyAmount?.value!==token[0]||
       rawAmount.foreign!==annotated.foreign||legacyAmount.foreign!==annotated.foreign)throw currencyError();
    rawStart=rawAmount.start;
    legacyStart=legacyAmount.start;

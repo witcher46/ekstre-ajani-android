@@ -129,6 +129,23 @@ test('QNB decodes PDFBox glyphs and excludes a split reward section', () => {
   assert.equal(parsed.reconciliation.status, 'verified');
 });
 
+test('Yapı Kredi accepts a TRY-suffixed amount followed by decimal Worldpuan', () => {
+  const text = yapi.replace('100,00 0,00', '100,00 TL 0,00');
+  const parsed = parseStatement(text);
+  assert.deepEqual(movements(parsed), expected);
+  assert.equal(parsed.rows[0].sourceDesc, 'SENTETIK MARKET');
+  assert.equal(parsed.rows[0].importKey, '["Yapı Kredi","2026-10","2026-10-01","SENTETIK MARKET",10000,""]|1');
+  assert.equal(parsed.reconciliation.status, 'verified');
+  assert.equal(parsed.reconciliation.statementDebt, 25500);
+});
+
+test('Yapı Kredi still rejects foreign or ambiguously labeled amounts next to Worldpuan', () => {
+  for (const amountAndPoints of ['100,00 USD 0,00', '100,00 0,00 TL', '100,00 TL 0,00 USD']) {
+    const text = yapi.replace('100,00 0,00', amountAndPoints);
+    assert.throws(() => parseStatement(text), /para birimi.*kısmi kayıt/, amountAndPoints);
+  }
+});
+
 test('Yapı Kredi excludes dated Worldpuan section rows', () => {
   const parsed = parseStatement(fixture('yapi-kredi-points-boundary.synthetic.txt'));
   assert.deepEqual(movements(parsed), expected);
