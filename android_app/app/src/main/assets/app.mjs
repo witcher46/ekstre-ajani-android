@@ -475,6 +475,17 @@ function fitLayout(){
  document.documentElement.style.setProperty('--nav-height',nav.getBoundingClientRect().height+'px');
 }
 const layoutObserver=new ResizeObserver(()=>requestAnimationFrame(fitLayout));layoutObserver.observe($('main'));layoutObserver.observe($('nav'));window.addEventListener('resize',fitLayout);
+$('main').addEventListener('focusin',({target})=>{
+ if(!target.matches(':focus-visible'))return;
+ requestAnimationFrame(()=>{
+  if(document.activeElement!==target)return;
+  const rect=target.getBoundingClientRect();
+  const clearance=parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop);
+  const availableHeight=$('nav').getBoundingClientRect().top-2*clearance;
+  // Keep the leading edge visible when the control is taller than the available space.
+  if(rect.height>availableHeight&&rect.top<clearance)window.scrollBy(0,rect.top-clearance);
+ });
+});
 
 function openQuickAdd(){
  if($('modal').open)return;
