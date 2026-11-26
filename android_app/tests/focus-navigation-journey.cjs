@@ -6,14 +6,18 @@ const path=require('node:path');
 const root=path.resolve(__dirname,'../app/src/main/assets');
 const settle=page=>page.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))));
 
-async function serveWallet(page){
+async function serveWallet(page,appSuffix=''){
   await page.clock.setFixedTime(new Date('2026-11-26T12:00:00Z'));
   await page.route('https://wallet.test/**',route=>{
     const name=new URL(route.request().url()).pathname.slice(1)||'index.html';
     const file=path.join(root,name);
     if(!file.startsWith(root+path.sep)||!fs.existsSync(file))return route.abort();
     const contentType=name.endsWith('.mjs')?'text/javascript':name.endsWith('.css')?'text/css':'text/html';
-    return route.fulfill({body:fs.readFileSync(file),contentType});
+    const body=fs.readFileSync(file);
+    return route.fulfill({
+      body:name==='app.mjs'&&appSuffix?Buffer.concat([body,Buffer.from(appSuffix)]):body,
+      contentType,
+    });
   });
 }
 
@@ -175,6 +179,151 @@ async function checkShowMore(browser){
   }
 }
 
+async function checkBackNavigation(browser){
+  const C=await import('../app/src/main/assets/core.mjs');
+  const fixture=structuredClone(require('./fixtures/android-0.2.0.json'));
+  fixture.accounts[0].name='Sentetik <kart> & kredi';
+  fixture.transactions.push({
+    ...fixture.transactions[2],id:'u08-pending',matchStatus:'pending',matchCandidates:[],matchReason:'sourceChanged',
+  });
+  const wallet=C.addBalanceObservation(fixture,{
+    accountId:'synthetic-bank',observedDate:'2026-10-15',observedAmountCents:100000,sourceKind:'bankDocument',
+  });
+  const page=await browser.newPage({timezoneId:'UTC',viewport:{width:360,height:640}});
+  try{
+    page.setDefaultTimeout(5000);
+    const errors=[],failures=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    // The app starts at home and its child routes normally have an opener.
+    // Empty only the stack to exercise the production Back click with no opener.
+    await serveWallet(page,'\nwindow.clearBackHistoryForTest=()=>{history.length=0;render();};\n');
+    await page.addInitScript(wallet=>localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet)),wallet);
+    const home=()=>page.goto('https://wallet.test/');
+    const tab=route=>page.locator('nav [data-page="'+route+'"]').click();
+    const button=selector=>page.locator('main button'+selector);
+    const heading=()=>page.locator('main h1').innerText();
+    const nativeBack=()=>page.evaluate(()=>window.handleBack());
+    const scroll=()=>page.evaluate(()=>window.scrollY);
+    const focused=locator=>locator.evaluateAll(elements=>elements.includes(document.activeElement));
+    const check=(name,actual,expected)=>{
+      if(actual!==expected)failures.push({name,actual,expected});
+    };
+    const statement='QNB · 2026-10',card='Sentetik <kart> & kredi',renamedCard=card+' yeni',bank='Sentetik banka';
+    const back=button('.back-link');
+    const deferReview=page.getByRole('button',{name:'Sonra incele'});
+    async function checkBack(control,destination,expectedName=destination){
+      const visible=expectedName===destination?'← '+destination:expectedName;
+      check('visible Back label to '+destination,await control.innerText(),visible);
+      const accessible=await control.ariaSnapshot();
+      check('accessible Back name to '+destination,accessible,'- button "'+expectedName+'"');
+      await control.click();
+      check('Back destination',await heading(),destination);
+    }
+    async function checkFallback(control,destination,expectedName){
+      await page.evaluate(()=>window.clearBackHistoryForTest());
+      await checkBack(control,destination,expectedName);
+      check('native Back after fallback to '+destination,await nativeBack(),false);
+      check('repeated native Back after fallback to '+destination,await nativeBack(),false);
+      check('fallback did not revisit the abandoned view',await heading(),destination);
+    }
+
+    await home();
+    await tab('import');
+    const importedStatement=button('[data-statement-view]');
+    await importedStatement.click();
+    assert.equal(await heading(),statement);
+    await checkBack(back,'Ekstreler');
+    check('statement list opener restored',await focused(importedStatement),true);
+    await importedStatement.click();
+    const openCard=button('[data-card-view="synthetic-card"]');
+    await openCard.click();
+    assert.equal(await heading(),card);
+    await checkBack(back,statement);
+    check('statement card opener restored',await focused(openCard),true);
+
+    await home();
+    await tab('wallet');
+    const walletCard=button('[data-card-view="synthetic-card"]');
+    await walletCard.click();
+    const lastStatement=button('.card-statement-link');
+    await lastStatement.evaluate(element=>element.scrollIntoView({block:'center'}));
+    const cardScroll=await scroll();
+    assert(cardScroll>0,'synthetic card opener should be below the fold');
+    await lastStatement.click();
+    assert.equal(await heading(),statement);
+    const quickAdd=page.locator('#quick-add');
+    await quickAdd.click();
+    assert.equal(await page.locator('#modal[open]').count(),1);
+    check('native Back closes the modal',await nativeBack(),true);
+    check('modal closed',await page.locator('#modal[open]').count(),0);
+    check('native Back leaves statement open after closing the modal',await heading(),statement);
+    check('modal opener restored',await focused(quickAdd),true);
+    await openCard.click();
+    await button('[data-account="synthetic-card"]').click();
+    await page.locator('#modal [name=name]').fill(renamedCard);
+    await page.locator('#submit').click();
+    assert.equal(await heading(),renamedCard);
+    await checkBack(back,statement);
+    await checkBack(back,renamedCard);
+    check('card statement opener restored',await focused(lastStatement),true);
+    check('card source scroll restored',await scroll(),cardScroll);
+
+    const historyPanel=page.locator('main details').filter({has:page.getByText(/^Ekstre geçmişi ·/)});
+    const historyStatement=historyPanel.locator('button[data-statement-view]');
+    await historyPanel.locator('summary').click();
+    await historyStatement.evaluate(element=>element.scrollIntoView({block:'center'}));
+    const historyScroll=await scroll();
+    await historyStatement.click();
+    assert.equal(await heading(),statement);
+    await checkBack(back,renamedCard);
+    check('card history opener restored',await focused(historyStatement),true);
+    check('card history scroll restored',await scroll(),historyScroll);
+    await checkBack(back,'Cüzdanım');
+    check('wallet card opener restored',await focused(walletCard),true);
+    check('native Back unwinds normal history',await nativeBack(),true);
+    check('normal history returns to home',await heading(),'Parana genel bakış');
+    check('native Back yields at the root',await nativeBack(),false);
+
+    await home();
+    await tab('transactions');
+    await page.locator('#search').fill('Sentetik');
+    const openReview=button('[data-page=review]');
+    await openReview.click();
+    assert.equal(await deferReview.count(),1,'quality journey review deferral locator is unique');
+    await checkBack(deferReview,'İşlemler','Sonra incele · İşlemler');
+    check('transaction query restored',await page.locator('#search').inputValue(),'Sentetik');
+    check('review opener restored',await focused(openReview),true);
+    await openReview.click();
+    await checkFallback(deferReview,'Ekstreler','Sonra incele · Ekstreler');
+
+    await home();
+    await tab('import');
+    await importedStatement.click();
+    await checkFallback(back,'Ekstreler');
+
+    for(const [route,action] of [['balance-review','balanceBack'],['balance-history','balanceHistoryBack']]){
+      await home();
+      await tab('wallet');
+      const walletBank=button('[data-account-view="synthetic-bank"]');
+      await walletBank.click();
+      const opener=button('[data-'+route+']');
+      await opener.click();
+      const balanceBack=button('[data-action="'+action+'"]');
+      assert.equal(await balanceBack.count(),1,'existing '+action+' selector finds the Back button');
+      await checkBack(balanceBack,bank);
+      check(route+' opener restored',await focused(opener),true);
+      await opener.click();
+      await checkFallback(balanceBack,'Cüzdanım');
+    }
+
+    assert.deepEqual(errors,[]);
+    assert.deepEqual(failures,[],'U08 Back labels, destinations, and history');
+    console.log('U08 Back destinations, legacy balance actions, unique review deferral, empty history, opener/scroll/query restoration, and modal-first native Back passed');
+  }finally{
+    await page.close();
+  }
+}
+
 async function checkWalletFocus(page,scale){
   await page.locator('nav [data-page=wallet]').click();
   await settle(page);
@@ -232,6 +381,8 @@ async function checkDialog(page,opener,expectedTitle){
 (async()=>{
   const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||undefined});
   try{
+    await checkBackNavigation(browser);
+    if(process.argv.includes('--u08'))return;
     await checkTransactionEmptyStates(browser);
     await checkShowMore(browser);
     const failures=[];

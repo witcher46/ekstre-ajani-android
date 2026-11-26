@@ -3,6 +3,7 @@ import * as W from './wallet.mjs';
 import {advancedReports,reportRows} from './reports.mjs';
 import {options,select} from './ui/form-controls.mjs';
 import {renderBalanceAccount} from './ui/balance-review.mjs';
+import {renderBackLink} from './ui/navigation.mjs';
 
 const kindNames = {expense:'Harcama',income:'Gelir',refund:'İade',payment:'Hesaptan kart ödemesi',cardPayment:'Ekstre kart ödemesi',transfer:'Transfer'};
 const statementFields = {previousDebt:'Önceki dönem borcu',statementDebt:'Dönem borcu',expectedDebt:'Beklenen dönem borcu',cut:'Hesap kesim tarihi',due:'Son ödeme tarihi'};
@@ -213,12 +214,13 @@ function cardView(ctx,account) {
 export function accountView(ctx,accountId) {
   const {state,esc,periodControl} = ctx;
   const account = state.accounts.find(a => a.id === accountId);
-  if (!account) return shell('<h1>Hesap bulunamadı</h1><button data-page="wallet">Cüzdana dön</button>');
-  if (account.type === 'card') return shell(`<button class="back-link" data-page="wallet">← Cüzdanım</button>${cardView(ctx,account)}`);
+  const back = renderBackLink(ctx.backTitle ?? 'Cüzdanım');
+  if (!account) return shell(`${back}<h1>Hesap bulunamadı</h1>`);
+  if (account.type === 'card') return shell(back + cardView(ctx,account));
   const movements = state.transactions.filter(t => t.account === account.id || t.target === account.id);
   const overview = W.accountOverview(state,account.id,ctx.period);
   const monthly = movements.filter(t => t.date.slice(0,7) === ctx.period);
-  return shell(`<button class="back-link" data-page="wallet">← Cüzdanım</button><h1>${esc(account.name)}</h1><p class="lead">${account.type === 'cash' ? 'Nakit hesabı' : 'Banka hesabı'}</p>
+  return shell(`${back}<h1>${esc(account.name)}</h1><p class="lead">${account.type === 'cash' ? 'Nakit hesabı' : 'Banka hesabı'}</p>
     <section class="hero panel"><small>KAYDEDİLMİŞ KULLANILABİLİR BAKİYE</small><div class="big" data-stat="accountBalance">${amount(ctx,C.balance(state,account))}</div><p class="notice">Açılış bakiyesi gelir sayılmaz. Bakiye kaydedilmiş hareketlere dayanır.</p></section>
     <div class="toolbar"><button class="primary" data-action="addIncome">Gelir ekle</button><button data-action="transfer">Transfer</button><button data-account="${esc(account.id)}">Hesabı düzenle</button></div>
     ${renderBalanceAccount(state,account)}
@@ -398,15 +400,21 @@ function statementCard(ctx,statement,rows,pending) {
   </article>`;
 }
 
+export function statementTitle(statement) {
+  return statement ? `${statement.bank || 'Ekstre'} · ${statement.period}` : 'Ekstre bulunamadı';
+}
+
 export function statementView(ctx,id) {
   const statement=ctx.state.statements.find(st=>st.id===id);
-  if (!statement) return shell('<h1>Ekstre bulunamadı</h1><button data-action="back">Ekstrelere dön</button>');
+  const back = renderBackLink(ctx.backTitle ?? 'Ekstreler');
+  const title = ctx.esc(statementTitle(statement));
+  if (!statement) return shell(`${back}<h1>${title}</h1>`);
   const {rowsByStatement,underReview}=statementGroups(ctx.state);
   const rows=rowsByStatement.get(id) || [];
   const pending=underReview.has(id);
   const status=statementStatus(statement,pending,rows.length);
-  return shell(`<button class="back-link" data-action="back">← Ekstreler</button>
-    <h1>${ctx.esc(statement.bank || 'Ekstre')} · ${ctx.esc(statement.period)}</h1>
+  return shell(`${back}
+    <h1>${title}</h1>
     <p class="lead">${ctx.esc(accountName(ctx.state,statement.account))}</p>
     <section class="panel"><h2>Ekstre bilgileri</h2><p class="statement-status ${status.tone||''}">${status.label}</p>
       ${status.reason?`<p>${status.reason}</p>`:''}

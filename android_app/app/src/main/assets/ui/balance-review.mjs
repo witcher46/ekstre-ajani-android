@@ -1,5 +1,6 @@
 import * as C from '../core.mjs';
 import {escapeHtml as esc,field,options,select} from './form-controls.mjs';
+import {renderBackLink} from './navigation.mjs';
 
 const sourceLabels = {bankDocument:'Banka belgesi',manualBank:'Elle aktarılan banka bakiyesi',cashCount:'Nakit sayımı'};
 const ledgerSources = {manual:'Elle kaydedilen işlem',pdf:'PDF aktarımı',csv:'CSV aktarımı',unknown:'Kayıt kaynağı tanınmıyor'};
@@ -213,10 +214,10 @@ function finalForm(prepared){
   </form>`;
 }
 
-export function renderBalanceReview(state,observationId,draft,storageAvailable){
+export function renderBalanceReview(state,observationId,draft,storageAvailable,backTitle='Cüzdanım'){
  const observation = observations(state).find(row=>row.id===observationId&&row.role==='observation');
  const account = state.accounts.find(row=>row.id===observation?.accountId);
- const header = `<button type="button" class="back-link" data-action="balanceBack">← Hesap ayrıntısı</button><h1>Bakiye mutabakatı</h1>`;
+ const header = `${renderBackLink(backTitle,'balanceBack')}<h1>Bakiye mutabakatı</h1>`;
  const error = '<p id="balance-review-error" role="alert" tabindex="-1" hidden></p>';
  if(draft.clockBehind)return `<div class="wallet-v2 balance-review">${header}<section class="panel">
   <h2 id="balance-clock-title" tabindex="-1">Cihaz saatini düzelt</h2>

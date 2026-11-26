@@ -163,12 +163,18 @@ function focusTarget(element){
  const selector=`${scope} [data-${attr}="${CSS.escape(element.dataset[key])}"]${rowId?`[data-transaction-id="${CSS.escape(rowId)}"]`:''}`;
  return {element,selector,index:[...document.querySelectorAll(selector)].indexOf(element),fallback:rowId?`${scope} [data-edit="${CSS.escape(rowId)}"]`:null};
 }
-function restoreFocus(target){
+function restoreFocus(target,{returning=false}={}){
  const current=target?.element?.isConnected?target.element:
   target?.selector?document.querySelectorAll(target.selector)[Math.max(0,target.index??0)]:null;
  const fallback=target?.fallback?document.querySelector(target.fallback):null;
- if(current||fallback)(current||fallback).focus();
- else focusMain();
+ const opener=current||fallback;
+ if(!opener){focusMain();return;}
+ if(returning){
+  for(let section=opener.closest('details');section;section=section.parentElement.closest('details')){
+   if(!section.querySelector(':scope > summary')?.contains(opener))section.open=true;
+  }
+ }
+ opener.focus({preventScroll:returning});
 }
 const {open:modal,close:closeModal,showError:showDialogError}=createDialog($('modal'),{
  captureOpener:()=>focusTarget(actionTrigger||document.activeElement),
@@ -180,7 +186,7 @@ window.handleBack=()=>{
  if(!previous)return false;
  ({page,detailId,query,expenseCategory}=previous);
  resetBalanceReview(page,detailId);
- render();window.scrollTo(0,previous.scroll);restoreFocus(previous.opener);
+ render();restoreFocus(previous.opener,{returning:true});window.scrollTo(0,previous.scroll);
  return true;
 };
 window.nativeError=errorNotice;window.nativeNotice=message=>notice(message);
@@ -209,9 +215,22 @@ window.onPdfText=async (text,request)=>{
   go('import');notice('PDF okundu. Kartı seçip önizlemeyi onayla.');
  }catch(e){window.onPdfError(e.message,request);}
 };
-function go(next,id=null,category=null){
+function backFallback(){
+ return page==='statement'||page==='review'
+  ? {page:'import',title:'Ekstreler'} : {page:'wallet',title:'Cüzdanım'};
+}
+function backDestinationTitle(){
+ const previous=history.at(-1);
+ if(previous?.page==='account')return state.accounts.find(a=>a.id===previous.detailId)?.name??'Hesap bulunamadı';
+ if(previous?.page==='statement')return V.statementTitle(state.statements.find(st=>st.id===previous.detailId));
+ return previous?.title||backFallback().title;
+}
+function go(next,id=null,category=null,{recordHistory=true}={}){
  if(next!==page||id!==detailId||category!==expenseCategory){
-  history.push({page,detailId,query,expenseCategory,scroll:window.scrollY,opener:focusTarget(actionTrigger||document.activeElement)});
+  if(recordHistory)history.push({
+   page,detailId,query,expenseCategory,title:$('main').querySelector('h1')?.textContent.trim(),
+   scroll:window.scrollY,opener:focusTarget(actionTrigger||document.activeElement),
+  });
   resetBalanceReview(next,id);
  }
  page=next;detailId=id;expenseCategory=category;query='';
@@ -298,13 +317,14 @@ function render(){
  const s=C.summary(state,period,mode),rows=C.rowsForPeriod(state,period,mode),periodControl=`<input class="period" id="period" aria-label="${periodLabel}" type="month" max="9999-12" value="${period}">`;
  const modeControl=select('view-mode','Rapor kapsamı',options([['calendar','Takvim ayı · işlem tarihine göre'],['statement','Ekstre dönemi · yalnız kartlar']],periodMode));
  let html='';
- const ctx={state,period,periodMode,fmt,esc,transactionList,periodControl,dateStatus,importCategoryOption,listLimit,importDraft,reportFilters,accountHistoryLimit};
+ const backTitle=backDestinationTitle();
+ const ctx={state,period,periodMode,fmt,esc,transactionList,periodControl,dateStatus,importCategoryOption,listLimit,importDraft,reportFilters,accountHistoryLimit,backTitle};
  if(page==='home'){html=V.homeView(ctx);
  }else if(page==='wallet'){html=V.walletView(ctx);
  }else if(page==='account'){html=V.accountView(ctx,detailId);
- }else if(page==='balanceReview'){html=renderBalanceReview(state,detailId,balanceDraft,balanceReviewToken!==null);
+ }else if(page==='balanceReview'){html=renderBalanceReview(state,detailId,balanceDraft,balanceReviewToken!==null,backTitle);
  }else if(page==='balanceApprovalHistory'||page==='balanceApprovalDetail'){
-  html=renderBalanceApprovalHistory({...balanceHistoryView,selectedId:page==='balanceApprovalDetail'?detailId:null});
+  html=renderBalanceApprovalHistory({...balanceHistoryView,selectedId:page==='balanceApprovalDetail'?detailId:null,backTitle});
  }else if(page==='incomePlans'){html=V.incomePlansView(ctx);
  }else if(page==='transactions'){
  const list=rows.filter(t=>(filteredExpenses?t.kind==='expense'&&t.amount>0&&t.category===expenseCategory:(!kindFilter||t.kind===kindFilter)&&(!accountFilter||t.account===accountFilter||t.target===accountFilter))&&`${t.desc} ${t.category} ${t.note||''}`.toLocaleLowerCase('tr').includes(query.toLocaleLowerCase('tr'))).sort((a,b)=>b.date.localeCompare(a.date));
@@ -324,7 +344,7 @@ function render(){
  }else if(page==='import'){html=V.importView(ctx,pending);
  }else if(page==='statement'){html=V.statementView(ctx,detailId);
  }else if(page==='review'){
- html=reviewPage();
+ html=renderReviewCenter(state,backTitle);
  }else{
  html=`<h1>Ayarlar</h1><p class="lead">${esc(installedVersionLabel())}</p><button data-page="review">İnceleme ve kaynak bağlantıları</button><div class="panel"><h2>Veriler ve yedek</h2><p>Kayıtların bu cihazda saklanır. Uygulamayı kaldırmadan veya yeni bir deneme APK’sı kurmadan önce yedek al.</p><div class="actions"><button data-action="backup">Yedek dışa aktar</button><button data-action="restore">Yedek yükle</button></div><p class="notice">Bu sürüm Android JSON yedeklerini açar. Masaüstü .db yedeği doğrudan aktarılamaz; kart hareketleri için CSV aktarımını kullan.</p></div><button data-action="recover">Geri yükleme öncesi cüzdanı kurtar</button>${expenseCategoriesPanel()}${merchantRulesPanel()}<div class="panel"><h2>Gelir kategorileri</h2><p>${state.incomeCategories.map(esc).join(' · ')}</p><button data-action="incomeCategory">+ Gelir kategorisi</button></div><div class="panel"><h2>İlk deneme</h2><p>Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Gerçek belgelerini yüklemeden önce temel işlevleri deneyebilirsin.</p><button data-action="demo">Örnek cüzdan oluştur</button></div><div class="panel"><h2>Bu sürümün kapsamı</h2><p>Hesaplar, işlemler, PDF/CSV aktarımı, kategori düzenleme, bütçe, aylık abonelik, rapor ve yedekleme. Çoklu profil, AI yorumu, otomatik eşleştirme, işlem bölme, gelişmiş kurallar ve arka plan hatırlatmaları henüz yoktur.</p></div>`;
  }
@@ -481,8 +501,6 @@ function incomePlanForm(){if(!state.accounts.some(a=>a.type!=='card'))throw Erro
 function receiveIncomeForm(id,due){const p=state.incomePlans.find(r=>r.id===id);if(!p)return;modal('Gelir alındı',`<p>${esc(p.name)} · Planlanan tarih ${esc(due)} · ${fmt(p.amount)}</p>`+select('account','Gelirin gerçekten geldiği hesap',accountOptions(a=>a.type!=='card',p.account))+field('receivedOn','Gerçekte alındığı tarih',C.today(),'date','required'),f=>commit(W.receiveIncome(state,id,{receivedOn:f.get('receivedOn'),expectedDue:due,account:f.get('account')})),'Geliri kaydet');}
 function dateStatus(date){const days=Math.round((new Date(date+'T12:00:00')-new Date(C.today()+'T12:00:00'))/86400000);return `${esc(date)} · ${days<0?'Vadesi geçti':days===0?'Bugün':days<=7?'Yaklaşıyor':'Planlandı'}`;}
 function upcoming(){const items=C.upcomingPayments(state).filter(r=>r.days<=7).slice(0,3);return items.length?`<div class="panel"><h2>Yaklaşan / geciken ödemeler</h2>${items.map(r=>`<div class="row"><div><strong>${esc(r.name)}</strong><small>${dateStatus(r.date)}${r.estimated?' · kayıtlı ödemelere göre tahmin':''}</small></div><b>${r.amount===null?'Tutar bilinmiyor':fmt(r.amount)}</b></div>`).join('')}<button data-page="plan">Ödeme planına git</button></div>`:'';}
-function reviewPage(){return renderReviewCenter(state);}
-
 function subscriptionPayment(rid,due){const r=state.subscriptions.find(r=>r.id===rid);if(!r)return;modal('Abonelik ödemesi',`<p>${esc(r.name)} · Planlanan vade ${esc(due)}</p><b>${fmt(r.amount)}</b>`+field('paidOn','Gerçek ödeme tarihi',C.today(),'date','required'),f=>commit(C.paySubscription(state,rid,{paidOn:f.get('paidOn'),expectedDue:due})),'Ödemeyi kaydet');}
 function fitLayout(){
  const nav=$('nav');if(!nav.classList.contains('expanded')&&[...nav.children].some(b=>b.scrollWidth>b.clientWidth+1))nav.classList.add('expanded');
@@ -671,6 +689,10 @@ function submitBalanceReview(event){
  }
 }
 
+function handleBackClick(){
+ if(!window.handleBack())go(backFallback().page,null,null,{recordHistory:false});
+}
+
 const actions={
  applyCategorySuggestion:event=>{
   if(!actionTrigger.isConnected)return;
@@ -700,9 +722,9 @@ const actions={
   if(account?.type==='card')payCardForm(account.id);
   else payCardForm(undefined,{sourceId:account?.id});
  },
- back:()=>{if(!window.handleBack())go('import');},
- balanceBack:()=>{if(!window.handleBack())go('wallet');},
- balanceHistoryBack:()=>{if(!window.handleBack())go('wallet');},
+ back:handleBackClick,
+ balanceBack:handleBackClick,
+ balanceHistoryBack:handleBackClick,
  balanceHistoryReveal:()=>{
   balanceHistoryView.reveal=!balanceHistoryView.reveal;
   render();$('balance-history-reveal')?.focus({preventScroll:true});

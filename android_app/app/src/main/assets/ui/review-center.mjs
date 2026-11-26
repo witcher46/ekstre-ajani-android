@@ -39,7 +39,7 @@ function candidatesFor(state,row,byId) {
     .filter(item=>item&&C.effective(item)&&C.sourceOf(item)!==C.sourceOf(row));
 }
 
-function renderPending(state,row,index,byId) {
+function renderPending(state,row,index,byId,backTitle) {
   const candidates=candidatesFor(state,row,byId);
   const isCsvReview=['csvRepeatedRow','csvSourceConflict'].includes(row.matchReason);
   const id='review-item-'+index;
@@ -76,7 +76,7 @@ function renderPending(state,row,index,byId) {
   html+='<div class="review-decisions">';
   if(candidates.length)html+='<button type="button" class="primary" data-link="'+esc(row.id)+'">Aynı işlem</button>';
   html+='<button type="button" data-distinct="'+esc(row.id)+'">Ayrı gerçek işlem</button>';
-  html+='<button type="button" data-action="back">Sonra incele</button>';
+  html+='<button type="button" data-action="back">Sonra incele · '+esc(backTitle)+'</button>';
   html+='</div>';
   html+='<details class="review-destructive"><summary>Diğer seçenekler</summary>';
   html+='<button type="button" data-delete="'+esc(row.id)+'">'+
@@ -93,7 +93,7 @@ function renderLinked(state,row,byId) {
     '<button type="button" data-unlink="'+esc(row.id)+'">Yeniden incele</button></div>';
 }
 
-export function renderReviewCenter(state) {
+export function renderReviewCenter(state,backTitle='Ekstreler') {
   const transactions=state.transactions;
   const pending=transactions.filter(t=>t.matchStatus==='pending');
   const linked=transactions.filter(t=>Boolean(t.linkedTo));
@@ -106,7 +106,7 @@ export function renderReviewCenter(state) {
   html+='<aside class="review-principle">Belirsiz kayıtlar otomatik eşleştirilmez. Kart borcu ödemesi ikinci bir gider sayılmaz.</aside>';
   html+='<section aria-label="Bekleyen kayıtlar"><h2>Karar bekleyenler</h2>';
   if(pending.length){
-    for(const [index,row] of pending.entries())html+=renderPending(state,row,index,byId);
+    for(const [index,row] of pending.entries())html+=renderPending(state,row,index,byId,backTitle);
   }else {
     html+='<div class="panel review-empty"><strong>İncelenecek kayıt yok</strong><p>Yeni bir PDF veya CSV aktardığında belirsiz kayıtlar burada görünür.</p></div>';
   }
