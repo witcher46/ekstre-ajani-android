@@ -822,3 +822,5 @@ $('csv-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';
 }catch(error){errorNotice(error.message);}};
 
 render();
+$('header-actions').hidden=false;
+$('nav').hidden=false;

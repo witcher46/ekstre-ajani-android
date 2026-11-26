@@ -4,7 +4,82 @@ const digest=raw=>raw===null?'':createHash('sha256').update(raw).digest('hex');
 const wallet={format:'ekstre-android',version:1,accounts:[{id:'bank',type:'bank',name:'Sentetik hesap',opening:74325}],transactions:[],statements:[],subscriptions:[],categories:['Diğer'],budgets:{}};
 const good=JSON.stringify(wallet,null,2),broken='okunamayan sentetik kayıt';
 
+async function startupJourney(browser,url){
+ const cases=[
+  {name:'structuredClone missing with a bridge',missingClone:true,withBridge:true},
+  {name:'structuredClone missing without a bridge',missingClone:true},
+  {name:'wallet module unavailable',missingModule:true,withBridge:true},
+  {name:'valid wallet',withBridge:true},
+  {name:'corrupt wallet',withBridge:true,corrupt:true},
+ ];
+ for(const scenario of cases){
+  const {name,missingClone,missingModule,withBridge,corrupt}=scenario;
+  const page=await browser.newPage({viewport:{width:360,height:780}});
+  const slots={1:corrupt?broken:good,3:good};
+  const appRequests=[],pageErrors=[];
+  page.on('request',request=>{
+   if(new URL(request.url()).pathname==='/app.mjs')appRequests.push(request.url());
+  });
+  page.on('pageerror',error=>pageErrors.push(error.message));
+  try{
+   if(missingModule)await page.route('**/wallet.mjs',route=>route.abort());
+   await page.addInitScript(({missingClone,withBridge,slots})=>{
+    if(missingClone)delete window.structuredClone;
+    const io=window.startupIO={reads:[],writes:[],storageWrites:[],slots};
+    if(withBridge){
+     window.Android=new Proxy({
+      snapshotSlot(slot){io.reads.push(slot);return slots[slot];},
+      load(){io.reads.push(1);return slots[1];},
+     },{
+      get(target,method){
+       return target[method]||((...args)=>{io.writes.push([method,...args]);return false;});
+      },
+     });
+    }
+    for(const method of ['setItem','removeItem','clear']){
+     const original=Storage.prototype[method];
+     Storage.prototype[method]=function(...args){
+      if(this===window.localStorage)io.storageWrites.push([method,...args]);
+      return original.apply(this,args);
+     };
+    }
+   },{missingClone,withBridge,slots});
+   await page.goto(url+'/index.html');
+   const guidance=page.getByText(/Google Play Store/);
+   if(missingClone||missingModule){
+    assert.equal(await guidance.isVisible(),true,
+     name+': expected visible update instructions; page errors: '+pageErrors.join(', '));
+    const instructions=await page.locator('main').innerText();
+    for(const step of [/Android System WebView/,/Google Chrome/,/Güncelle/,/yeniden aç/]){
+     assert.match(instructions,step,name);
+    }
+    assert.equal(await page.locator('#settings').isVisible(),false,name);
+    if(missingClone)assert.deepEqual(appRequests,[],name+': app module must not load');
+    assert.deepEqual((await page.evaluate(()=>window.startupIO)).reads,[],name);
+   }else if(corrupt){
+    await page.getByRole('heading',{name:'Cüzdan kurtarma'}).waitFor({timeout:4000});
+    assert.equal(await page.locator('[data-action=recover][data-slot="3"]').isVisible(),true);
+    assert.equal(await guidance.isVisible(),false,name);
+    assert.deepEqual((await page.evaluate(()=>window.startupIO)).reads,[1,3,2],name);
+   }else{
+    await page.getByRole('heading',{name:'Parana genel bakış'}).waitFor({timeout:4000});
+    assert.equal(await guidance.isVisible(),false,name);
+    await page.locator('nav [data-page=wallet]').click({timeout:4000});
+    assert.equal(await page.getByRole('button',{name:/^Sentetik hesap/}).isVisible(),true,name);
+    assert.deepEqual((await page.evaluate(()=>window.startupIO)).reads,[1],name);
+   }
+   assert.deepEqual(pageErrors,[],name);
+   const io=await page.evaluate(()=>window.startupIO);
+   assert.deepEqual(io.writes,[],name);
+   assert.deepEqual(io.storageWrites,[],name);
+   assert.deepEqual(io.slots,slots,name);
+  }finally{await page.close();}
+ }
+ console.log('Startup capability and recovery scenarios passed');
+}
+
 module.exports=async function recoveryJourney(browser,url){
+ await startupJourney(browser,url);
  const page=await browser.newPage();
  const configure=async (slots,unreadable)=>{
   await page.evaluate(config=>{sessionStorage.setItem('recoveryFixture',JSON.stringify(config));},{slots,unreadable});
