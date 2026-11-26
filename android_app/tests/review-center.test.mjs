@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as C from '../app/src/main/assets/core.mjs';
 import {renderReviewCenter,reviewCounts} from '../app/src/main/assets/ui/review-center.mjs';
-import {NAV_ITEMS,activeBottomPage} from '../app/src/main/assets/ui/navigation.mjs';
+import {renderBottomNavigation,renderMoreNavigation} from '../app/src/main/assets/ui/navigation.mjs';
 
 const seed=()=>{
   const state=C.empty();
@@ -67,7 +67,11 @@ test('review center is honest about candidates and shows confirmed links without
   assert.deepEqual(reviewCounts(state.transactions),{pending:2,linked:1});
 });
 
-test('review screen is a Transactions subpage without changing five primary routes',()=>{
-  assert.deepEqual(NAV_ITEMS.map(([id])=>id),['home','wallet','transactions','plan','import']);
-  assert.equal(activeBottomPage('review'),'transactions');
+test('review keeps the Transactions path through Diğer and has no current fixed tab',()=>{
+  const nav=renderBottomNavigation('review');
+  assert.deepEqual([...nav.matchAll(/data-page="([^"]+)"/g)].map(match=>match[1]),['home','wallet','reports']);
+  assert.match(nav,/id="more" data-action="openMore" aria-haspopup="dialog"/);
+  assert.match(renderMoreNavigation(),/data-action="selectMorePage" data-destination="transactions"/);
+  assert.doesNotMatch(nav,/aria-current/);
+  assert.match(renderReviewCenter(seed(),'İşlemler'),/data-action="back">Sonra incele · İşlemler<\/button>/);
 });
