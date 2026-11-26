@@ -396,6 +396,102 @@ async function checkWalletFocus(page,scale){
   return failures;
 }
 
+async function checkReviewCheckbox(browser){
+  const fixture=require('./fixtures/android-0.2.0.json');
+  const row={id:'u10-review',account:'synthetic-bank',date:'2026-11-02',period:'2026-11',
+    kind:'expense',amount:100,category:'Sentetik özel kategori',desc:'Sentetik inceleme'};
+  const wallet={...fixture,transactions:[row],statements:[]};
+  const page=await browser.newPage({timezoneId:'UTC',viewport:{width:390,height:844}});
+  try{
+    page.setDefaultTimeout(5000);
+    const errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    page.on('dialog',confirmation=>{
+      errors.push('Unexpected browser dialog: '+confirmation.type());
+      return confirmation.dismiss();
+    });
+    await serveWallet(page);
+    await page.addInitScript(wallet=>localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet)),wallet);
+    await page.goto('https://wallet.test/');
+    await page.locator('nav [data-page=transactions]').click();
+
+    const transaction=page.getByRole('button',{name:/Sentetik inceleme/});
+    const dialog=page.getByRole('dialog',{name:'İşlem ayrıntısı'});
+    const checkbox=dialog.getByRole('checkbox',{name:'İncelendi',exact:true});
+    const label=checkbox.locator('..');
+    const note=dialog.locator('[name=note]');
+    const remove=dialog.getByRole('button',{name:'İşlemi sil'});
+    const failures=[];
+    for(const [width,scale] of [[390,1],[320,2],[280,4]]){
+      await page.setViewportSize({width,height:844});
+      await transaction.click();
+      const scaledText=scale===4?label.locator('xpath=self::* | .//*'):dialog.locator('*');
+      await scaledText.evaluateAll((elements,scale)=>{
+        if(scale===1)return;
+        const sizes=elements.map(element=>parseFloat(getComputedStyle(element).fontSize));
+        elements.forEach((element,index)=>element.style.fontSize=sizes[index]*scale+'px');
+      },scale);
+      assert.equal(await checkbox.getAttribute('name'),'reviewed');
+      assert.equal(await checkbox.isChecked(),false);
+      await checkbox.evaluate(element=>{
+        element.form.dataset.reviewChanges='0';
+        element.addEventListener('change',()=>element.form.dataset.reviewChanges=Number(element.form.dataset.reviewChanges)+1);
+      });
+      await label.evaluate(element=>element.scrollIntoView({block:'center'}));
+      const bounds=await label.boundingBox();
+      const field=await note.boundingBox();
+      const x=field.x+field.width-3;
+      const y=bounds.y+bounds.height/2;
+      await page.mouse.click(x,y);
+      assert.equal(await dialog.isVisible(),true,'The gutter click must keep the edit dialog open');
+      const clicked=await checkbox.isChecked();
+      const pointerChanges=await dialog.locator('form').getAttribute('data-review-changes');
+      assert.equal(await note.inputValue(),'');
+      await note.focus();
+      await page.keyboard.press('Tab');
+      assert.equal(await checkbox.evaluate(element=>element===document.activeElement&&element.matches(':focus-visible')),true);
+      assert.equal(await checkbox.evaluate(element=>getComputedStyle(element).outlineStyle),'solid');
+      await page.keyboard.press('Space');
+      assert.equal(await checkbox.isChecked(),!clicked);
+      assert.equal(Number(await dialog.locator('form').getAttribute('data-review-changes')),Number(pointerChanges)+1);
+      await page.keyboard.press('Tab');
+      assert.equal(await remove.evaluate(element=>element===document.activeElement),true);
+
+      const textLines=await label.evaluate(element=>{
+        const walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT);
+        while(walker.nextNode()){
+          if(!walker.currentNode.textContent.trim())continue;
+          const range=document.createRange();
+          range.selectNodeContents(walker.currentNode);
+          return range.getClientRects().length;
+        }
+        return 0;
+      });
+      const result={width,scale,labelWidth:bounds.width,labelHeight:bounds.height,fieldWidth:field.width,
+        textLines,clicked,pointerChanges:Number(pointerChanges)};
+      console.log('U10 transaction detail',result);
+      if(bounds.height<48||Math.abs(bounds.x-field.x)>1||Math.abs(bounds.width-field.width)>1||
+        !clicked||pointerChanges!=='1'||(scale===4&&textLines<2))failures.push(result);
+      await page.keyboard.press('Escape');
+      await dialog.waitFor({state:'hidden'});
+    }
+    assert.deepEqual(errors,[]);
+    assert.deepEqual(failures,[],'The review label must span the form and provide a 48px touch target, including with wrapped text');
+
+    await transaction.click();
+    await note.focus();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Space');
+    await dialog.locator('#submit').click();
+    await dialog.waitFor({state:'hidden'});
+    await transaction.getByText('İncelendi',{exact:true}).waitFor();
+    await transaction.click();
+    assert.equal(await checkbox.isChecked(),true);
+  }finally{
+    await page.close();
+  }
+}
+
 async function checkDialog(page,opener,expectedTitle){
   await opener.focus();
   await page.keyboard.press('Enter');
@@ -417,6 +513,10 @@ async function checkDialog(page,opener,expectedTitle){
 (async()=>{
   const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||undefined});
   try{
+    if(process.argv.includes('--u10')){
+      await checkReviewCheckbox(browser);
+      return;
+    }
     const onlyIncomePlans=process.argv.includes('--u09');
     if(!onlyIncomePlans){
       await checkBackNavigation(browser);
@@ -426,6 +526,7 @@ async function checkDialog(page,opener,expectedTitle){
     if(onlyIncomePlans)return;
     await checkTransactionEmptyStates(browser);
     await checkShowMore(browser);
+    await checkReviewCheckbox(browser);
     const failures=[];
     for(const scale of [100,200]){
       const page=await browser.newPage({viewport:{width:320,height:640}});
