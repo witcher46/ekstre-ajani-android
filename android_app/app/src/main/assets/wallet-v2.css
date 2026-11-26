@@ -199,3 +199,9 @@
  .wallet-v2 .card-source-label{display:inline-block;max-width:100%;margin:6px 0 0}
  .wallet-v2 .card-statement-summary .card-remaining dd{font-size:1.1rem;overflow-wrap:anywhere}
 }
+
+.expense-allocation{margin-block:16px}
+.expense-allocation fieldset{min-inline-size:0;margin:0;border:1px solid var(--line);border-radius:11px;padding:12px;overflow-wrap:anywhere}
+.expense-allocation-row+.expense-allocation-row{border-top:1px solid var(--line);margin-block-start:12px}
+.expense-allocation-row button,.expense-allocation-actions{margin-block-start:12px}
+.expense-allocation-actions{display:flex;gap:8px;flex-wrap:wrap}

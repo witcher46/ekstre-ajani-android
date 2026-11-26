@@ -4,7 +4,7 @@ Baseline audited on 21–22 Nov 2026; report completed 24 Nov:
 - Repository: witcher46/ekstre-ajani-android. Audited main: aae505b3c7a01a416bb9059c442f0161e167f00e; tree: 06cf6f25b455dee7a2d4d4857ac71cd2cedac6cf.
 - Check actual branch/HEAD before work. This is an audited baseline, not an assertion about the latest commit.
 - PR #24: reconciliation phase 2 (evidence, CAS, approval/history). PR #25: category suggestions and actual installed version label. Both merged at baseline.
-- Local-first Java Android shell + WebView assets; JS integer-kuruş finance core; SQLite JSON snapshot storage (current/previous/recovery). Supported JSON v1/v2/v3. No automatic bank connection.
+- Local-first Java Android shell + WebView assets; JS integer-kuruş finance core; SQLite JSON snapshot storage (current/previous/recovery). Supported JSON v1/v2/v3/v4. The first saved expense split creates v4. No automatic bank connection.
 - Prior physical test: isolated test APK passed accounts, ordinary finance, mismatch observation, incomplete evidence rejection, basic UI/privacy and synthetic JSON roundtrip. Valid approval/history, TalkBack and real production-signed upgrade remain open.
 - The independent audit confirmed 24 findings and found the project unready for production. The full audit PDF and raw evidence are owner-local. Ask only for the specific missing evidence if needed. Never upload actual financial records.
 

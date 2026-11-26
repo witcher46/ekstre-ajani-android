@@ -7,6 +7,7 @@ import {loadPdfIdentityKey} from './pdf-identity.mjs';
 import {parseStatementCsv} from './csv.mjs';
 import {createDialog} from './ui/dialog.mjs';
 import {escapeHtml as esc,options,field,select} from './ui/form-controls.mjs';
+import {expenseAllocationFields,attachExpenseAllocationFields} from './ui/expense-allocations.mjs';
 import {renderBottomNavigation} from './ui/navigation.mjs';
 import {renderReviewCenter} from './ui/review-center.mjs';
 import {compareBalanceObservation} from './balance-reconciliation.mjs';
@@ -238,7 +239,7 @@ function go(next,id=null,category=null,{recordHistory=true}={}){
 }
 const empty=(message,title='Buradan başlayalım')=>`<div class="empty"><b>${title}</b><p>${message}</p></div>`;
 function expenseCategorySuggestion(row,lookup=merchant=>C.categorySuggestion(state,merchant)){
- if(!row||row.linkedTo||!['expense','refund'].includes(row.kind))return null;
+ if(!row||row.linkedTo||C.allocationsFor(state,row)||!['expense','refund'].includes(row.kind))return null;
  const suggestion=lookup(row.merchantName??row.sourceDesc??row.desc);
  return suggestion&&suggestion.category!==row.category?suggestion:null;
 }
@@ -293,7 +294,8 @@ function installedVersionLabel(){
 function transactionList(rows,{suggestCategories=false,limit=listLimit}={}){
  const lookup=suggestCategories&&!loadFailed&&rows.length&&C.indexCategorySuggestions(state);
  return rows.length?rows.slice(0,limit).map((t,index)=>{
-  const edit=`<button class="row transaction" type="button" data-edit="${esc(t.id)}"><span class="left"><strong>${esc(t.desc)}</strong><small>${esc(t.date)} · ${esc(accountName(t.account))}<br>${esc(t.category)} · ${esc(kinds[t.kind])}${t.installment?' · '+esc(t.installment):''}${t.matchStatus==='pending'?(t.kind==='payment'?'<br>Banka hareketi kaydedildi; ikinci kart etkisi incelemede':'<br>Olası eşleşme · henüz toplama eklenmedi'):t.linkedTo?'<br>Aynı işleme bağlı · ikinci kez sayılmıyor':''}</small></span><span class="amount">${fmt(t.amount)}${t.reviewed?'<small>İncelendi</small>':''}</span></button>`;
+  const categoryText=t.allocationView?t.category:C.allocationsFor(state,t)?'Bölünmüş gider':t.category;
+  const edit=`<button class="row transaction" type="button" data-edit="${esc(t.id)}"><span class="left"><strong>${esc(t.desc)}</strong><small>${esc(t.date)} · ${esc(accountName(t.account))}<br>${esc(categoryText)} · ${esc(kinds[t.kind])}${t.installment?' · '+esc(t.installment):''}${t.matchStatus==='pending'?(t.kind==='payment'?'<br>Banka hareketi kaydedildi; ikinci kart etkisi incelemede':'<br>Olası eşleşme · henüz toplama eklenmedi'):t.linkedTo?'<br>Aynı işleme bağlı · ikinci kez sayılmıyor':''}</small></span><span class="amount">${fmt(t.amount)}${t.reviewed?'<small>İncelendi</small>':''}</span></button>`;
   return lookup?categorySuggestionRow(t,edit,index,lookup):edit;
  }).join(''):empty('Henüz işlem yok. Hesap ekleyebilir veya bir ekstre aktarabilirsin.');
 }
@@ -327,7 +329,14 @@ function render(){
   html=renderBalanceApprovalHistory({...balanceHistoryView,selectedId:page==='balanceApprovalDetail'?detailId:null,backTitle});
  }else if(page==='incomePlans'){html=V.incomePlansView(ctx);
  }else if(page==='transactions'){
- const list=rows.filter(t=>(filteredExpenses?t.kind==='expense'&&t.amount>0&&t.category===expenseCategory:(!kindFilter||t.kind===kindFilter)&&(!accountFilter||t.account===accountFilter||t.target===accountFilter))&&`${t.desc} ${t.category} ${t.note||''}`.toLocaleLowerCase('tr').includes(query.toLocaleLowerCase('tr'))).sort((a,b)=>b.date.localeCompare(a.date));
+ const searchTerm=query.toLocaleLowerCase('tr');
+ const scoped=filteredExpenses?
+  rows.filter(t=>t.kind==='expense'&&t.amount>0).map(t=>C.expenseCategoryRow(state,t,expenseCategory)).filter(Boolean):
+  rows.filter(t=>(!kindFilter||t.kind===kindFilter)&&(!accountFilter||t.account===accountFilter||t.target===accountFilter));
+ const list=scoped.filter(t=>{
+  const categories=t.allocationView?[t.category]:C.expenseCategoryAmounts(state,t).map(part=>part.category);
+  return [t.desc,t.category,t.note,...categories].join(' ').toLocaleLowerCase('tr').includes(searchTerm);
+ }).sort((a,b)=>b.date.localeCompare(a.date));
  let results;
  if(list.length||!state.transactions.length){
   results=transactionList(list,{suggestCategories:true});
@@ -346,7 +355,7 @@ function render(){
  }else if(page==='review'){
  html=renderReviewCenter(state,backTitle);
  }else{
- html=`<h1>Ayarlar</h1><p class="lead">${esc(installedVersionLabel())}</p><button data-page="review">İnceleme ve kaynak bağlantıları</button><div class="panel"><h2>Veriler ve yedek</h2><p>Kayıtların bu cihazda saklanır. Uygulamayı kaldırmadan veya yeni bir deneme APK’sı kurmadan önce yedek al.</p><div class="actions"><button data-action="backup">Yedek dışa aktar</button><button data-action="restore">Yedek yükle</button></div><p class="notice">Bu sürüm Android JSON yedeklerini açar. Masaüstü .db yedeği doğrudan aktarılamaz; kart hareketleri için CSV aktarımını kullan.</p></div><button data-action="recover">Geri yükleme öncesi cüzdanı kurtar</button>${expenseCategoriesPanel()}${merchantRulesPanel()}<div class="panel"><h2>Gelir kategorileri</h2><p>${state.incomeCategories.map(esc).join(' · ')}</p><button data-action="incomeCategory">+ Gelir kategorisi</button></div><div class="panel"><h2>İlk deneme</h2><p>Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Gerçek belgelerini yüklemeden önce temel işlevleri deneyebilirsin.</p><button data-action="demo">Örnek cüzdan oluştur</button></div><div class="panel"><h2>Bu sürümün kapsamı</h2><p>Hesaplar, işlemler, PDF/CSV aktarımı, kategori düzenleme, bütçe, aylık abonelik, rapor ve yedekleme. Çoklu profil, AI yorumu, otomatik eşleştirme, işlem bölme, gelişmiş kurallar ve arka plan hatırlatmaları henüz yoktur.</p></div>`;
+ html=`<h1>Ayarlar</h1><p class="lead">${esc(installedVersionLabel())}</p><button data-page="review">İnceleme ve kaynak bağlantıları</button><div class="panel"><h2>Veriler ve yedek</h2><p>Kayıtların bu cihazda saklanır. Uygulamayı kaldırmadan veya yeni bir deneme APK’sı kurmadan önce yedek al.</p><div class="actions"><button data-action="backup">Yedek dışa aktar</button><button data-action="restore">Yedek yükle</button></div><p class="notice">Bu sürüm Android JSON yedeklerini açar. Masaüstü .db yedeği doğrudan aktarılamaz; kart hareketleri için CSV aktarımını kullan.</p></div><button data-action="recover">Geri yükleme öncesi cüzdanı kurtar</button>${expenseCategoriesPanel()}${merchantRulesPanel()}<div class="panel"><h2>Gelir kategorileri</h2><p>${state.incomeCategories.map(esc).join(' · ')}</p><button data-action="incomeCategory">+ Gelir kategorisi</button></div><div class="panel"><h2>İlk deneme</h2><p>Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Gerçek belgelerini yüklemeden önce temel işlevleri deneyebilirsin.</p><button data-action="demo">Örnek cüzdan oluştur</button></div><div class="panel"><h2>Bu sürümün kapsamı</h2><p>Hesaplar, işlemler, PDF/CSV aktarımı, kategori düzenleme, manuel gider bölme, bütçe, aylık abonelik, rapor ve yedekleme. Çoklu profil, AI yorumu, otomatik eşleştirme, gelişmiş kurallar ve arka plan hatırlatmaları henüz yoktur.</p></div>`;
  }
  $('main').innerHTML=html;
  $('main').querySelector('h1')?.setAttribute('tabindex','-1');
@@ -430,16 +439,21 @@ function transactionForm(existing,preset='expense'){
  if(!state.accounts.length){notice('Önce hesap veya kart ekle.');accountForm();return;}
  if(existing?.linkedTo){const canonical=state.transactions.find(t=>t.id===existing.linkedTo);if(canonical)return transactionForm(canonical);}
  const locked=!!(existing?.statement||existing?.csvKey||existing?.installmentPlan),isEdit=!!existing;
+ const initialAllocations=existing&&C.allocationsFor(state,existing),fixed=locked||!!initialAllocations;
+ const canAllocate=existing?C.canAllocateExpense(state,existing):true;
+ let allocationFields;
  const merchant=desc=>existing?.merchantName??existing?.sourceDesc??desc;
- modal(isEdit?'İşlem ayrıntısı':preset==='income'?'Gelir ekle':preset==='transfer'?'Transfer yap':'Gider ekle',select('kind','İşlem türü',options(Object.entries(kinds).filter(([k])=>k!=='cardPayment'||existing?.kind===k),existing?.kind||preset))+select('account','Hesap',accountOptions(()=>true,existing?.account||(page==='account'?detailId:undefined)))+`<div id="target-fields"></div>`+field('desc','Açıklama',existing?.desc||'','text','required maxlength="500"')+field('amount','Tutar (TL)',existing?existing.amount/100:'','text','inputmode="decimal" required')+field('date','Gerçek işlem tarihi',existing?.date||C.today(),'date','required')+(existing?.installmentPlan?'<p class="notice">Taksit planına bağlı. Açıklama, kategori ve not düzenlenebilir.</p>':locked?`<p class="notice">Kaynak: ${esc(C.sourceOf(existing))} · Ekstre dönemi: ${esc(existing.period)}<br>Orijinal açıklama: ${esc(existing.sourceDesc??existing.desc)}</p>`:'')+select('category','Kategori',categoryOptions(existing?.kind||preset,existing?.category))+`<div id="category-suggestion"><p id="category-advice" role="status"></p><button id="choose-category" type="button" hidden>Önerilen kategoriyi seç</button><label><input name="remember-category" type="checkbox"> Bu satıcı için kategori önerisini hatırla</label></div><div id="installment-fields"></div>`+field('note','Not',existing?.note||'','text','maxlength="2000"')+`<label class="transaction-reviewed"><input name="reviewed" type="checkbox" ${existing?.reviewed?'checked':''}><span>İncelendi</span></label>`+(existing?`<button type="button" class="danger" data-delete="${esc(existing.id)}">${existing.installmentPlan?'Taksit planını sil':'İşlemi sil'}</button>`:''),f=>{
-  const kind=locked?existing.kind:f.get('kind'),t={...existing,id:existing?.id||C.id(),account:locked?existing.account:f.get('account'),kind,desc:f.get('desc').trim(),amount:C.money(f.get('amount')),date:f.get('date'),period:existing&&(locked||existing.date===f.get('date'))?existing.period:f.get('date').slice(0,7),category:['payment','transfer','cardPayment'].includes(kind)?kinds[kind]:f.get('category'),note:f.get('note'),reviewed:f.get('reviewed')==='on'};
+ modal(isEdit?'İşlem ayrıntısı':preset==='income'?'Gelir ekle':preset==='transfer'?'Transfer yap':'Gider ekle',select('kind','İşlem türü',options(Object.entries(kinds).filter(([k])=>k!=='cardPayment'||existing?.kind===k),existing?.kind||preset))+select('account','Hesap',accountOptions(()=>true,existing?.account||(page==='account'?detailId:undefined)))+`<div id="target-fields"></div>`+field('desc','Açıklama',existing?.desc||'','text','required maxlength="500"')+field('amount','Tutar (TL)',existing?C.decimalMoney(existing.amount):'','text','inputmode="decimal" required')+field('date','Gerçek işlem tarihi',existing?.date||C.today(),'date','required')+(existing?.installmentPlan?'<p class="notice">Taksit planına bağlı. Açıklama, kategori ve not düzenlenebilir.</p>':locked?`<p class="notice">Kaynak: ${esc(C.sourceOf(existing))} · Ekstre dönemi: ${esc(existing.period)}<br>Orijinal açıklama: ${esc(existing.sourceDesc??existing.desc)}</p>`:'')+select('category','Kategori',categoryOptions(existing?.kind||preset,existing?.category))+`<div id="category-suggestion"><p id="category-advice" role="status"></p><button id="choose-category" type="button" hidden>Önerilen kategoriyi seç</button><label><input name="remember-category" type="checkbox"> Bu satıcı için kategori önerisini hatırla</label></div><div id="installment-fields"></div>`+(canAllocate?expenseAllocationFields(state.version<4):'')+field('note','Not',existing?.note||'','text','maxlength="2000"')+`<label class="transaction-reviewed"><input name="reviewed" type="checkbox" ${existing?.reviewed?'checked':''}><span>İncelendi</span></label>`+(existing?`<button type="button" class="danger" data-delete="${esc(existing.id)}">${existing.installmentPlan?'Taksit planını sil':'İşlemi sil'}</button>`:''),f=>{
+  const kind=fixed?existing.kind:f.get('kind'),t={...existing,id:existing?.id||C.id(),account:fixed?existing.account:f.get('account'),kind,desc:f.get('desc').trim(),amount:existing&&f.get('amount')===C.decimalMoney(existing.amount)?existing.amount:C.money(f.get('amount')),date:f.get('date'),period:existing&&(locked||existing.date===f.get('date'))?existing.period:f.get('date').slice(0,7),category:['payment','transfer','cardPayment'].includes(kind)?kinds[kind]:f.get('category'),note:f.get('note'),reviewed:f.get('reviewed')==='on'};
   if(kind==='payment'&&C.sourceOf(t)==='manual')rejectFutureCardPaymentDate(t.date);
   if(['payment','transfer'].includes(kind))t.target=f.get('target');else delete t.target;
   const count=f.get('installmentCount')?.trim();
   if(!locked){const installment=f.get('installment')?.trim();if(count&&installment)throw Error('Taksit planı veya tek taksit bilgisi gir.');if(kind==='expense'&&installment){const [a,b]=installment.split('/').map(Number);if(!/^\d{1,3}\/\d{1,3}$/.test(installment)||a<1||b<a)throw Error('Taksidi 1/6 gibi yaz; mevcut taksit toplamdan büyük olamaz.');t.installment=installment;}else delete t.installment;}
   if(locked&&(t.amount!==existing.amount||t.account!==existing.account||t.kind!==existing.kind||t.date!==existing.date))throw Error('Aktarılan kaydın tutar, tarih, hesap ve türü korunur. Açıklama, kategori ve notu düzenleyebilirsin.');
-  let next=existing?C.updateTransaction(state,t):count?C.addInstallmentPlan(state,t,Number(count)):C.addTransaction(state,t);
-  if(['expense','refund'].includes(kind)&&f.get('remember-category')==='on'){
+  const allocations=allocationFields?.read(f);
+  if(count&&allocations)throw Error('Gideri bölmek için taksit sayısını temizle.');
+  let next=existing?C.updateTransaction(state,t,{allocations}):count?C.addInstallmentPlan(state,t,Number(count)):C.addTransaction(state,t,{allocations});
+  if(!allocations&&['expense','refund'].includes(kind)&&f.get('remember-category')==='on'){
    const name=merchant(t.desc),rule=C.merchantRule(next,name);
    next=C.saveMerchantRule(next,name,t.category,rule?.id);
   }
@@ -459,11 +473,23 @@ function transactionForm(existing,preset='expense'){
     '<p class="notice">Plan için toplam alışveriş tutarını ve ilk taksitin tarihini gir.</p>':'')+
    field('installment','Tek taksit bilgisi (isteğe bağlı; 1/6)',previous??existing?.installment??'','text','maxlength="7"')+
    '<p class="notice">Tek taksit giriyorsan tutar alanına yalnız o taksitin tutarını yaz.</p>':'';
+  for(const input of $('installment-fields').querySelectorAll('input')){
+   input.addEventListener('input',updateAllocationAvailability);
+   input.addEventListener('change',updateAllocationAvailability);
+  }
+  updateAllocationAvailability();
   updateSuggestion();
-  if(locked)for(const name of ['kind','account'])$('f-'+name).disabled=true;
+  if(fixed)for(const name of ['kind','account'])$('f-'+name).disabled=true;
+  if(initialAllocations&&$('f-installment'))$('f-installment').disabled=true;
+ }
+ function updateAllocationAvailability(){
+  allocationFields?.setAvailable($('f-kind').value==='expense'&&
+   !$('f-installment')?.value.trim()&&!$('f-installmentCount')?.value.trim());
  }
  function updateSuggestion(){
-  const applicable=['expense','refund'].includes($('f-kind').value);
+  const split=allocationFields?.active();
+  document.querySelector('label[for=f-category]').textContent=split?'Bölümler kaldırılırsa kullanılacak kategori':'Kategori';
+  const applicable=!split&&['expense','refund'].includes($('f-kind').value);
   $('category-suggestion').hidden=!applicable;
   const category=applicable?C.suggestCategory(state,merchant($('f-desc').value)):null;
   const advice=category?'Kayıtlı öneri: '+category:'';
@@ -471,9 +497,14 @@ function transactionForm(existing,preset='expense'){
   $('choose-category').hidden=!category;
   $('choose-category').onclick=()=>{if(category){$('f-category').value=category;$('f-category').focus();}};
  }
+ if(canAllocate){
+  allocationFields=attachExpenseAllocationFields($('expense-allocation'),state.categories,initialAllocations,{
+   parseAmount:C.money,formatAmount:C.decimalMoney,onChange:updateSuggestion,
+  });
+ }
  $('f-desc').addEventListener('input',updateSuggestion);
  $('f-kind').onchange=updateFields;$('f-account').onchange=updateFields;updateFields();
- if(locked){for(const name of ['amount','date','installment'])if($('f-'+name))$('f-'+name).readOnly=true;}
+ if(fixed){for(const name of ['amount','date','installment'])if($('f-'+name))$('f-'+name).readOnly=true;}
 }
 function payCardForm(cardId,{sourceId=''}={}){
  const cards=state.accounts.filter(a=>a.type==='card'),sources=state.accounts.filter(a=>a.type!=='card');
@@ -572,7 +603,7 @@ function refreshBalanceHistory(next=page,id=detailId){
   setWallet(displayedWallet(current),token);
  }
  const archive=balanceHistoryArchive??state;
- const selected=next==='balanceApprovalDetail'&&archive.version===3?
+ const selected=next==='balanceApprovalDetail'&&archive.version>=3?
   archive.balanceReconciliation.approvals.find(approval=>approval.id===id):null;
  const accountId=next==='balanceApprovalHistory'?id:readBalanceApprovalEvidence(selected)?.accountId;
  const account=archive.accounts.find(row=>row.id===accountId);

@@ -81,12 +81,12 @@ function validateBalanceReconciliation(state){
 
 export function validate(s){
  if(!s||s.format!=='ekstre-android')throw Error('Bu dosya Android cüzdan yedeği değil.');
- if(s.version!==1&&s.version!==2&&s.version!==3)throw Error('Bu Android cüzdan yedeği sürümü desteklenmiyor.');
+ if(![1,2,3,4].includes(s.version))throw Error('Bu Android cüzdan yedeği sürümü desteklenmiyor.');
  for(const k of ['accounts','transactions','statements','subscriptions','categories'])if(!Array.isArray(s[k])||s[k].length>50000)throw Error('Yedek yapısı veya boyutu geçersiz.');
  if(!s.budgets||typeof s.budgets!=='object'||Array.isArray(s.budgets))throw Error('Bütçe verisi geçersiz.');
  const ids=new Set();for(const a of s.accounts){if(!text(a.id)||ids.has(a.id)||!text(a.name)||!a.name.trim()||!['card','bank','cash'].includes(a.type)||!cents(a.opening))throw Error('Hesap kaydı geçersiz.');ids.add(a.id);}
  if(s.version>=2)validateBalanceReconciliation(s);
- if(s.version===3)validateBalanceApprovals(s.balanceReconciliation.approvals);
+ if(s.version>=3)validateBalanceApprovals(s.balanceReconciliation.approvals);
  const txids=new Set();for(const t of s.transactions){if(!text(t.id)||txids.has(t.id)||!ids.has(t.account)||!validDate(t.date)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(t.period)||!text(t.desc,500)||!text(t.category)||!text(t.note??'',2000)||!cents(t.amount)||t.amount<0||!['expense','income','refund','cardPayment','payment','transfer'].includes(t.kind))throw Error('İşlem kaydı geçersiz.');if(['payment','transfer'].includes(t.kind)&&(!ids.has(t.target)||t.target===t.account))throw Error('Hedef hesap geçersiz.');if(t.installment&&!/^\d{1,3}\/\d{1,3}$/.test(t.installment))throw Error('Taksit geçersiz.');txids.add(t.id);}
  const statementIds=new Set();
  for(const st of s.statements){
@@ -142,6 +142,7 @@ export function validate(s){
   if(t.csvBatchId!==undefined&&(!text(t.csvBatchId)||!t.csvBatchId.trim()||sourceOf(t)!=='csv'||t.csvSourceId!==undefined))throw Error('CSV aktarım kimliği geçersiz.');
  }
  validateLinkGroups(s,links);
+ if(s.version===4)validateExpenseAllocations(s,byId,links);
  if(s.csvDismissals!==undefined){
   if(!Array.isArray(s.csvDismissals)||s.csvDismissals.length>50000)throw Error('CSV inceleme kayıtları geçersiz.');
   const cardIds=new Set(s.accounts.filter(a=>a.type==='card').map(a=>a.id));
@@ -266,6 +267,9 @@ export function renameExpenseCategory(s,category,newName){
  next.categories=next.categories.map(c=>c===category?name:c);
  for(const row of next.transactions){
   if((row.kind==='expense'||row.kind==='refund')&&row.category===category)row.category=name;
+  for(const allocation of allocationsFor(next,row)??[]){
+   if(allocation.category===category)allocation.category=name;
+  }
  }
  for(const row of [...next.subscriptions,...(next.merchantCategoryRules??[])]){
   if(row.category===category)row.category=name;
@@ -285,6 +289,9 @@ export function renameExpenseCategory(s,category,newName){
 
 export function removeExpenseCategory(s,category,{moveRulesTo,removeRules=false}={}){
  if(!s.categories.includes(category))throw Error('Gider kategorisi bulunamadı.');
+ if(s.version===4&&Object.values(s.expenseAllocations).some(parts=>parts.some(part=>part.category===category))){
+  throw Error('Bu kategori bir gider bölümünde kullanılıyor. Önce ilgili bölümleri düzenle.');
+ }
  const categories=s.categories.filter(c=>c!==category);
  if(!categories.length)throw Error('En az bir gider kategorisi kalmalı.');
  if(moveRulesTo!==undefined&&(!categories.includes(moveRulesTo)||removeRules))throw Error('Başka bir hedef gider kategorisi seç.');
@@ -301,6 +308,68 @@ export function removeExpenseCategory(s,category,{moveRulesTo,removeRules=false}
 export const sourceOf=t=>t.source||(t.statement?'pdf':t.csvKey?'csv':'manual');
 export const isFutureManualCardPayment=(t,asOf)=>t.kind==='payment'&&sourceOf(t)==='manual'&&t.date>asOf;
 export const effective=t=>!t.linkedTo&&t.matchStatus!=='pending';
+const allocationError=()=>Error('Gider bölümleri en az iki geçerli kategori ve pozitif tutar içermeli. Bölümlerin toplamı gider tutarına eşit olmalı.');
+const ineligibleAllocation=()=>Error('Yalnızca elle girilen, bağlantısız ve taksitsiz TL giderleri bölümlere ayrılabilir.');
+
+function allocationParent(t){
+ return t?.kind==='expense'&&(t.source==null||t.source===''||t.source==='manual')&&effective(t)&&t.matchStatus!=='linked'&&
+  (t.currency===undefined||t.currency==='TRY')&&
+  ['statement','csvKey','csvSourceId','csvBatchId','importKey','installment','installmentPlan',
+   'subscriptionId','subscriptionDue','target'].every(key=>t[key]==null||t[key]==='');
+}
+export function canAllocateExpense(s,t){
+ return allocationParent(t)&&!s.transactions.some(row=>row.linkedTo===t.id);
+}
+export function allocationsFor(s,t){
+ return s.version===4&&Object.hasOwn(s.expenseAllocations,t.id)?s.expenseAllocations[t.id]:undefined;
+}
+export function expenseCategoryAmounts(s,t){
+ if(t.kind!=='expense'&&t.kind!=='refund')return [];
+ return allocationsFor(s,t)??[t];
+}
+// Category lists show one row per parent, even when that category has several parts.
+export function expenseCategoryRow(s,t,category){
+ const parts=expenseCategoryAmounts(s,t).filter(part=>part.category===category);
+ if(!parts.length)return null;
+ if(parts[0]===t)return t;
+ return {...t,category,amount:parts.reduce((sum,part)=>addCents(sum,part.amount),0),allocationView:true};
+}
+function validateExpenseAllocations(s,byId,links){
+ const allocations=s.expenseAllocations;
+ if(!allocations||typeof allocations!=='object'||Array.isArray(allocations))throw allocationError();
+ const categories=new Set(s.categories);
+ for(const [id,parts] of Object.entries(allocations)){
+  const t=byId.get(id);
+  if(!allocationParent(t)||links.has(t))throw ineligibleAllocation();
+  if(!Array.isArray(parts)||parts.length<2||parts.length>50000)throw allocationError();
+  let remaining=t.amount;
+  for(const part of parts){
+   if(!part||Object.keys(part).length!==2||!categories.has(part.category)||part.category==='Toplam'||
+      !cents(part.amount)||part.amount<=0||part.amount>remaining)throw allocationError();
+   remaining-=part.amount;
+  }
+  if(remaining!==0)throw allocationError();
+ }
+}
+function applyExpenseAllocations(next,id,allocations){
+ if(allocations===undefined)return;
+ if(allocations===null){
+  if(next.version===4)delete next.expenseAllocations[id];
+  return;
+ }
+ if(next.version<4){
+  if(Object.hasOwn(next,'expenseAllocations')||
+     (next.version===1&&Object.hasOwn(next,'balanceReconciliation'))||
+     (next.version===2&&Object.hasOwn(next.balanceReconciliation,'approvals'))){
+   throw Error('Eski yedekteki ayrılmış alanlar korunuyor. Bu gider bölümlere ayrılamadı.');
+  }
+  next.expenseAllocations={};
+  next.balanceReconciliation={observations:[],...next.balanceReconciliation,approvals:next.balanceReconciliation?.approvals??[]};
+  next.version=4;
+ }
+ // Legacy IDs can include names such as "__proto__".
+ next.expenseAllocations={...next.expenseAllocations,[id]:structuredClone(allocations)};
+}
 export function postedCardPaymentSources(s,asOf){
  const payments=new Map();
  for(const row of s.transactions){
@@ -474,11 +543,13 @@ function validateKind(s,t,{allowInertTarget=false}={}){
   if(!b||a.id===b.id||a.type==='card'||(t.kind==='payment'?b.type!=='card':b.type==='card'))throw Error('Transfer iki banka/nakit hesabı arasında, kart ödemesi banka/nakitten karta yapılır.');
  }else if(t.target!=null&&(!allowInertTarget||s.accounts.some(a=>a.id===t.target)))throw Error('Hedef hesap bağlantısı yalnızca transfer veya kart borcu ödemesinde kullanılabilir.');
 }
-export function addTransaction(s,t,{editing=false}={}){
+export function addTransaction(s,t,{editing=false,allocations}={}){
  validateKind(s,t,{allowInertTarget:editing});const next=structuredClone(s),row={...t,id:t.id||id(),period:t.period||t.date.slice(0,7),source:sourceOf(t)};
  if(!editing&&next.transactions.some(alias=>alias.linkedTo===row.id&&!sameEconomic(alias,row)))throw Error('Kaynakla bağlantılı bir tutar, tarih veya hesap değiştirilemez. Önce inceleme kutusundan bağlantıyı ayır.');
  if(!editing&&!row.statement&&!row.csvKey&&!row.matchStatus)markCandidate(row,next.transactions);
- next.transactions.push(row);return validate(next);
+ next.transactions.push(row);
+ applyExpenseAllocations(next,row.id,allocations);
+ return validate(next);
 }
 export function addInstallmentPlan(s,purchase,count){
  if(purchase.kind!=='expense'||!isCardTransaction(s,purchase))throw Error('Taksit planı için bir kredi kartı seç.');
@@ -498,10 +569,14 @@ export function addInstallmentPlan(s,purchase,count){
  }
  return validate(next);
 }
-export function updateTransaction(s,t){
+export function updateTransaction(s,t,{allocations}={}){
  const old=s.transactions.find(r=>r.id===t.id);
  if(!old)throw Error('Düzenlenecek kayıt bulunamadı.');
  const financialChange=['account','target','date','period','amount','kind','installment','installmentPlan'].some(k=>old[k]!==t[k]);
+ const allocationEdit=!!allocationsFor(s,old)||allocations!=null;
+ if(allocationEdit&&(financialChange||!canAllocateExpense(s,old)||!allocationParent(t))){
+  throw Error('Gider bölümlerini düzenlerken işlemin finansal alanları ve kaynak bağlantısı korunmalı.');
+ }
  if(old.installmentPlan&&financialChange)throw Error('Taksit planının tutarı, tarihi ve hesabı tek tek değiştirilemez.');
  if((old.linkedTo||s.transactions.some(r=>r.linkedTo===old.id))&&
     (financialChange||old.linkedTo!==t.linkedTo||old.matchStatus!==t.matchStatus)){
@@ -520,7 +595,9 @@ export function updateTransaction(s,t){
   }
   markCandidate(row,next.transactions);
  }
- return addTransaction(next,row,{editing:true});
+ const updated=addTransaction(next,row,{editing:true,allocations});
+ if(allocationEdit)updated.transactions.splice(s.transactions.indexOf(old),0,updated.transactions.pop());
+ return updated;
 }
 export function setTransactionCategory(s,id,category){
  const row=s.transactions.find(t=>t.id===id);
@@ -613,7 +690,14 @@ export function rowsForPeriod(s,period,mode='calendar'){
 }
 export function summary(s,period,mode='calendar'){
  const rows=rowsForPeriod(s,period,mode),cats=new Map();let spent=0,refunds=0,income=0;
- for(const t of rows){if(t.kind==='income')income=addCents(income,t.amount);if(!['expense','refund'].includes(t.kind))continue;const n=t.kind==='refund'?-t.amount:t.amount;cats.set(t.category,addCents(cats.get(t.category)||0,n));if(n>=0)spent=addCents(spent,n);else refunds=addCents(refunds,-n);}
+ for(const t of rows){
+  if(t.kind==='income')income=addCents(income,t.amount);
+  if(t.kind==='expense')spent=addCents(spent,t.amount);
+  if(t.kind==='refund')refunds=addCents(refunds,t.amount);
+  for(const {category,amount} of expenseCategoryAmounts(s,t)){
+   cats.set(category,addCents(cats.get(category)||0,t.kind==='refund'?-amount:amount));
+  }
+ }
  return {spent,refunds,income,net:addCents(spent,-refunds),categories:[...cats].sort((a,b)=>compareCents(b[1],a[1]))};
 }
 export function nextMonth(date,anchorDay=Number(date.slice(8,10))){const d=new Date(date+'T12:00:00Z');d.setUTCDate(1);d.setUTCMonth(d.getUTCMonth()+1);d.setUTCDate(Math.min(anchorDay,new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0)).getUTCDate()));return d.toISOString().slice(0,10);}
@@ -666,6 +750,7 @@ export function resolveCandidate(s,tid,decision,targetId){
  if(row.matchStatus!=='pending')throw Error('İncelenecek aday bulunamadı.');
  if(decision==='link'){
   const target=next.transactions.find(t=>t.id===targetId);
+  if(target&&allocationsFor(next,target))throw Error('Kaynak bağlamadan önce gider bölümlerini kaldır.');
   const aliases=next.transactions.filter(t=>t.linkedTo===targetId);
   const members=[row,...(target?[target]:[]),...aliases,...next.transactions.filter(t=>t.linkedTo===row.id)];
   const pdf=members.find(t=>sourceOf(t)==='pdf'),csv=members.find(t=>sourceOf(t)==='csv');
@@ -705,6 +790,7 @@ export function removeTransaction(s,tid){
   next.csvDismissals.push([csvKeyFor(removedRow),removedRow.csvBatchId??null]);
  }
  next.transactions=next.transactions.filter(t=>!removed.has(t.id));
+ if(next.version===4)for(const id of removed)delete next.expenseAllocations[id];
  return validate(repairReferences(next));
 }
 function collectAmbiguousStatementPayments(s){
@@ -889,7 +975,7 @@ export function importCsv(s,rows,account){
  return validate(next);
 }
 function withBalanceObservations(state,observations){
- return validate({...state,version:state.version===3?3:2,balanceReconciliation:{...state.balanceReconciliation,observations}});
+ return validate({...state,version:Math.max(state.version,2),balanceReconciliation:{...state.balanceReconciliation,observations}});
 }
 
 export function addBalanceObservation(state,input,{now=new Date().toISOString()}={}){

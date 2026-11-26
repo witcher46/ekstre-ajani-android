@@ -40,16 +40,17 @@ export function periodFigures(s,period,account){
  for(const t of rows){
   if(t.kind==='income'){income=C.addCents(income,t.amount);incomeCats.set(t.category,C.addCents(incomeCats.get(t.category)||0,t.amount));}
   if(t.kind!=='expense'&&t.kind!=='refund')continue;
-  const category=cats.get(t.category)??{name:t.category,spent:0,refunds:0};
-  if(t.kind==='refund'){
-   refunds=C.addCents(refunds,t.amount);
-   category.refunds=C.addCents(category.refunds,t.amount);
-  }else{
+  const field=t.kind==='refund'?'refunds':'spent';
+  if(t.kind==='refund')refunds=C.addCents(refunds,t.amount);
+  else{
    spent=C.addCents(spent,t.amount);
-   category.spent=C.addCents(category.spent,t.amount);
    if(accountTypes.get(t.account)==='card')cardSpent=C.addCents(cardSpent,t.amount);
   }
-  cats.set(t.category,category);
+  for(const {category:name,amount} of C.expenseCategoryAmounts(s,t)){
+   const category=cats.get(name)??{name,spent:0,refunds:0};
+   category[field]=C.addCents(category[field],amount);
+   cats.set(name,category);
+  }
  }
  for(const t of s.transactions.filter(t=>bankMovement(t,asOf)&&t.date.slice(0,7)===period)){
   if(t.kind==='transfer'){

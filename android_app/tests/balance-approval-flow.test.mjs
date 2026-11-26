@@ -85,6 +85,33 @@ test('requires an independently reviewed anchor, source coverage, and explicit f
   assert.deepEqual(read(),v2);
 });
 
+test('v4 adds observations and successive approvals while keeping allocations and proof immutable',()=>{
+  const {v2,observation,options}=fixture();
+  const split=C.addTransaction(v2,{id:'split',account:'card',date,kind:'expense',amount:100_000,desc:'Sentetik gider',category:'Diğer'},{
+    allocations:[{category:'Market / Gıda',amount:60_000},{category:'Diğer',amount:40_000}],
+  });
+  const stored=storage(C.addBalanceObservation(split,{
+    accountId:'cash',observedDate:date,observedAmountCents:25,sourceKind:'cashCount',
+  }));
+  assert.equal(stored.read().version,4);
+  const approve=()=>{
+    const review=prepareBalanceApproval(stored.android,observation.id,options);
+    assert.equal(review.status,'prepared');
+    assert.equal(saveBalanceApproval(stored.android,review,true).status,'saved');
+    return stored.read();
+  };
+  const first=approve();
+  const second=approve();
+  for(const saved of [first,second]){
+    assert.equal(saved.version,4);
+    assert.deepEqual(saved.expenseAllocations,split.expenseAllocations);
+    assert.deepEqual(saved.transactions,split.transactions);
+  }
+  const previous=first.balanceReconciliation.approvals[0];
+  assert.deepEqual(second.balanceReconciliation.approvals[0],previous);
+  assert.equal(second.balanceReconciliation.approvals[1].previousApprovalId,previous.id);
+});
+
 test('first explicit approval appends v3 canonical proof, with all financial data unchanged',()=>{
   const {v1,v2,observation,options} = fixture();
   const db = storage(v2);

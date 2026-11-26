@@ -78,7 +78,7 @@ export function saveBalanceApproval(android,review,independentlyReviewed){
 
   try{
     const evidence = validation.comparison.evidence;
-    const existing = current.state.version===3?current.state.balanceReconciliation.approvals:[];
+    const existing = current.state.version>=3?current.state.balanceReconciliation.approvals:[];
     const previous = previousApproval(existing,evidence);
     const approvedAt = new Date().toISOString();
     if(previous&&approvedAt<previous.approvedAt){
@@ -89,7 +89,7 @@ export function saveBalanceApproval(android,review,independentlyReviewed){
       id:id(),approvedAt,previousApprovalId:previous?.id??null,
       evidenceJson,evidenceSha256:sha256(evidenceJson),
     };
-    const state = {...current.state,version:3,balanceReconciliation:{
+    const state = {...current.state,version:Math.max(current.state.version,3),balanceReconciliation:{
       ...current.state.balanceReconciliation,approvals:[...existing,approval],
     }};
     if(android.saveIfUnchanged(current.token,backupText(state))!==true)return reviewRequired();
