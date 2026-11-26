@@ -324,6 +324,42 @@ async function checkBackNavigation(browser){
   }
 }
 
+async function checkIncomePlansHeading(browser){
+  const page=await browser.newPage({viewport:{width:360,height:640}});
+  try{
+    page.setDefaultTimeout(5000);
+    const errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    await serveWallet(page,'\nwindow.readBackTitleForTest=backDestinationTitle;\n');
+    await page.goto('https://wallet.test/');
+    const main=page.getByRole('main');
+    const plans=main.getByRole('region',{name:'Gelir planları'});
+    const panels=['Planlanan gelir bakiye değildir','Alındı onayı bekleyen planlar',
+      'Gelir kategorileri','Alınmış planlı gelirler'];
+    const routeHeading=()=>main.locator('h1').evaluateAll(headings=>({
+      titles:headings.map(heading=>heading.textContent),
+      tabIndex:headings[0]?.getAttribute('tabindex'),
+      focused:headings.includes(document.activeElement),
+    }));
+
+    await main.getByRole('button',{name:'Gelir planları',exact:true}).click();
+    assert.deepEqual(await routeHeading(),{titles:['Gelir planları'],tabIndex:'-1',focused:true},
+      'standalone income plans must have one focusable and focused h1');
+    assert.deepEqual(await plans.getByRole('heading',{level:2}).allTextContents(),panels);
+
+    await page.locator('nav [data-page=plan]').click();
+    assert.deepEqual(await routeHeading(),{titles:['Planlama'],tabIndex:'-1',focused:true},
+      'Planlama must keep its sole h1 and receive route focus');
+    assert.deepEqual(await plans.getByRole('heading',{level:2}).allTextContents(),['Gelir planları']);
+    assert.deepEqual(await plans.getByRole('heading',{level:3}).allTextContents(),panels);
+    assert.equal(await page.evaluate(()=>window.readBackTitleForTest()),'Gelir planları');
+    assert.deepEqual(errors,[]);
+    console.log('U09 standalone and embedded income plan headings, route focus, and Back destination title passed');
+  }finally{
+    await page.close();
+  }
+}
+
 async function checkWalletFocus(page,scale){
   await page.locator('nav [data-page=wallet]').click();
   await settle(page);
@@ -381,8 +417,13 @@ async function checkDialog(page,opener,expectedTitle){
 (async()=>{
   const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||undefined});
   try{
-    await checkBackNavigation(browser);
-    if(process.argv.includes('--u08'))return;
+    const onlyIncomePlans=process.argv.includes('--u09');
+    if(!onlyIncomePlans){
+      await checkBackNavigation(browser);
+      if(process.argv.includes('--u08'))return;
+    }
+    await checkIncomePlansHeading(browser);
+    if(onlyIncomePlans)return;
     await checkTransactionEmptyStates(browser);
     await checkShowMore(browser);
     const failures=[];

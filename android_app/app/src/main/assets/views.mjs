@@ -466,14 +466,16 @@ export function importView(ctx,pending) {
 }
 
 
-export function incomePlansView(ctx) {
+export function incomePlansView(ctx,{embedded=false}={}) {
   const {state,esc,transactionList} = ctx;
+  const titleTag = embedded ? 'h2' : 'h1';
+  const panelTag = embedded ? 'h3' : 'h2';
   const plans = state.incomePlans || [];
   const categories = W.normalizeWallet(state).incomeCategories;
   const received = state.transactions.filter(t => t.incomePlanId);
-  return shell(`<section aria-label="Gelir planları"><h2 class="view-title">Gelir planları</h2><p class="lead">Maaşını veya düzenli gelirini planla; gerçek para geldiğinde alındı olarak onayla.</p><div class="toolbar"><button class="primary" data-action="incomePlan">+ Gelir planı</button><button data-action="addIncome">Tek seferlik gelir ekle</button></div>
-    <aside class="panel"><h2>Planlanan gelir bakiye değildir</h2><p>Plan oluşturmak hesabına para eklemez. Alındı onayı gerçek tarihi ve alıcı hesabı sorar. Aynı vade yalnızca bir kez gelir olarak kaydedilir.</p></aside>
-    <section class="panel"><h2>Alındı onayı bekleyen planlar</h2>${plans.map(plan => `<article class="income-plan"><div class="row"><div class="left"><strong>${esc(plan.name)}</strong><small>${ctx.dateStatus(plan.next)}<br>${esc(accountName(state,plan.account))} · ${esc(plan.category)}</small></div><b>${amount(ctx,plan.amount)}</b></div><div class="actions"><button class="primary" data-income-receive="${esc(plan.id)}" data-due="${esc(plan.next)}">Gelir alındı</button><button data-income-delete="${esc(plan.id)}" aria-label="${esc(plan.name)} gelir planını sil">Planı sil</button></div></article>`).join('') || noRows('Henüz düzenli gelir planın yok.')}</section>
-    <section class="panel"><div class="section-heading"><h2>Gelir kategorileri</h2><button data-action="incomeCategory">+ Kategori ekle</button></div><p>${categories.map(category => esc(category)).join(' · ')}</p></section>
-    <section class="panel"><h2>Alınmış planlı gelirler</h2>${transactionList(newest(received))}</section></section>`);
+  return shell(`<section class="income-plans" aria-label="Gelir planları"><${titleTag} class="view-title">Gelir planları</${titleTag}><p class="lead">Maaşını veya düzenli gelirini planla; gerçek para geldiğinde alındı olarak onayla.</p><div class="toolbar"><button class="primary" data-action="incomePlan">+ Gelir planı</button><button data-action="addIncome">Tek seferlik gelir ekle</button></div>
+    <aside class="panel"><${panelTag}>Planlanan gelir bakiye değildir</${panelTag}><p>Plan oluşturmak hesabına para eklemez. Alındı onayı gerçek tarihi ve alıcı hesabı sorar. Aynı vade yalnızca bir kez gelir olarak kaydedilir.</p></aside>
+    <section class="panel"><${panelTag}>Alındı onayı bekleyen planlar</${panelTag}>${plans.map(plan => `<article class="income-plan"><div class="row"><div class="left"><strong>${esc(plan.name)}</strong><small>${ctx.dateStatus(plan.next)}<br>${esc(accountName(state,plan.account))} · ${esc(plan.category)}</small></div><b>${amount(ctx,plan.amount)}</b></div><div class="actions"><button class="primary" data-income-receive="${esc(plan.id)}" data-due="${esc(plan.next)}">Gelir alındı</button><button data-income-delete="${esc(plan.id)}" aria-label="${esc(plan.name)} gelir planını sil">Planı sil</button></div></article>`).join('') || noRows('Henüz düzenli gelir planın yok.')}</section>
+    <section class="panel"><div class="section-heading"><${panelTag}>Gelir kategorileri</${panelTag}><button data-action="incomeCategory">+ Kategori ekle</button></div><p>${categories.map(category => esc(category)).join(' · ')}</p></section>
+    <section class="panel"><${panelTag}>Alınmış planlı gelirler</${panelTag}>${transactionList(newest(received))}</section></section>`);
 }
