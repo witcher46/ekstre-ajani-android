@@ -85,7 +85,8 @@ public class RecoverySafetyTest {
  @Test public void webViewDistinguishesMissingEmptyAndUnreadableSlots() throws Exception {
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class);
       SQLiteDatabase db=context.openOrCreateDatabase("wallet.db",0,null)) {
-   waitFor(scenario,"!!document.querySelector('main h1')");
+   // The startup fallback has a heading before the app renders and reveals navigation.
+   waitFor(scenario,"!!document.querySelector('#nav:not([hidden])')");
    assertEquals("true",js(scenario,"[1,2,3].every(slot=>Android.snapshotSlot(slot)===undefined)"));
    assertEquals("true",js(scenario,"!!document.querySelector('[data-action=addAccount]')"));
    js(scenario,"document.querySelector('#settings').click()");
@@ -112,7 +113,7 @@ public class RecoverySafetyTest {
       SQLiteDatabase db=context.openOrCreateDatabase("wallet.db",0,null)) {
    seed(db,DAMAGED,DAMAGED+"2",GOOD);
    scenario.recreate();
-   waitFor(scenario,"!!document.querySelector('main h1')");
+   waitFor(scenario,"!!document.querySelector('#nav:not([hidden])')");
    js(scenario,"document.querySelector('#settings').click()");
    waitFor(scenario,"!!document.querySelector('[data-action=recover]')");
    js(scenario,"window.confirm=()=>false;document.querySelector('[data-action=recover]').click()");
