@@ -24,6 +24,9 @@ let importDraft;
 let pdfRequest=null;
 let actionTrigger=null,csvOpener=null;
 let state=W.normalizeWallet(C.empty()),detailId=null,expenseCategory=null,page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,toastTimer,loadFailed=false;
+const accountHistoryLimits=new Map();
+const accountHistoryKey=id=>JSON.stringify([detailId,id,id==='account-month-history'?period:null]);
+const accountHistoryLimit=id=>accountHistoryLimits.get(accountHistoryKey(id));
 let balanceDraft={},balanceReviewToken=null;
 let walletToken='';
 let balanceHistoryView={},balanceHistoryArchive=null,balanceHistoryLimit=20;
@@ -262,9 +265,9 @@ function installedVersionLabel(){
  }catch{}
  return 'Android sürüm bilgisi kullanılamıyor';
 }
-function transactionList(rows,{suggestCategories=false}={}){
+function transactionList(rows,{suggestCategories=false,limit=listLimit}={}){
  const lookup=suggestCategories&&!loadFailed&&rows.length&&C.indexCategorySuggestions(state);
- return rows.length?rows.slice(0,listLimit).map((t,index)=>{
+ return rows.length?rows.slice(0,limit).map((t,index)=>{
   const edit=`<button class="row transaction" type="button" data-edit="${esc(t.id)}"><span class="left"><strong>${esc(t.desc)}</strong><small>${esc(t.date)} · ${esc(accountName(t.account))}<br>${esc(t.category)} · ${esc(kinds[t.kind])}${t.installment?' · '+esc(t.installment):''}${t.matchStatus==='pending'?(t.kind==='payment'?'<br>Banka hareketi kaydedildi; ikinci kart etkisi incelemede':'<br>Olası eşleşme · henüz toplama eklenmedi'):t.linkedTo?'<br>Aynı işleme bağlı · ikinci kez sayılmıyor':''}</small></span><span class="amount">${fmt(t.amount)}${t.reviewed?'<small>İncelendi</small>':''}</span></button>`;
   return lookup?categorySuggestionRow(t,edit,index,lookup):edit;
  }).join(''):empty('Henüz işlem yok. Hesap ekleyebilir veya bir ekstre aktarabilirsin.');
@@ -289,7 +292,7 @@ function render(){
  const s=C.summary(state,period,mode),rows=C.rowsForPeriod(state,period,mode),periodControl=`<input class="period" id="period" aria-label="${periodLabel}" type="month" max="9999-12" value="${period}">`;
  const modeControl=select('view-mode','Rapor kapsamı',options([['calendar','Takvim ayı · işlem tarihine göre'],['statement','Ekstre dönemi · yalnız kartlar']],periodMode));
  let html='';
- const ctx={state,period,periodMode,fmt,esc,transactionList,periodControl,dateStatus,importCategoryOption,listLimit,importDraft,reportFilters};
+ const ctx={state,period,periodMode,fmt,esc,transactionList,periodControl,dateStatus,importCategoryOption,listLimit,importDraft,reportFilters,accountHistoryLimit};
  if(page==='home'){html=V.homeView(ctx);
  }else if(page==='wallet'){html=V.walletView(ctx);
  }else if(page==='account'){html=V.accountView(ctx,detailId);
@@ -710,6 +713,13 @@ const actions={
  },
  clearExpenseCategory:()=>{expenseCategory=null;render();focusMain();},
  addImportCard:()=>accountForm(null,{fromImport:true}),
+ moreAccountHistory:()=>{
+  const id=actionTrigger.getAttribute('aria-controls');
+  const shown=$(id).querySelectorAll('[data-edit]').length;
+  accountHistoryLimits.set(accountHistoryKey(id),shown+V.ACCOUNT_HISTORY_PAGE_SIZE);
+  render();
+  $(id).querySelectorAll('[data-edit]')[shown]?.focus();
+ },
  more:()=>{
   const list=actionTrigger?.closest('#report-category-transactions,#report-movements');
   const shown=list?.querySelectorAll('[data-edit]').length;
