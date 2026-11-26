@@ -13,23 +13,23 @@ All entries OPEN at baseline: 1 P0, 5 P1, 11 P2, 7 P3. Severity follows the full
 | D05 | P2 | Demo replaces saved budget/category in otherwise empty wallet | Preserve all pre-existing settings or require explicit safe separate demo | CLOSED (Phase 1B) |
 | D06 | P2 | Duplicate subscription/statement IDs accepted in backup | Reject ambiguous identifiers without changing existing wallet | CLOSED (Phase 1B) |
 | F-B5 | P2 | Expense with inappropriate target creates phantom cash on restore | Validate kind/target relationships; safe reject or explicit repair | CLOSED (Phase 1B) |
-| F-B3 | P1 | USD-only QNB statement verified as TRY | No unsupported/ambiguous currency written as TRY; test explicit TRY equivalents | OPEN |
-| F-B2 | P1 | Included post-cut-date row counted again (100 -> 200 TL) | Flag date inconsistency; do not count statement-included identity twice | OPEN |
-| F-S1 | P1 | Future manual payment reduces today's balance/debt | Define actual-vs-planned date policy; no premature realized payment | OPEN |
-| F-B1 | P2 | Two 40 TL document payments become 40 TL while one bank candidate pending | Document total remains 80; known bank outflow remains 40; explicit ambiguity | OPEN |
-| F-B4 | P2 | Unrecognized date rows offset each other and verified status misses them | Recognize or flag suspicious rows; no false completeness claim | OPEN |
-| U01 | P1 | 300 CSV rows / 3,000 rules preview median 13.866 s in desktop Chrome | Index rules per import; preserve ambiguity and selection; measure comparable workload | OPEN |
-| U04 | P2 | Imported history rescans on every startup | Indexed candidate lookup preserves matching semantics and reduces repeated scan | OPEN |
-| U02 | P2 | Card/account history capped at 150 without continuation | All 250 sample rows accessible with list-specific paging | OPEN |
-| U03 | P2 | Focused controls obscured by fixed navigation at 200% | Focused controls visible across supported text scales | OPEN |
-| U05 | P2 | Show-more loses keyboard focus | Focus first newly revealed row, continue keyboard navigation | OPEN |
-| U06 | P3 | No search result shows first-use empty text | Distinguish empty wallet, period and no match | OPEN |
-| U07 | P3 | Category suggestion misstates parent merchant vs branch rule | Accurate explanation for rule source | OPEN |
-| U08 | P3 | Back label and history destination inconsistent | Label matches destination; back does not create forward history | OPEN |
-| U09 | P3 | Income plan route has no focusable h1 | Independent route heading receives focus | OPEN |
-| U10 | P3 | Review checkbox label below 48px target | Accessible full-row touch target | OPEN |
-| A01 | P3 | Missing structuredClone leaves blank startup | Capability check and actionable update notice | OPEN |
-| A02 | P3 | Backup/version docs stale | Accurate supported formats/version docs | OPEN |
+| F-B3 | P1 | USD-only QNB statement verified as TRY | No unsupported/ambiguous currency written as TRY; test explicit TRY equivalents | CLOSED (code/CI) |
+| F-B2 | P1 | Included post-cut-date row counted again (100 -> 200 TL) | Flag date inconsistency; do not count statement-included identity twice | CLOSED (code/CI) |
+| F-S1 | P1 | Future manual payment reduces today's balance/debt | Define actual-vs-planned date policy; no premature realized payment | CLOSED (code/CI) |
+| F-B1 | P2 | Two 40 TL document payments become 40 TL while one bank candidate pending | Document total remains 80; known bank outflow remains 40; explicit ambiguity | CLOSED (code/CI) |
+| F-B4 | P2 | Unrecognized date rows offset each other and verified status misses them | Recognize or flag suspicious rows; no false completeness claim | CLOSED (code/CI) |
+| U01 | P1 | 300 CSV rows / 3,000 rules preview median 13.866 s in desktop Chrome | Index rules per import; preserve ambiguity and selection; measure comparable workload | CLOSED (code/CI) |
+| U04 | P2 | Imported history rescans on every startup | Indexed candidate lookup preserves matching semantics and reduces repeated scan | CLOSED (code/CI) |
+| U02 | P2 | Card/account history capped at 150 without continuation | All 250 sample rows accessible with list-specific paging | CLOSED (code/CI) |
+| U03 | P2 | Focused controls obscured by fixed navigation at 200% | Focused controls visible across supported text scales | CLOSED (code/CI) |
+| U05 | P2 | Show-more loses keyboard focus | Focus first newly revealed row, continue keyboard navigation | CLOSED (code/CI) |
+| U06 | P3 | No search result shows first-use empty text | Distinguish empty wallet, period and no match | CLOSED (code/CI) |
+| U07 | P3 | Category suggestion misstates parent merchant vs branch rule | Accurate explanation for rule source | CLOSED (code/CI) |
+| U08 | P3 | Back label and history destination inconsistent | Label matches destination; back does not create forward history | CLOSED (code/CI) |
+| U09 | P3 | Income plan route has no focusable h1 | Independent route heading receives focus | CLOSED (code/CI) |
+| U10 | P3 | Review checkbox label below 48px target | Accessible full-row touch target | CLOSED (code/CI) |
+| A01 | P3 | Missing structuredClone leaves blank startup | Capability check and actionable update notice | CLOSED (code/CI) |
+| A02 | P3 | Backup/version docs stale | Accurate supported formats/version docs | CLOSED (code/CI) |
 
 ## Phase 1A acceptance
 
@@ -50,9 +50,36 @@ All entries OPEN at baseline: 1 P0, 5 P1, 11 P2, 7 P3. Severity follows the full
 
 These are code/CI closures, not physical-device or production release acceptance.
 
-## Phase 2 scope
+## Phase 2 history and current closure
 
-First slice F-B3 only: reproduce USD-only QNB false TRY verification; fail closed for unsupported/ambiguous currency, retain explicitly supported TRY equivalents and existing reconciliation/backup contracts. F-B2, F-S1, F-B1 and F-B4 remain OPEN. No bank-specific real data committed.
+Phase 2 began with F-B3, covering unsupported or ambiguous statement currency and explicit TRY equivalents. The remaining financial findings followed. As of 26 Nov 2026, all 24 baseline findings are closed at code and CI level. Release acceptance remains open.
+
+## Closure evidence for the 17 remaining baseline findings
+
+Each tested candidate passed the linked Verify, Android and Upgrade jobs.
+
+| ID | PR | Tested candidate | Merge commit | CI jobs |
+|---|---|---|---|---|
+| F-B3 | [#30](https://github.com/witcher46/ekstre-ajani-android/pull/30) | `dbbc3e61f88982937b0363a6639acbbe09044d8d` | `c1a099d842170b154b3fad08c7f5db553a5b5495` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45662669688/job/139376385853) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45662669688/job/139376385170) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45662669853/job/139376385390) |
+| F-B2 | [#33](https://github.com/witcher46/ekstre-ajani-android/pull/33) | `3538bd0ee97e2e3313911bb2da492c43ddcd92ec` | `b6c18747365907500ae0679fbcac435d7b7e504e` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45698122607/job/139500785841) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45698122607/job/139500786103) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45698122639/job/139500785445) |
+| F-S1 | [#34](https://github.com/witcher46/ekstre-ajani-android/pull/34) | `70d701e66d9684db4f688172fbf4dd2eff59d532` | `74b66e33c24e432103926f3d7b554ac6caf21d65` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45707266015/job/139532309539) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45707266015/job/139532309840) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45707266185/job/139532309849) |
+| F-B1 | [#35](https://github.com/witcher46/ekstre-ajani-android/pull/35) | `edeea2c23e0a53ab1ae8868b0aa1f44b45741893` | `9a6b52aba9337762101883d18c9bfe11b30a8278` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45713836637/job/139554753567) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45713836637/job/139554752069) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45713836662/job/139554751287) |
+| F-B4 | [#36](https://github.com/witcher46/ekstre-ajani-android/pull/36) | `b9fca27ee66119a4f8f34fc422b18b039e7c1c17` | `4b83ff99c88a44aaaa5c65b1f91f7f2b08c34818` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45718106757/job/139569246564) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45718106757/job/139569246974) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45718106766/job/139569246702) |
+| U01 | [#37](https://github.com/witcher46/ekstre-ajani-android/pull/37) | `d2ae659e823e7965be27ea77a5786eed85b21440` | `53a4483ac2565eca0527eda65969cab793c5e625` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45725437420/job/139594007119) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45725437420/job/139594007511) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45725437430/job/139594007073) |
+| U04 | [#38](https://github.com/witcher46/ekstre-ajani-android/pull/38) | `3e7d1bbc71913e6ce9add3e69fa9c81e115292c4` | `3a4a56654736d0271f9d8cfb06bdc3ca15dca494` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45730708933/job/139611710184) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45730708933/job/139611710602) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45730708926/job/139611710415) |
+| U02 | [#39](https://github.com/witcher46/ekstre-ajani-android/pull/39) | `9aa3ed4966cd1606756ca8722ae9170daf478c7e` | `3b8d034be41df15fe93b85f9202a10530d724213` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45733794578/job/139622030515) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45733794578/job/139622030200) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45733794518/job/139622030158) |
+| U03 | [#40](https://github.com/witcher46/ekstre-ajani-android/pull/40) | `50f9800315cc285730daf4706367e260f203a053` | `92e2181017e6821586c55c59a451dc659a976858` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45739032077/job/139639194805) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45739032077/job/139639194451) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45739032126/job/139639194452) |
+| U05 | [#41](https://github.com/witcher46/ekstre-ajani-android/pull/41) | `10f730b6e1452c12aa40479a90bb9a7deb426aaa` | `37746b6603fe529921ef2c101026d9339ad2831c` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45743206927/job/139652955674) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45743206927/job/139652955657) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45743207191/job/139652956696) |
+| A01 | [#42](https://github.com/witcher46/ekstre-ajani-android/pull/42) | `b398c5c2a4ae599c902405cb6fd0bfaf20ee64ff` | `ed62306205b4155f033d26eca7392ceb62594053` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45749240839/job/139672768227) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45749240839/job/139672767308) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45749240853/job/139672766728) |
+| A02 | [#43](https://github.com/witcher46/ekstre-ajani-android/pull/43) | `06a1c7b472c31bf2340fea27a4d9eb104d3ce940` | `8bd8e2301339bf3e674c15b6de9b9c87c3904b03` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45752822764/job/139684390608) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45752822764/job/139684390845) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45752822943/job/139684390850) |
+| U06 | [#44](https://github.com/witcher46/ekstre-ajani-android/pull/44) | `cddd268d104af4d98ff8168fc08d452029363ff4` | `400d749998d611b00d76309dc4e5dac36c34bcfa` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45758727184/job/139703422310) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45758727184/job/139703421998) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45758727231/job/139703421793) |
+| U07 | [#45](https://github.com/witcher46/ekstre-ajani-android/pull/45) | `b775c9282ac5e90fc5c11ebc646663fb6e1c6597` | `a992ae792b096f316877eb9383b98b0e1ad61317` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45760178520/job/139708070869) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45760178520/job/139708070373) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45760178513/job/139708070340) |
+| U08 | [#46](https://github.com/witcher46/ekstre-ajani-android/pull/46) | `a0458d19f0d477bb6046135d6ac50bac4971e823` | `b85d759278a88bf037617e60808d99b3f8c3fb62` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45762420565/job/139715272622) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45762420565/job/139715272202) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45762420504/job/139715272454) |
+| U09 | [#47](https://github.com/witcher46/ekstre-ajani-android/pull/47) | `c9f5260ec946de02aa14111e70dae5bb8beb58e8` | `9f272f9292c1a72369875008fd7bc549526bac18` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45763619810/job/139719179236) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45763619810/job/139719179695) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45763619820/job/139719179196) |
+| U10 | [#48](https://github.com/witcher46/ekstre-ajani-android/pull/48) | `97b3c025f24e6521f0912d07d266e9b687960a02` | `0421662eaca2e8878da5a949f47bd536ae098973` | [Verify](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45765181177/job/139724294459) · [Android](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45765181177/job/139724294050) · [Upgrade](https://github.com/witcher46/ekstre-ajani-android/actions/runs/45765181122/job/139724293822) |
+
+- U01 and U04 evidence covers indexed rule and history lookup in synthetic workloads. Real-world performance remains unverified.
+- U10 verifies the 48 px CSS touch target in Chromium. Physical Android touch and TalkBack checks remain release gates.
 
 ## Release gates still open
 - Valid reconciliation approval/history and freshness with complete synthetic independent-source inputs.
