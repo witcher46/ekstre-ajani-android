@@ -6,6 +6,99 @@ const path=require('node:path');
 const root=path.resolve(__dirname,'../app/src/main/assets');
 const settle=page=>page.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))));
 
+async function serveWallet(page){
+  await page.clock.setFixedTime(new Date('2026-11-26T12:00:00Z'));
+  await page.route('https://wallet.test/**',route=>{
+    const name=new URL(route.request().url()).pathname.slice(1)||'index.html';
+    const file=path.join(root,name);
+    if(!file.startsWith(root+path.sep)||!fs.existsSync(file))return route.abort();
+    const contentType=name.endsWith('.mjs')?'text/javascript':name.endsWith('.css')?'text/css':'text/html';
+    return route.fulfill({body:fs.readFileSync(file),contentType});
+  });
+}
+
+async function checkShowMore(browser){
+  const fixture=require('./fixtures/android-0.2.0.json');
+  const sample=fixture.transactions[0],statement=fixture.statements[0];
+  const category=sample.category,statementId=sample.account+'|2026-11';
+  const rows=Array.from({length:302},(_,i)=>({
+    id:'u05-'+i,account:sample.account,statement:statementId,source:'pdf',
+    date:'2026-11-02',period:'2026-11',kind:'expense',amount:100,category,
+    desc:'Sentetik U05 hareket '+i,...(i===150?{sourceDesc:'SENTETIK MARKET'}:{}),
+  }));
+  const other={id:'u05-other',account:sample.account,date:'2026-11-03',period:'2026-11',
+    kind:'expense',amount:100,category:'Diğer',desc:'Kapsam dışı sentetik hareket'};
+  const wallet={...fixture,transactions:[...rows,other],
+    statements:[{...statement,id:statementId,period:'2026-11',cut:'2026-11-05',imported:'2026-11-05'}],
+    merchantCategoryRules:[{id:'u05-rule',merchant:'SENTETIK MARKET',category:'Diğer'}]};
+  const rowIds=rows.map(row=>row.id);
+  const page=await browser.newPage({timezoneId:'UTC',viewport:{width:360,height:640}});
+  try{
+    page.setDefaultTimeout(5000);
+    const errors=[],failures=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    await serveWallet(page);
+    await page.addInitScript(wallet=>localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet)),wallet);
+    const stored=()=>page.evaluate(()=>localStorage.getItem('ekstre-android-v1'));
+    const activeIn=list=>list.evaluate(scope=>{
+      const active=document.activeElement;
+      const {dataset,tagName}=active;
+      if(!scope.contains(active))return 'outside list ('+tagName+')';
+      return dataset.edit??[dataset.action,dataset.transactionId].filter(Boolean).join(':');
+    });
+    async function expand(name,list,key,ids,shown,tabTarget){
+      const more=list.getByRole('button',{name:'Daha fazla göster',exact:true});
+      const renderedIds=()=>list.locator('button[data-edit]').evaluateAll(buttons=>buttons.map(button=>button.dataset.edit));
+      assert.deepEqual(await renderedIds(),ids.slice(0,shown),name+' before expanding');
+      await more.focus();
+      await page.keyboard.press(key);
+      assert.deepEqual(await renderedIds(),ids.slice(0,shown+150),name+' after expanding');
+      assert.equal(await more.count(),ids.length>shown+150?1:0,name+' continuation');
+      const focused=await activeIn(list);
+      await page.keyboard.press('Tab');
+      const tab=await activeIn(list);
+      const expectedFocus=ids[shown],expectedTab=tabTarget??ids[shown+1];
+      if(focused!==expectedFocus||tab!==expectedTab)failures.push({name,key,focused,expectedFocus,tab,expectedTab});
+      assert.equal(await stored(),original,name+' preserves the stored wallet');
+    }
+    const goHome=()=>page.goto('https://wallet.test/');
+    const transactionView=page.locator('main');
+    const suggestionTab='applyCategorySuggestion:u05-150';
+
+    await goHome();
+    const original=await stored();
+    await page.locator('nav [data-page=transactions]').click();
+    await page.locator('#search').fill('Sentetik U05');
+    await expand('transactions with search',transactionView,'Enter',rowIds,150,suggestionTab);
+    await expand('transactions final page',transactionView,'Space',rowIds,300);
+
+    await goHome();
+    await page.locator('[data-expense-category]').filter({hasText:category}).click();
+    await expand('expense category drilldown',transactionView,'Space',rowIds,150,suggestionTab);
+
+    for(const [name,scope,ids,key] of [
+      ['report category','#report-category-transactions',rowIds,'Enter'],
+      ['report movements','#report-movements',[other.id,...rowIds],'Space'],
+    ]){
+      await goHome();
+      await page.locator('[data-page=reports]').click();
+      await page.locator('#f-report-category').selectOption('category:'+category);
+      await page.locator('#report-movements-toggle').click();
+      await expand(name,page.locator(scope),key,ids,150);
+    }
+
+    await goHome();
+    await page.locator('nav [data-page=import]').click();
+    await page.locator('[data-statement-view]').click();
+    await expand('statement detail',transactionView,'Enter',rowIds,150);
+    assert.deepEqual(errors,[]);
+    assert.deepEqual(failures,[],'U05 must focus the first new primary control and continue from it with Tab');
+    console.log('U05 Enter/Space and Tab passed in transactions, category drilldown, both report lists, and statement detail');
+  }finally{
+    await page.close();
+  }
+}
+
 async function checkWalletFocus(page,scale){
   await page.locator('nav [data-page=wallet]').click();
   await settle(page);
@@ -63,19 +156,13 @@ async function checkDialog(page,opener,expectedTitle){
 (async()=>{
   const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||undefined});
   try{
+    await checkShowMore(browser);
     const failures=[];
     for(const scale of [100,200]){
       const page=await browser.newPage({viewport:{width:320,height:640}});
       const errors=[];
       page.on('pageerror',error=>errors.push(error.message));
-      await page.clock.setFixedTime(new Date('2026-11-26T12:00:00Z'));
-      await page.route('https://wallet.test/**',route=>{
-        const name=new URL(route.request().url()).pathname.slice(1)||'index.html';
-        const file=path.join(root,name);
-        if(!file.startsWith(root+path.sep)||!fs.existsSync(file))return route.abort();
-        const contentType=name.endsWith('.mjs')?'text/javascript':name.endsWith('.css')?'text/css':'text/html';
-        return route.fulfill({body:fs.readFileSync(file),contentType});
-      });
+      await serveWallet(page);
       await page.goto('https://wallet.test/');
       await page.evaluate(scale=>{document.documentElement.style.fontSize=scale+'%';},scale);
       await page.locator('[data-action=demo]').click();
