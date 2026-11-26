@@ -251,8 +251,8 @@ public class MainActivity extends Activity {
     if(!expectedToken.equals(currentToken)||
        (mayAppendApproval&&expectedToken.equals(BalanceApprovalStorage.sha256(content))))return false;
     JSONObject before=current==null?null:new JSONObject(current);
-   if(!BalanceApprovalStorage.preservesHistory(before,candidate,mayAppendApproval)||
-      !ExpenseAllocationStorage.validWrite(before,candidate,mayAppendApproval))return false;
+    if(!BalanceApprovalStorage.preservesHistory(before,candidate,mayAppendApproval)||
+       !ExpenseAllocationStorage.validWrite(before,candidate,mayAppendApproval))return false;
     copySlot(1,2);
     db.execSQL("INSERT OR REPLACE INTO snapshots(id,content) VALUES(1,?)",new Object[]{content});
     db.setTransactionSuccessful();

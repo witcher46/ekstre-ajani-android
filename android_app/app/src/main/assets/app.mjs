@@ -478,13 +478,13 @@ function transactionForm(existing,preset='expense'){
    input.addEventListener('change',updateAllocationAvailability);
   }
   updateAllocationAvailability();
-  updateSuggestion();
   if(fixed)for(const name of ['kind','account'])$('f-'+name).disabled=true;
   if(initialAllocations&&$('f-installment'))$('f-installment').disabled=true;
  }
  function updateAllocationAvailability(){
   allocationFields?.setAvailable($('f-kind').value==='expense'&&
    !$('f-installment')?.value.trim()&&!$('f-installmentCount')?.value.trim());
+  updateSuggestion();
  }
  function updateSuggestion(){
   const split=allocationFields?.active();

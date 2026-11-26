@@ -2,7 +2,7 @@ import {field,options,select} from './form-controls.mjs';
 
 export const expenseAllocationFields=upgrading=>`<div id="expense-allocation" class="expense-allocation">
  <button id="start-expense-allocation" type="button" hidden>Gideri böl</button>
- <fieldset id="expense-allocation-parts" aria-describedby="expense-allocation-help" hidden>
+ <fieldset id="expense-allocation-parts" aria-describedby="expense-allocation-help" hidden disabled>
   <legend>Gider bölümleri</legend>
   <p id="expense-allocation-help">En az iki bölüm gir. Bölümlerin toplamı işlem tutarına eşit olmalı.</p>
   ${upgrading?'<p>İlk bölümü kaydetmek cüzdanı v4 biçimine geçirir. Eski uygulama sürümleri v4 yedeklerini açamaz.</p>':''}
@@ -22,7 +22,9 @@ export function attachExpenseAllocationFields(root,categories,initial,{parseAmou
  let serial=0,available=false,cleared=false;
 
  function refresh(){
-  start.hidden=!available||!parts.hidden;
+  const active=available&&rows.childElementCount>0;
+  parts.hidden=parts.disabled=!active;
+  start.hidden=!available||active;
   for(const button of rows.querySelectorAll('[data-remove-allocation]'))button.hidden=rows.children.length<=2;
  }
  function add(part){
@@ -46,7 +48,6 @@ export function attachExpenseAllocationFields(root,categories,initial,{parseAmou
  }
  function open(values){
   for(const part of values)add(part);
-  parts.hidden=false;
   cleared=false;
   refresh();
  }
@@ -60,7 +61,6 @@ export function attachExpenseAllocationFields(root,categories,initial,{parseAmou
  root.querySelector('#add-expense-allocation').onclick=()=>add().focus();
  root.querySelector('#clear-expense-allocation').onclick=()=>{
   rows.replaceChildren();
-  parts.hidden=true;
   cleared=!!initial;
   refresh();
   onChange();
