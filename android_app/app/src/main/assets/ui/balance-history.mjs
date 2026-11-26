@@ -1,5 +1,6 @@
 import {formatMoney} from '../core.mjs';
 import {escapeHtml as esc} from './form-controls.mjs';
+import {renderBackLink} from './navigation.mjs';
 
 const statuses = {
  current:'Kayıtlarla güncel',
@@ -131,18 +132,17 @@ function historyDetail(entry,reveal,movementLimit){
  <p class="notice">Kanonik içeriğin SHA-256 özeti saklanan içeriğin bütünlüğünü denetler. Kaynağın doğruluğu ve bugünkü güncellik ayrıca değerlendirilir.</p>`;
 }
 
-export function renderBalanceApprovalHistory({accountName,entries,reveal=false,unavailable=false,selectedId=null,hasMore=false,movementLimit=50}){
+export function renderBalanceApprovalHistory({accountName,entries,reveal=false,unavailable=false,selectedId=null,hasMore=false,movementLimit=50,backTitle='Cüzdanım'}){
  const selected = selectedId===null?null:entries.find(entry=>entry.approval.id===selectedId);
  const heading = selectedId===null?'Onay Geçmişi':'Onay ayrıntısı';
  const id = selectedId===null?'balance-approval-history':'balance-approval-detail';
- const back = selectedId===null?'← Hesap ayrıntısı':'← Onay Geçmişi';
  const body = selectedId===null?
   entries.length?entries.map(entry=>historyEntry(entry,reveal)).join('')+
    (hasMore?'<button type="button" data-action="balanceHistoryMore">Daha fazla onay</button>':''):
    '<section class="panel"><p>Bu hesap için kayıtlı onay bulunmuyor.</p></section>':
   selected?historyDetail(selected,reveal,movementLimit):'<p class="warning">Seçilen onay bu hesabın kayıtlı geçmişinde bulunamıyor.</p>';
  return `<div class="wallet-v2 balance-history" id="${id}">
-  <button type="button" class="back-link" data-action="balanceHistoryBack">${back}</button>
+  ${renderBackLink(backTitle)}
   <h1>${heading}</h1><p class="lead">${esc(accountName)}</p>
   ${unavailable?'<p class="warning" role="alert">Güncel kayıtlar okunamadı. Geçmişte saklanan kanıt gösteriliyor, güncellik değerlendirilemiyor.</p>':''}
   ${commonControls(reveal)}
