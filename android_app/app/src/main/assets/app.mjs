@@ -16,6 +16,7 @@ import {addReviewedBalanceRecord,balanceObservationFields,readBalanceAnchor,read
 import {balanceApprovalHistory} from './balance-approval-history.mjs';
 import {readBalanceApprovalEvidence} from './balance-approval-storage.mjs';
 import {renderBalanceApprovalHistory} from './ui/balance-history.mjs';
+import {renderSavingsGoals,savingsGoalFields} from './ui/savings-goals.mjs';
 const $=id=>document.getElementById(id);
 const plainMoney=C.formatMoney;
 const fmt=n=>`<span class="money">${plainMoney(n)}</span>`,key='ekstre-android-v1';
@@ -217,6 +218,7 @@ window.onPdfText=async (text,request)=>{
  }catch(e){window.onPdfError(e.message,request);}
 };
 function backFallback(){
+ if(page==='savingsGoals')return {page:'plan',title:'Planlama'};
  return page==='statement'||page==='review'
   ? {page:'import',title:'Ekstreler'} : {page:'wallet',title:'Cüzdanım'};
 }
@@ -328,6 +330,7 @@ function render(){
  }else if(page==='balanceApprovalHistory'||page==='balanceApprovalDetail'){
   html=renderBalanceApprovalHistory({...balanceHistoryView,selectedId:page==='balanceApprovalDetail'?detailId:null,backTitle});
  }else if(page==='incomePlans'){html=V.incomePlansView(ctx);
+ }else if(page==='savingsGoals'){html=renderSavingsGoals(ctx);
  }else if(page==='transactions'){
  const searchTerm=query.toLocaleLowerCase('tr');
  const scoped=filteredExpenses?
@@ -348,7 +351,7 @@ function render(){
  html=`<h1>İşlemler</h1><p class="lead">Bir işleme dokunarak düzenle veya incele.</p>${filteredExpenses?`<div class="toolbar"><strong>Gider kategorisi · ${esc(expenseCategory||'Kategorisiz')}</strong><button data-action="clearExpenseCategory">Filtreyi temizle</button></div>`:modeControl}<div class="toolbar">${periodControl}<button type="button" data-page="review">İnceleme Merkezi</button><button class="primary" data-action="addTransaction">+ İşlem</button></div>${filteredExpenses?'':select('kind-filter','İşlem türü',options([['','Tüm türler'],...Object.entries(kinds)],kindFilter))+select('account-filter','Hesap / kart',options([['','Tüm hesaplar'],...state.accounts.map(a=>[a.id,a.name])],accountFilter))}<input id="search" class="search" type="search" placeholder="Açıklama, kategori veya not ara" value="${esc(query)}"><small>${list.length} işlem · ${Math.min(listLimit,list.length)} gösteriliyor</small><div class="panel" id="transactions-list">${results}</div>${list.length>listLimit?'<button type="button" data-action="more" aria-controls="transactions-list">Daha fazla göster</button>':''}`;
  }else if(page==='plan'){
  const budgets=Object.entries(state.budgets).filter(([k])=>k.startsWith(period+'|'));
- html=`<h1>Planlama</h1><p class="lead">Bütçeni ve yaklaşan ödemelerini takip et.</p>${V.incomePlansView(ctx,{embedded:true})}<div class="toolbar">${periodControl}<button data-action="budget">+ Bütçe</button></div><div class="panel"><h2>Aylık bütçe</h2>${budgets.map(([k,v])=>{const cat=k.slice(8),used=cat==='Toplam'?s.net:s.categories.find(([c])=>c===cat)?.[1]||0;return `<div class="row"><div><strong>${esc(cat)}</strong><small>${fmt(used)} / ${fmt(v)}</small>${used>v?'<small class="danger">Bütçe aşıldı</small>':''}</div><button data-budget="${esc(k)}" aria-label="Bütçeyi kaldır">×</button></div><progress class="bar" aria-label="${esc(cat)} bütçe kullanımı" aria-valuetext="${esc(`${plainMoney(used)} / ${plainMoney(v)}${used>v?' · Bütçe aşıldı':''}`)}" max="${Math.max(v,1)}" value="${C.positiveCents(used)}"></progress>`;}).join('')||'<p>Bu dönem için bütçe ekle.</p>'}</div><div class="panel"><div class="row"><h2>Abonelikler</h2><button data-action="subscription">+ Ekle</button></div>${state.subscriptions.map(r=>`<div class="row"><div><strong>${esc(r.name)}</strong><small>${dateStatus(r.next)} · ${fmt(r.amount)}<br>${esc(accountName(r.account))}</small></div><div><button data-pay="${esc(r.id)}" data-due="${esc(r.next)}">Ödendi</button><button data-subdelete="${esc(r.id)}" aria-label="Aboneliği sil">×</button></div></div>`).join('')||'<p>Aylık ödemelerini planla. Ödendi düğmesi gerçek ödeme tarihini sorar; bir vade bir kez kaydedilir.</p>'}</div><div class="panel"><h2>Ekstre ödeme takvimi</h2>${C.upcomingPayments(state).filter(st=>st.type==='statement').map(st=>`<div class="row"><div><strong>${esc(st.name)}</strong><small>${dateStatus(st.date)} · kaydedilen ödemelere göre kalan tahmin</small></div><strong>${st.amount===null?'Okunamadı':fmt(st.amount)}</strong></div>`).join('')||'<p>Son ödeme tarihi bulunan bir ekstre aktar.</p>'}<p class="notice">Ödeme takvimi bankadaki ödeme durumunu doğrulamaz.</p></div><div class="panel"><h2>Taksitli hareketler</h2>${transactionList(rows.filter(t=>t.installment))}<p class="notice">Taksit ayrıntıları ve kalan taksit tahmini kartın ayrıntısında gösterilir. Tahmin gelecekteki harcamaları bugünün giderine eklemez.</p></div>`;
+ html=`<h1>Planlama</h1><p class="lead">Bütçeni ve yaklaşan ödemelerini takip et.</p><button type="button" data-page="savingsGoals">Birikim hedefleri</button>${V.incomePlansView(ctx,{embedded:true})}<div class="toolbar">${periodControl}<button data-action="budget">+ Bütçe</button></div><div class="panel"><h2>Aylık bütçe</h2>${budgets.map(([k,v])=>{const cat=k.slice(8),used=cat==='Toplam'?s.net:s.categories.find(([c])=>c===cat)?.[1]||0;return `<div class="row"><div><strong>${esc(cat)}</strong><small>${fmt(used)} / ${fmt(v)}</small>${used>v?'<small class="danger">Bütçe aşıldı</small>':''}</div><button data-budget="${esc(k)}" aria-label="Bütçeyi kaldır">×</button></div><progress class="bar" aria-label="${esc(cat)} bütçe kullanımı" aria-valuetext="${esc(`${plainMoney(used)} / ${plainMoney(v)}${used>v?' · Bütçe aşıldı':''}`)}" max="${Math.max(v,1)}" value="${C.positiveCents(used)}"></progress>`;}).join('')||'<p>Bu dönem için bütçe ekle.</p>'}</div><div class="panel"><div class="row"><h2>Abonelikler</h2><button data-action="subscription">+ Ekle</button></div>${state.subscriptions.map(r=>`<div class="row"><div><strong>${esc(r.name)}</strong><small>${dateStatus(r.next)} · ${fmt(r.amount)}<br>${esc(accountName(r.account))}</small></div><div><button data-pay="${esc(r.id)}" data-due="${esc(r.next)}">Ödendi</button><button data-subdelete="${esc(r.id)}" aria-label="Aboneliği sil">×</button></div></div>`).join('')||'<p>Aylık ödemelerini planla. Ödendi düğmesi gerçek ödeme tarihini sorar; bir vade bir kez kaydedilir.</p>'}</div><div class="panel"><h2>Ekstre ödeme takvimi</h2>${C.upcomingPayments(state).filter(st=>st.type==='statement').map(st=>`<div class="row"><div><strong>${esc(st.name)}</strong><small>${dateStatus(st.date)} · kaydedilen ödemelere göre kalan tahmin</small></div><strong>${st.amount===null?'Okunamadı':fmt(st.amount)}</strong></div>`).join('')||'<p>Son ödeme tarihi bulunan bir ekstre aktar.</p>'}<p class="notice">Ödeme takvimi bankadaki ödeme durumunu doğrulamaz.</p></div><div class="panel"><h2>Taksitli hareketler</h2>${transactionList(rows.filter(t=>t.installment))}<p class="notice">Taksit ayrıntıları ve kalan taksit tahmini kartın ayrıntısında gösterilir. Tahmin gelecekteki harcamaları bugünün giderine eklemez.</p></div>`;
  }else if(page==='reports'){html=V.reportsView(ctx);
  }else if(page==='import'){html=V.importView(ctx,pending);
  }else if(page==='statement'){html=V.statementView(ctx,detailId);
@@ -384,6 +387,29 @@ function accountForm(existing,{fromImport=false}={}){modal(existing?'Hesabı dü
   rememberImportAccount($('import-account'));
  }
  });}
+function savingsGoalForm(goal){
+ modal(goal?'Birikim hedefini düzenle':'Birikim hedefi ekle',savingsGoalFields(state,goal),f=>{
+  commit(C.saveSavingsGoal(state,{
+   id:goal?.id??C.id(),
+   name:f.get('goal-name').trim(),
+   account:f.get('goal-account'),
+   target:C.money(f.get('goal-target'),{wide:true}),
+   due:f.get('goal-due'),
+   reserved:C.money(f.get('goal-reserved'),{wide:true}),
+  }));
+  notice('Birikim hedefi kaydedildi.');
+ });
+}
+
+function confirmSavingsGoalRemoval(id){
+ const goal=C.savingsGoals(state).find(row=>row.id===id);
+ if(!goal)return;
+ modal('Birikim hedefi silinsin mi?', '<p>'+esc(goal.name)+'</p>',()=>{
+  commit(C.removeSavingsGoal(state,id));
+  notice('Birikim hedefi silindi.');
+ },'Hedefi sil');
+}
+
 function merchantRulesPanel(){
  const rules=state.merchantCategoryRules||[];
  return `<section class="panel"><h2>Satıcı kategori kuralları</h2>${rules.map(rule=>`<div class="row"><span class="left"><strong>${esc(rule.merchant)}</strong><small>${esc(rule.category)}</small></span><button data-merchant-rule="${esc(rule.id)}">Kuralı düzenle</button></div>`).join('')||'<p>Henüz kaydedilmiş satıcı kuralı yok.</p>'}<button data-action="merchantRule">+ Satıcı kuralı</button></section>`;
@@ -811,6 +837,9 @@ const actions={
  recover:()=>previewRecovery(Number(actionTrigger?.dataset.slot||3)),
  merchantRule:()=>merchantRuleForm(),
  cancelCategoryRemoval:closeModal,
+ addSavingsGoal:()=>savingsGoalForm(),
+ editSavingsGoal:()=>savingsGoalForm(C.savingsGoals(state).find(row=>row.id===actionTrigger.dataset.goalId)),
+ removeSavingsGoal:()=>confirmSavingsGoalRemoval(actionTrigger.dataset.goalId),
  addAccount:()=>accountForm(),addTransaction:()=>transactionForm(),addIncome:()=>transactionForm(null,'income'),transfer:()=>transactionForm(null,'transfer'),payCard:()=>payCardForm(),incomePlan:()=>incomePlanForm(),
  incomeCategory:()=>modal('Gelir kategorisi ekle',field('name','Kategori adı','','text','required maxlength="80"'),f=>{const next=copy();next.incomeCategories.push(f.get('name').trim());commit(next);}),
  demo:()=>{if(readSlot(1)!==null)throw Error('Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Mevcut verilerin korunuyor.');commit(C.demo());notice('Yapay örnek kayıtlar oluşturuldu.');},
