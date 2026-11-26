@@ -146,6 +146,51 @@ test('Yapı Kredi still rejects foreign or ambiguously labeled amounts next to W
   }
 });
 
+test('Yapı Kredi preserves movements, identities, and totals with commentary after the final movement', () => {
+  const baseline = parseStatement(yapi);
+  assert.equal(baseline.reconciliation.status, 'verified');
+  for (const footer of [
+    'Ekstre bilgilerine bu bölümde yer verilmiştir.',
+    'Ekstre açıklaması: USD ve döviz işlemleri hakkında genel bilgi.',
+    'Tutar bilgisine bu bölümde yer verilmiştir.',
+  ]) {
+    const text = yapi.replace('Worldpuan Detayları', footer + '\nWorldpuan Detayları');
+    assert.deepEqual(parseStatement(text), baseline, footer);
+  }
+});
+
+test('Yapı Kredi still rejects foreign currency evidence after the final movement', () => {
+  for (const heading of [
+    'Ekstre Para Birimi: USD',
+    'USD',
+    'Hesap Özeti Borcu (USD): 255,00',
+    'Hesap Özeti (USD)',
+    'USD Ekstre',
+    'Ekstre tutarları USD cinsindendir.',
+    'Hesap Özeti USD cinsindendir.',
+    'İşlem Tarihi Açıklama Tutar (USD) Tutar (TL)',
+    'İşlem Tarihi | Açıklama | USD',
+    'Tutar (TL) Tutar (USD)',
+    'Tutar USD Worldpuan',
+    'Tutar (TL): 255,00 / 100,00 USD',
+    'Toplam Tutar: 255,00 USD',
+    'Toplam Tutar: USD 255,00',
+  ]) {
+    const text = yapi.replace('Worldpuan Detayları', heading + '\nWorldpuan Detayları');
+    assert.throws(() => parseStatement(text), /para birimi.*kısmi kayıt/, heading);
+  }
+});
+
+test('Yapı Kredi movement lines and QNB footer lines retain the existing currency cues', () => {
+  const commentary = 'Ekstre açıklaması: USD ve döviz işlemleri hakkında genel bilgi.\n';
+  const yapiBetweenRows = yapi.replace('04.10.2026 ODEME', commentary + '04.10.2026 ODEME');
+  const yapiWrappedRow = yapi.replace('20,00 0,00', '\nDöviz tutar bilgisi 20,00 0,00');
+  const qnbAfterRows = qnb.replace('ParaPuan', commentary + 'ParaPuan');
+  for (const text of [yapiBetweenRows, yapiWrappedRow, qnbAfterRows]) {
+    assert.throws(() => parseStatement(text), /para birimi.*kısmi kayıt/);
+  }
+});
+
 test('Yapı Kredi excludes dated Worldpuan section rows', () => {
   const parsed = parseStatement(fixture('yapi-kredi-points-boundary.synthetic.txt'));
   assert.deepEqual(movements(parsed), expected);

@@ -99,6 +99,11 @@ const tryUnitPattern=new RegExp(tryCurrency,'iu');
 const tryPattern=new RegExp(String.raw`^\(?\s*${tryCurrency}`,'iu');
 const decimalPattern=new RegExp(decimalAmount);
 const currencyHeading=/^(?:(?:EKSTRE|HESAP)\s+)?(?:PARA\s+BIRIMI|DOVIZ\s+CINSI|CURRENCY)\b/i;
+const broadCurrencyHeading=/\b(?:TUTAR|ISLEM\s+TARIHI|HESAP\s+OZETI|EKSTRE)\b/i;
+const columnHeading=/^ISLEM\s+TARIHI[\s|/]+ACIKLAMA\b/i;
+const declaredCurrency=new RegExp(String.raw`\b(?:HESAP\s+OZETI|EKSTRE|TUTAR(?:LAR)?I?)\s+${unit}\s+CINSINDEN(?:DIR)?\b`,'iu');
+const summaryCurrencyHeading=new RegExp(String.raw`^(?:${unit}\s+)?(?:HESAP\s+OZETI|EKSTRE)(?:\s*:?\s*${unit}(?:\s*[/|]\s*${unit})*)?$`,'iu');
+const amountHeading=new RegExp(String.raw`\bTUTAR(?:I|\s*/\s*TAKSIT)?\b\s*:?\s*(?:\(\s*${currency}\s*\)|${annotatedNumber}|${currency}(?=\s*(?:[/:|]|$)|\s+(?:TUTAR|KALAN|WORLD\s*PUAN)\b|[\s:]*${annotatedNumber}))`,'iu');
 const currencyError=()=>Error('Ekstre tutarının para birimi belirsiz veya TRY karşılığı okunamadı; kısmi kayıt yapılmadı.');
 
 function annotatedTry(field,pattern,isQ,requireTry=false){
@@ -165,12 +170,25 @@ function parseStatementRows(text,privateIdentities){
  const rowStop=new RegExp('^(?:'+previousLabels+'|'+qnbCarryover+'|'+debtLabels+'|'+cutLabel+'|'+dueLabel+')\\b','i');
  const limit=lines.findIndex((line,i)=>boundary.test(line.trim())||boundary.test(line.trim()+' '+(lines[i+1]?.trim()??'')));
  const movementEnd=limit<0?lines.length:limit;
+ const hasAmount=new RegExp(moneyPattern);
+ let broadCurrencyEnd=movementEnd;
+ if(!isQ){
+  while(broadCurrencyEnd>0&&!rowMatch(lines[broadCurrencyEnd-1].trim().replace(/\s+/g,' ')))broadCurrencyEnd--;
+  // The final dated movement can take its amount from the following line.
+  if(broadCurrencyEnd>0&&broadCurrencyEnd<movementEnd&&!hasAmount.test(lines[broadCurrencyEnd-1]))broadCurrencyEnd++;
+ }
  const onlyCurrency=new RegExp(String.raw`^\s*${foreignCurrency}\s*$`,'iu');
- const foreignContext=lines.slice(0,movementEnd).some(line=>{
+ const foreignContext=lines.slice(0,movementEnd).some((line,i)=>{
   const heading=line.trim();
   if(rowMatch(heading))return false;
   if(currencyHeading.test(heading))return foreignPattern.test(heading)||!tryUnitPattern.test(heading);
-  return foreignPattern.test(heading)&&(onlyCurrency.test(heading)||rowStop.test(heading)||/\b(?:TUTAR|ISLEM\s+TARIHI|HESAP\s+OZETI|EKSTRE)\b/i.test(heading));
+  if(!foreignPattern.test(heading))return false;
+  if(onlyCurrency.test(heading)||rowStop.test(heading))return true;
+  // Yapı Kredi footer prose can contain ISO words such as "yer". Only apply the broad
+  // cue after movements when the line also has the shape of a financial heading.
+  return broadCurrencyHeading.test(heading)&&(i<broadCurrencyEnd||
+   columnHeading.test(heading)||summaryCurrencyHeading.test(heading)||
+   amountHeading.test(heading)||declaredCurrency.test(heading));
  });
  let foreignMovement=false,implicitMovement=false;
  for(let i=0;i<movementEnd;i++){
@@ -181,7 +199,7 @@ function parseStatementRows(text,privateIdentities){
   let body=m[4]||'';
   let legacyBody=rowMatch(legacyLines[i].trim().replace(/\s+/g,' '))?.[4]??body;
   let rawBody=rawLines[i].trim().replace(/^\d{1,2}(?:[/.]\d{1,2}[/.]\d{4}|\s+\S+\s+\d{4})(?:\s+|$)/,'');
-  if(!new RegExp(moneyPattern).test(body)&&body&&nextLine&&!matchMovementStart(nextLine)&&!rowStop.test(nextLine)&&
+  if(!hasAmount.test(body)&&body&&nextLine&&!matchMovementStart(nextLine)&&!rowStop.test(nextLine)&&
      !/(?:^|\s)Siparis\s+(?:Kodu|No)\b/i.test(nextLine)){
    body+=' '+nextLine;legacyBody+=' '+legacyLines[i+1].trim();rawBody+='\n'+rawLines[i+1].trim();i++;
   }

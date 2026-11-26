@@ -342,7 +342,9 @@ async function run() {
     const beforeCurrencyTests=await snapshot();
     const yapi=fs.readFileSync(path.join(__dirname,'fixtures/pdf-parser-audit/yapi-kredi.synthetic.txt'),'utf8')
       .replace('100,00 0,00','100,00 TL 0,00');
-    for(const text of [usdOnly,ambiguous,yapi.replace('100,00 TL','100,00 USD')]){
+    const yapiWithFooter=line=>yapi.replace('Worldpuan Detayları',line+'\nWorldpuan Detayları');
+    const yapiForeignColumns=yapiWithFooter('İşlem Tarihi Açıklama Tutar (USD) Tutar (TL)');
+    for(const text of [usdOnly,ambiguous,yapi.replace('100,00 TL','100,00 USD'),yapiForeignColumns]){
       await choose();
       await complete(text,await token());
       assert.match(await page.locator('#error-announcement').textContent(),/para birimi/i);
@@ -382,7 +384,8 @@ async function run() {
     }
     await page.evaluate(()=>{window.Android={pickPdf:id=>window.pdfRequests.push(id)};});
     await choose();
-    await complete(yapi,await token());
+    const yapiCommentary=yapiWithFooter('Ekstre bilgilerine bu bölümde yer verilmiştir.');
+    await complete(yapiCommentary,await token());
     assert.equal(await preview.count(),1,await page.locator('#error-announcement').textContent());
     await preview.getByText('Toplamlar doğrulandı',{exact:true}).waitFor();
     await page.evaluate(()=>{delete window.Android;});
