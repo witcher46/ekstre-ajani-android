@@ -10,6 +10,7 @@ const shell = html => `<div class="wallet-v2">${html}</div>`;
 const amount = (ctx,value) => value === null || value === undefined ? '<span class="muted">Bilinmiyor</span>' : ctx.fmt(value);
 const accountName = (state,id) => state.accounts.find(a => a.id === id)?.name || 'Hesap';
 const newest = rows => [...rows].sort((a,b) => b.date.localeCompare(a.date));
+export const ACCOUNT_HISTORY_PAGE_SIZE = 150;
 const metric = (ctx,key,label,value,note='') => `<div class="metric"><small>${ctx.esc(label)}</small><b data-stat="${ctx.esc(key)}">${amount(ctx,value)}</b>${note ? `<p class="notice">${ctx.esc(note)}</p>` : ''}</div>`;
 const detail = (ctx,label,value,money=false) => `<div><dt>${ctx.esc(label)}</dt><dd>${money ? amount(ctx,value) : ctx.esc(value ?? 'Bilinmiyor')}</dd></div>`;
 const compactStat = (ctx,key,label,value) => `<div><dt>${ctx.esc(label)}</dt><dd data-stat="${ctx.esc(key)}">${amount(ctx,value)}</dd></div>`;
@@ -113,8 +114,17 @@ function installmentPanel(ctx,installments) {
   </details>`;
 }
 
+function accountHistoryPanel(ctx,id,title,rows,note='') {
+  const limit = ctx.accountHistoryLimit?.(id) ?? ACCOUNT_HISTORY_PAGE_SIZE;
+  return `<section class="panel" aria-labelledby="${id}-heading"><h2 id="${id}-heading">${ctx.esc(title)}</h2>
+    ${note ? `<p class="notice">${ctx.esc(note)}</p>` : ''}
+    <div id="${id}">${ctx.transactionList(newest(rows),{limit})}</div>
+    ${rows.length > limit ? `<button type="button" data-action="moreAccountHistory" aria-controls="${id}">Daha fazla göster</button>` : ''}
+  </section>`;
+}
+
 function cardView(ctx,account) {
-  const {state,esc,transactionList} = ctx;
+  const {state,esc} = ctx;
   const card = W.cardDetail(state,account.id);
   const statements = state.statements.filter(st => st.account === account.id).sort((a,b) => b.cut.localeCompare(a.cut));
   const unassigned = card.unassignedPayments || [];
@@ -195,13 +205,13 @@ function cardView(ctx,account) {
       '<br>' + esc(st.bank || 'Banka bilinmiyor') + '</small></div><b>' + amount(ctx,st.debt) +
       '</b><button data-statement-view="' + esc(st.id) + '">Detayı aç</button></div>').join('') ||
       noRows('Henüz ekstre aktarılmadı.')) + '</details>';
-  html += '<section class="panel"><h2>Kart hareketleri</h2>' + transactionList(newest(card.movements || [])) + '</section>' +
+  html += accountHistoryPanel(ctx,'card-history','Kart hareketleri',card.movements || []) +
     '<div class="actions"><button data-page="import">Ekstre aktar</button>' +
     '<button data-account="' + esc(account.id) + '">Kartı düzenle</button></div>';
   return html;
 }
 export function accountView(ctx,accountId) {
-  const {state,esc,transactionList,periodControl} = ctx;
+  const {state,esc,periodControl} = ctx;
   const account = state.accounts.find(a => a.id === accountId);
   if (!account) return shell('<h1>Hesap bulunamadı</h1><button data-page="wallet">Cüzdana dön</button>');
   if (account.type === 'card') return shell(`<button class="back-link" data-page="wallet">← Cüzdanım</button>${cardView(ctx,account)}`);
@@ -213,7 +223,9 @@ export function accountView(ctx,accountId) {
     <div class="toolbar"><button class="primary" data-action="addIncome">Gelir ekle</button><button data-action="transfer">Transfer</button><button data-account="${esc(account.id)}">Hesabı düzenle</button></div>
     ${renderBalanceAccount(state,account)}
     <h2 class="divider">Aylık hesap hareketleri</h2><div class="toolbar">${periodControl}</div><div class="summary-grid">${metric(ctx,'income','Hesaba kaydedilmiş gelir',overview.income)}${metric(ctx,'netExpense','Hesaptan net gider',overview.netExpense)}</div><p class="notice">Gelen transferler gelir, giden transferler ve kart borcu ödemeleri gider sayılmaz.</p>
-    ${reviewWarning(ctx,movements)}<section class="panel"><h2>Seçilen aydaki hareketler</h2>${transactionList(newest(monthly))}</section><section class="panel"><h2>Hesap geçmişi</h2><p class="notice">Bu hesabın kaynak veya hedef olduğu tüm hareketler.</p>${transactionList(newest(movements))}</section>`);
+    ${reviewWarning(ctx,movements)}
+    ${accountHistoryPanel(ctx,'account-month-history','Seçilen aydaki hareketler',monthly)}
+    ${accountHistoryPanel(ctx,'account-all-history','Hesap geçmişi',movements,'Bu hesabın kaynak veya hedef olduğu tüm hareketler.')}`);
 }
 
 function categoryPanel(ctx,title,values,empty) {
