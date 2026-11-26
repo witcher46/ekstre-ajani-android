@@ -247,8 +247,8 @@ function monthlyChart(ctx,months) {
     </article>`).join('')}</div></section>`;
 }
 
-function reportTransactionList(ctx,rows) {
-  return ctx.transactionList(newest(rows))+(rows.length>ctx.listLimit?'<button type="button" data-action="more">Daha fazla göster</button>':'');
+function reportTransactionList(ctx,rows,id) {
+  return ctx.transactionList(newest(rows))+(rows.length>ctx.listLimit ? `<button type="button" data-action="more" aria-controls="${id}">Daha fazla göster</button>` : '');
 }
 
 function reportCategories(ctx,report,accountId) {
@@ -270,7 +270,7 @@ function reportCategories(ctx,report,accountId) {
         return `<article class="report-category-month"><h4>${esc(reportMonthLabel(m.month))}</h4>
           <dl class="report-values">${detail(ctx,'Harcama',entry?.spent??0,true)}${detail(ctx,'İade',entry?.refunds??0,true)}${detail(ctx,'Net gider',entry?.net??0,true)}</dl></article>`;
       }).join('')}</div>
-      <h3>Kategori işlemleri</h3><div id="report-category-transactions">${reportTransactionList(ctx,reportRows(state,report.months.map(m=>m.month),{accountId,category:category.name}))}</div>` : ''}
+      <h3>Kategori işlemleri</h3><div id="report-category-transactions">${reportTransactionList(ctx,reportRows(state,report.months.map(m=>m.month),{accountId,category:category.name}),'report-category-transactions')}</div>` : ''}
   </section>`;
 }
 
@@ -314,7 +314,7 @@ export function reportsView(ctx) {
         ${detail(ctx,'Banka veya nakitten kart ödemesi',totals.cardCashPayments,true)}
         ${detail(ctx,'Kartla yapılan harcama',totals.cardSpent,true)}</dl>
       <button type="button" id="report-movements-toggle" aria-expanded="${reportFilters.reveal}" aria-controls="report-movements" data-action="toggleReportMovements">Ayın işlem kayıtları</button>
-      <div id="report-movements" ${reportFilters.reveal?'':'hidden'}>${reportFilters.reveal?reportTransactionList(ctx,reportRows(state,[current.month],{accountId})):''}</div>
+      <div id="report-movements" ${reportFilters.reveal?'':'hidden'}>${reportFilters.reveal?reportTransactionList(ctx,reportRows(state,[current.month],{accountId}),'report-movements'):''}</div>
     </section>
     ${categoryPanel(ctx,'Gelir kategorileri',current.incomeByCategory,'Bu ay kaydedilmiş gelir yok.')}
     ${reviewWarning(ctx)}${sourceWarning(ctx)}</div>`);
@@ -415,9 +415,9 @@ export function statementView(ctx,id) {
       <dl class="card-details">${detail(ctx,'Hesap kesimi',statement.cut)}${detail(ctx,'Son ödeme tarihi',statement.due)}${detail(ctx,'İçe aktarma tarihi',statement.imported)}</dl>
       <div class="actions"><button data-card-view="${ctx.esc(statement.account)}">Kredi kartını aç</button>${pending?'<button data-page="review">İnceleme kutusu</button>':''}</div>
     </section>
-    <section class="panel"><h2>Belgedeki hareketler · ${ctx.esc(rows.length)}</h2>
+    <section class="panel" id="statement-transactions"><h2>Belgedeki hareketler · ${ctx.esc(rows.length)}</h2>
       ${rows.length?ctx.transactionList(newest(rows)):noRows('Bu ekstreye bağlı hareket kaydı yok.')}
-      ${rows.length>ctx.listLimit?'<button data-action="more">Daha fazla göster</button>':''}
+      ${rows.length>ctx.listLimit?'<button type="button" data-action="more" aria-controls="statement-transactions">Daha fazla göster</button>':''}
     </section>`);
 }
 
