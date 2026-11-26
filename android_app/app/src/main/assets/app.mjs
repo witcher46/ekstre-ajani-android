@@ -82,18 +82,19 @@ const reminderStorageKey=key+'-reminders';
 const hasReminderBridge=()=>typeof window.Android?.replaceReminderSchedule==='function';
 let reminderSyncFailed=false;
 const reminderSettings=()=>hasReminderBridge()?Android.reminderStatus():'unavailable';
+const remindersEnabled=()=>['on','blocked'].includes(reminderSettings());
 const reminderSnoozes=()=>hasReminderBridge()?Android.reminderSnoozes():localStorage.getItem(reminderStorageKey)??'{}';
 function saveReminderSettings(before,next){
  if(!hasReminderBridge()){
   localStorage.setItem(reminderStorageKey,next);return true;
  }
- const plan=reminderSettings()==='off'?[]:notificationPlan(state,readSnoozes(next));
+ const plan=remindersEnabled()?notificationPlan(state,readSnoozes(next)):[];
  return Android.replaceReminderSchedule(walletToken,before,next,JSON.stringify(plan));
 }
 function syncReminders(){
  if(!hasReminderBridge()||loadFailed)return;
  try{
-  if(reminderSettings()==='off'){reminderSyncFailed=false;return;}
+  if(!remindersEnabled()){reminderSyncFailed=false;return;}
   const raw=reminderSnoozes();
   reminderSyncFailed=!saveReminderSettings(raw,raw);
  }catch{reminderSyncFailed=true;}
@@ -993,4 +994,4 @@ $('csv-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';
 render();
 $('header-actions').hidden=false;
 $('nav').hidden=false;
-if(window.Android?.takeReminderLaunch?.())window.showReminders();
+if(!loadFailed&&window.Android?.takeReminderLaunch?.()===true)window.showReminders();

@@ -52,7 +52,6 @@ public class MainActivity extends Activity {
   getWindow().setStatusBarColor(0xff11181e);getWindow().setNavigationBarColor(0xff11181e);
   db=openOrCreateDatabase("wallet.db",MODE_PRIVATE,null);
   db.execSQL("CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY, content TEXT NOT NULL)");
-  ReminderScheduler.initialize(db);
   reminderLaunch.set(ReminderScheduler.OPEN_ACTION.equals(getIntent().getAction()));
   PDFBoxResourceLoader.init(getApplicationContext());
   getWindow().getDecorView().setBackgroundColor(0xff11181e);
@@ -460,7 +459,7 @@ public class MainActivity extends Activity {
   super.onNewIntent(intent);
   if(ReminderScheduler.OPEN_ACTION.equals(intent.getAction())){
    reminderLaunch.set(true);
-   web.evaluateJavascript("if(typeof window.showReminders==='function'&&Android.takeReminderLaunch())window.showReminders()",null);
+   web.evaluateJavascript("if(typeof window.showReminders==='function'&&Android.takeReminderLaunch()===true)window.showReminders()",null);
   }
  }
  @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){

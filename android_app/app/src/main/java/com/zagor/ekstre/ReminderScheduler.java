@@ -19,7 +19,9 @@ import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 import org.json.JSONArray;
@@ -36,24 +38,24 @@ public final class ReminderScheduler extends BroadcastReceiver {
  private static final LocalTime MORNING=LocalTime.of(9,0);
  private static final Pattern ID=Pattern.compile("[0-9a-f]{64}");
 
- static void initialize(SQLiteDatabase db) {
-  db.beginTransaction();
-  try {
-   db.execSQL("CREATE TABLE IF NOT EXISTS reminder_options (id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL, snoozes TEXT NOT NULL)");
-   db.execSQL("INSERT OR IGNORE INTO reminder_options VALUES (1,0,'{}')");
-   db.execSQL("CREATE TABLE IF NOT EXISTS reminder_schedule (occurrence TEXT PRIMARY KEY NOT NULL, day TEXT NOT NULL)");
-   db.execSQL("CREATE INDEX IF NOT EXISTS reminder_schedule_day ON reminder_schedule(day)");
-   db.execSQL("CREATE TABLE IF NOT EXISTS reminder_delivered (occurrence TEXT PRIMARY KEY NOT NULL)");
-   // Every change of primary snapshot discards the derived plan in the same
-   // transaction, including restore/recovery and approved balance writes.
-   for(String operation : new String[]{"INSERT","UPDATE","DELETE"}) {
-    String row=operation.equals("DELETE")?"OLD":"NEW";
-    db.execSQL("CREATE TRIGGER IF NOT EXISTS reminder_invalidate_"+operation+" AFTER "+operation
-     +" ON snapshots WHEN "+row+".id=1 BEGIN DELETE FROM reminder_schedule; END");
-   }
-   db.setTransactionSuccessful();
-  } finally {
-   db.endTransaction();
+ private static boolean hasSchema(SQLiteDatabase db) {
+  return DatabaseUtils.longForQuery(db,
+   "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='reminder_options')",null)!=0;
+ }
+
+ // Called inside the transaction for the first explicit reminder change.
+ private static void initialize(SQLiteDatabase db) {
+  db.execSQL("CREATE TABLE reminder_options (id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL, snoozes TEXT NOT NULL)");
+  db.execSQL("INSERT INTO reminder_options VALUES (1,0,'{}')");
+  db.execSQL("CREATE TABLE reminder_schedule (occurrence TEXT PRIMARY KEY NOT NULL, day TEXT NOT NULL)");
+  db.execSQL("CREATE INDEX reminder_schedule_day ON reminder_schedule(day)");
+  db.execSQL("CREATE TABLE reminder_delivered (occurrence TEXT PRIMARY KEY NOT NULL)");
+  // Every change of primary snapshot discards the derived plan in the same
+  // transaction, including restore/recovery and approved balance writes.
+  for(String operation : new String[]{"INSERT","UPDATE","DELETE"}) {
+   String row=operation.equals("DELETE")?"OLD":"NEW";
+   db.execSQL("CREATE TRIGGER reminder_invalidate_"+operation+" AFTER "+operation
+    +" ON snapshots WHEN "+row+".id=1 BEGIN DELETE FROM reminder_schedule; END");
   }
  }
 
@@ -69,11 +71,11 @@ public final class ReminderScheduler extends BroadcastReceiver {
  }
 
  static boolean enabled(SQLiteDatabase db) {
-  return DatabaseUtils.longForQuery(db,"SELECT enabled FROM reminder_options WHERE id=1",null)!=0;
+  return hasSchema(db)&&DatabaseUtils.longForQuery(db,"SELECT enabled FROM reminder_options WHERE id=1",null)!=0;
  }
 
  static String snoozes(SQLiteDatabase db) {
-  return DatabaseUtils.stringForQuery(db,"SELECT snoozes FROM reminder_options WHERE id=1",null);
+  return hasSchema(db)?DatabaseUtils.stringForQuery(db,"SELECT snoozes FROM reminder_options WHERE id=1",null):"{}";
  }
 
  static boolean replacePlan(SQLiteDatabase db,String before,String next,String raw) throws JSONException {
@@ -85,15 +87,35 @@ public final class ReminderScheduler extends BroadcastReceiver {
    if(!ID.matcher(key).matches()||!validDay(settings.opt(key)))return false;
   }
   JSONArray plan=new JSONArray(raw);
-  db.execSQL("DELETE FROM reminder_schedule");
+  if(plan.length()>0&&!enabled(db))return false;
+  Map<String,String> requested=new HashMap<>();
   for(int i=0;i<plan.length();i++) {
    JSONObject entry=plan.getJSONObject(i);
    Object id=entry.opt("occurrence"),day=entry.opt("day");
-   if(!(id instanceof String occurrence)||!ID.matcher(occurrence).matches()||!validDay(day))return false;
-   db.execSQL("INSERT INTO reminder_schedule VALUES (?,?)",new Object[]{occurrence,day});
+   if(!(id instanceof String occurrence)||!ID.matcher(occurrence).matches()||!validDay(day)||
+      requested.put(occurrence,(String)day)!=null)return false;
+  }
+  if(!hasSchema(db)) {
+   if(settings.length()==0)return true;
+   initialize(db);
+  }
+  if(!samePlan(db,requested)) {
+   db.execSQL("DELETE FROM reminder_schedule");
+   for(Map.Entry<String,String> row:requested.entrySet())
+    db.execSQL("INSERT INTO reminder_schedule VALUES (?,?)",new Object[]{row.getKey(),row.getValue()});
   }
   if(!before.equals(next))db.execSQL("UPDATE reminder_options SET snoozes=? WHERE id=1",new Object[]{next});
   return true;
+ }
+
+ private static boolean samePlan(SQLiteDatabase db,Map<String,String> requested) {
+  try(Cursor rows=db.rawQuery("SELECT occurrence, day FROM reminder_schedule",null)) {
+   if(rows.getCount()!=requested.size())return false;
+   while(rows.moveToNext()) {
+    if(!rows.getString(1).equals(requested.get(rows.getString(0))))return false;
+   }
+   return true;
+  }
  }
 
  private static boolean validDay(Object value) {
@@ -105,6 +127,10 @@ public final class ReminderScheduler extends BroadcastReceiver {
  static void setEnabled(Context context,SQLiteDatabase db,boolean enabled) {
   db.beginTransaction();
   try {
+   if(!hasSchema(db)) {
+    if(!enabled)return;
+    initialize(db);
+   }
    db.execSQL("UPDATE reminder_options SET enabled=? WHERE id=1",new Object[]{enabled?1:0});
    if(!enabled)db.execSQL("DELETE FROM reminder_schedule");
    db.setTransactionSuccessful();
@@ -210,9 +236,16 @@ public final class ReminderScheduler extends BroadcastReceiver {
    try {
     synchronized(LOCK) {
      if(!context.getDatabasePath("wallet.db").isFile())return;
-     try(SQLiteDatabase db=SQLiteDatabase.openDatabase(context.getDatabasePath("wallet.db").getPath(),
-         null,SQLiteDatabase.OPEN_READWRITE)) {
-      if(deliver)dispatchDue(context,db,ZonedDateTime.now());
+     String path=context.getDatabasePath("wallet.db").getPath();
+     try(SQLiteDatabase db=SQLiteDatabase.openDatabase(path,null,SQLiteDatabase.OPEN_READONLY)) {
+      if(!enabled(db))return;
+      if(!deliver) {
+       arm(context,db);
+       return;
+      }
+     }
+     try(SQLiteDatabase db=SQLiteDatabase.openDatabase(path,null,SQLiteDatabase.OPEN_READWRITE)) {
+      dispatchDue(context,db,ZonedDateTime.now());
       arm(context,db);
      }
     }
