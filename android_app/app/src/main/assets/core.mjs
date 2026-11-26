@@ -1067,9 +1067,18 @@ export function removeBalanceObservation(state,observationId){
 export const BACKUP_LIMIT=32000000;
 export function backupText(s){validate(s);const raw=JSON.stringify(sanitizePdfSources(s));if(new TextEncoder().encode(raw).length>BACKUP_LIMIT)throw Error('Cüzdan yedeği 32 MB sınırını aşıyor. Mevcut kayıtlar korunuyor.');return raw;}
 export function readBackup(raw){if(new TextEncoder().encode(raw).length>BACKUP_LIMIT)throw Error('Yedek en fazla 32 MB olabilir.');return sanitizePdfSources(validate(JSON.parse(raw)));}
+export function statementPayment(s,account,asOf){
+ const r=cardStatus(s,account,{asOf});
+ if(!r.latest?.due||r.statementRemaining===0)return null;
+ const card=typeof account==='string'?s.accounts.find(a=>a.id===account):account;
+ return {id:r.latest.id,type:'statement',account:r.latest.account,name:card.name+' · ekstre',date:r.latest.due,amount:r.statementRemaining,estimated:true};
+}
 export function upcomingPayments(s,asOf=today()){
  const items=s.subscriptions.map(r=>({id:r.id,type:'subscription',name:r.name,date:r.next,amount:r.amount,estimated:false}));
- for(const account of s.accounts.filter(a=>a.type==='card')){const r=cardStatus(s,account);if(r.latest?.due&&r.statementRemaining!==0)items.push({id:r.latest.id,type:'statement',name:account.name+' · ekstre',date:r.latest.due,amount:r.statementRemaining,estimated:true});}
+ for(const account of s.accounts.filter(a=>a.type==='card')){
+  const payment=statementPayment(s,account,asOf);
+  if(payment)items.push(payment);
+ }
  return items.map(r=>({...r,days:Math.round((Date.parse(r.date)-Date.parse(asOf))/86400000)})).sort((a,b)=>a.date.localeCompare(b.date));
 }
 export function demo(){const s=empty(),a={id:id(),name:'Banka hesabım',type:'bank',opening:2000000},c={id:id(),name:'Deneme kartı',type:'card',opening:0};s.accounts.push(a,c);for(const [desc,amount,category] of [['Market alışverişi',42500,'Market / Gıda'],['Kahve molası',12000,'Dışarıda yeme'],['Akaryakıt',90000,'Akaryakıt']])s.transactions.push({id:id(),account:c.id,date:today(),period:today().slice(0,7),desc,amount,category,kind:'expense',note:''});return s;}

@@ -17,6 +17,8 @@ import {balanceApprovalHistory} from './balance-approval-history.mjs';
 import {readBalanceApprovalEvidence} from './balance-approval-storage.mjs';
 import {renderBalanceApprovalHistory} from './ui/balance-history.mjs';
 import {renderSavingsGoals,savingsGoalFields} from './ui/savings-goals.mjs';
+import {dueItems,notificationPlan,readSnoozes} from './reminders.mjs';
+import {renderReminders} from './ui/reminders.mjs';
 const $=id=>document.getElementById(id);
 const plainMoney=C.formatMoney;
 const fmt=n=>`<span class="money">${plainMoney(n)}</span>`,key='ekstre-android-v1';
@@ -76,7 +78,27 @@ function initialWallet(){
  if(!copy)throw Error('Güncel cüzdan doğrulanamadı.');
  return copy;
 }
-function setWallet(wallet,token){state=wallet;walletToken=token;}
+const reminderStorageKey=key+'-reminders';
+const hasReminderBridge=()=>typeof window.Android?.replaceReminderSchedule==='function';
+let reminderSyncFailed=false;
+const reminderSettings=()=>hasReminderBridge()?Android.reminderStatus():'unavailable';
+const reminderSnoozes=()=>hasReminderBridge()?Android.reminderSnoozes():localStorage.getItem(reminderStorageKey)??'{}';
+function saveReminderSettings(before,next){
+ if(!hasReminderBridge()){
+  localStorage.setItem(reminderStorageKey,next);return true;
+ }
+ const plan=reminderSettings()==='off'?[]:notificationPlan(state,readSnoozes(next));
+ return Android.replaceReminderSchedule(walletToken,before,next,JSON.stringify(plan));
+}
+function syncReminders(){
+ if(!hasReminderBridge()||loadFailed)return;
+ try{
+  if(reminderSettings()==='off'){reminderSyncFailed=false;return;}
+  const raw=reminderSnoozes();
+  reminderSyncFailed=!saveReminderSettings(raw,raw);
+ }catch{reminderSyncFailed=true;}
+}
+function setWallet(wallet,token){state=wallet;walletToken=token;syncReminders();}
 try{const {raw,wallet}=initialWallet();setWallet(wallet,tokenOf(raw));}
 catch{loadFailed=true;errorNotice('Kayıtlar okunamadı. Kurtarma seçeneklerini incele.');}
 function commit(next){
@@ -97,7 +119,7 @@ function commit(next){
 }
 const copyLabel=slot=>slot===3?'Geri yükleme öncesi kopya':'Son kayıt öncesi kopya';
 function finishReplacement(wallet,raw){
- setWallet(wallet,tokenOf(raw));loadFailed=false;
+ loadFailed=false;setWallet(wallet,tokenOf(raw));
  pending=null;pdfRequest=null;history.length=0;detailId=null;
  balanceDraft={};balanceReviewToken=null;balanceHistoryArchive=null;balanceHistoryView={};
  page='home';render();focusMain();
@@ -218,7 +240,7 @@ window.onPdfText=async (text,request)=>{
  }catch(e){window.onPdfError(e.message,request);}
 };
 function backFallback(){
- if(page==='savingsGoals')return {page:'plan',title:'Planlama'};
+ if(page==='savingsGoals'||page==='reminders')return {page:'plan',title:'Planlama'};
  return page==='statement'||page==='review'
   ? {page:'import',title:'Ekstreler'} : {page:'wallet',title:'Cüzdanım'};
 }
@@ -331,6 +353,10 @@ function render(){
   html=renderBalanceApprovalHistory({...balanceHistoryView,selectedId:page==='balanceApprovalDetail'?detailId:null,backTitle});
  }else if(page==='incomePlans'){html=V.incomePlansView(ctx);
  }else if(page==='savingsGoals'){html=renderSavingsGoals(ctx);
+ }else if(page==='reminders'){
+  const asOf=C.today();
+  html=renderReminders({items:dueItems(state,asOf),snoozes:readSnoozes(reminderSnoozes()),
+   today:asOf,status:reminderSettings(),syncFailed:reminderSyncFailed,esc,fmt,dateStatus});
  }else if(page==='transactions'){
  const searchTerm=query.toLocaleLowerCase('tr');
  const scoped=filteredExpenses?
@@ -351,14 +377,14 @@ function render(){
  html=`<h1>İşlemler</h1><p class="lead">Bir işleme dokunarak düzenle veya incele.</p>${filteredExpenses?`<div class="toolbar"><strong>Gider kategorisi · ${esc(expenseCategory||'Kategorisiz')}</strong><button data-action="clearExpenseCategory">Filtreyi temizle</button></div>`:modeControl}<div class="toolbar">${periodControl}<button type="button" data-page="review">İnceleme Merkezi</button><button class="primary" data-action="addTransaction">+ İşlem</button></div>${filteredExpenses?'':select('kind-filter','İşlem türü',options([['','Tüm türler'],...Object.entries(kinds)],kindFilter))+select('account-filter','Hesap / kart',options([['','Tüm hesaplar'],...state.accounts.map(a=>[a.id,a.name])],accountFilter))}<input id="search" class="search" type="search" placeholder="Açıklama, kategori veya not ara" value="${esc(query)}"><small>${list.length} işlem · ${Math.min(listLimit,list.length)} gösteriliyor</small><div class="panel" id="transactions-list">${results}</div>${list.length>listLimit?'<button type="button" data-action="more" aria-controls="transactions-list">Daha fazla göster</button>':''}`;
  }else if(page==='plan'){
  const budgets=Object.entries(state.budgets).filter(([k])=>k.startsWith(period+'|'));
- html=`<h1>Planlama</h1><p class="lead">Bütçeni ve yaklaşan ödemelerini takip et.</p><button type="button" data-page="savingsGoals">Birikim hedefleri</button>${V.incomePlansView(ctx,{embedded:true})}<div class="toolbar">${periodControl}<button data-action="budget">+ Bütçe</button></div><div class="panel"><h2>Aylık bütçe</h2>${budgets.map(([k,v])=>{const cat=k.slice(8),used=cat==='Toplam'?s.net:s.categories.find(([c])=>c===cat)?.[1]||0;return `<div class="row"><div><strong>${esc(cat)}</strong><small>${fmt(used)} / ${fmt(v)}</small>${used>v?'<small class="danger">Bütçe aşıldı</small>':''}</div><button data-budget="${esc(k)}" aria-label="Bütçeyi kaldır">×</button></div><progress class="bar" aria-label="${esc(cat)} bütçe kullanımı" aria-valuetext="${esc(`${plainMoney(used)} / ${plainMoney(v)}${used>v?' · Bütçe aşıldı':''}`)}" max="${Math.max(v,1)}" value="${C.positiveCents(used)}"></progress>`;}).join('')||'<p>Bu dönem için bütçe ekle.</p>'}</div><div class="panel"><div class="row"><h2>Abonelikler</h2><button data-action="subscription">+ Ekle</button></div>${state.subscriptions.map(r=>`<div class="row"><div><strong>${esc(r.name)}</strong><small>${dateStatus(r.next)} · ${fmt(r.amount)}<br>${esc(accountName(r.account))}</small></div><div><button data-pay="${esc(r.id)}" data-due="${esc(r.next)}">Ödendi</button><button data-subdelete="${esc(r.id)}" aria-label="Aboneliği sil">×</button></div></div>`).join('')||'<p>Aylık ödemelerini planla. Ödendi düğmesi gerçek ödeme tarihini sorar; bir vade bir kez kaydedilir.</p>'}</div><div class="panel"><h2>Ekstre ödeme takvimi</h2>${C.upcomingPayments(state).filter(st=>st.type==='statement').map(st=>`<div class="row"><div><strong>${esc(st.name)}</strong><small>${dateStatus(st.date)} · kaydedilen ödemelere göre kalan tahmin</small></div><strong>${st.amount===null?'Okunamadı':fmt(st.amount)}</strong></div>`).join('')||'<p>Son ödeme tarihi bulunan bir ekstre aktar.</p>'}<p class="notice">Ödeme takvimi bankadaki ödeme durumunu doğrulamaz.</p></div><div class="panel"><h2>Taksitli hareketler</h2>${transactionList(rows.filter(t=>t.installment))}<p class="notice">Taksit ayrıntıları ve kalan taksit tahmini kartın ayrıntısında gösterilir. Tahmin gelecekteki harcamaları bugünün giderine eklemez.</p></div>`;
+ html=`<h1>Planlama</h1><p class="lead">Bütçeni ve yaklaşan ödemelerini takip et.</p><div class="actions"><button type="button" data-page="reminders">Hatırlatmalar</button><button type="button" data-page="savingsGoals">Birikim hedefleri</button></div>${V.incomePlansView(ctx,{embedded:true})}<div class="toolbar">${periodControl}<button data-action="budget">+ Bütçe</button></div><div class="panel"><h2>Aylık bütçe</h2>${budgets.map(([k,v])=>{const cat=k.slice(8),used=cat==='Toplam'?s.net:s.categories.find(([c])=>c===cat)?.[1]||0;return `<div class="row"><div><strong>${esc(cat)}</strong><small>${fmt(used)} / ${fmt(v)}</small>${used>v?'<small class="danger">Bütçe aşıldı</small>':''}</div><button data-budget="${esc(k)}" aria-label="Bütçeyi kaldır">×</button></div><progress class="bar" aria-label="${esc(cat)} bütçe kullanımı" aria-valuetext="${esc(`${plainMoney(used)} / ${plainMoney(v)}${used>v?' · Bütçe aşıldı':''}`)}" max="${Math.max(v,1)}" value="${C.positiveCents(used)}"></progress>`;}).join('')||'<p>Bu dönem için bütçe ekle.</p>'}</div><div class="panel"><div class="row"><h2>Abonelikler</h2><button data-action="subscription">+ Ekle</button></div>${state.subscriptions.map(r=>`<div class="row"><div><strong>${esc(r.name)}</strong><small>${dateStatus(r.next)} · ${fmt(r.amount)}<br>${esc(accountName(r.account))}</small></div><div><button data-pay="${esc(r.id)}" data-due="${esc(r.next)}">Ödendi</button><button data-subdelete="${esc(r.id)}" aria-label="Aboneliği sil">×</button></div></div>`).join('')||'<p>Aylık ödemelerini planla. Ödendi düğmesi gerçek ödeme tarihini sorar; bir vade bir kez kaydedilir.</p>'}</div><div class="panel"><h2>Ekstre ödeme takvimi</h2>${C.upcomingPayments(state).filter(st=>st.type==='statement').map(st=>`<div class="row"><div><strong>${esc(st.name)}</strong><small>${dateStatus(st.date)} · kaydedilen ödemelere göre kalan tahmin</small></div><strong>${st.amount===null?'Okunamadı':fmt(st.amount)}</strong></div>`).join('')||'<p>Son ödeme tarihi bulunan bir ekstre aktar.</p>'}<p class="notice">Ödeme takvimi bankadaki ödeme durumunu doğrulamaz.</p></div><div class="panel"><h2>Taksitli hareketler</h2>${transactionList(rows.filter(t=>t.installment))}<p class="notice">Taksit ayrıntıları ve kalan taksit tahmini kartın ayrıntısında gösterilir. Tahmin gelecekteki harcamaları bugünün giderine eklemez.</p></div>`;
  }else if(page==='reports'){html=V.reportsView(ctx);
  }else if(page==='import'){html=V.importView(ctx,pending);
  }else if(page==='statement'){html=V.statementView(ctx,detailId);
  }else if(page==='review'){
  html=renderReviewCenter(state,backTitle);
  }else{
- html=`<h1>Ayarlar</h1><p class="lead">${esc(installedVersionLabel())}</p><button data-page="review">İnceleme ve kaynak bağlantıları</button><div class="panel"><h2>Veriler ve yedek</h2><p>Kayıtların bu cihazda saklanır. Uygulamayı kaldırmadan veya yeni bir deneme APK’sı kurmadan önce yedek al.</p><div class="actions"><button data-action="backup">Yedek dışa aktar</button><button data-action="restore">Yedek yükle</button></div><p class="notice">Bu sürüm Android JSON yedeklerini açar. Masaüstü .db yedeği doğrudan aktarılamaz; kart hareketleri için CSV aktarımını kullan.</p></div><button data-action="recover">Geri yükleme öncesi cüzdanı kurtar</button>${expenseCategoriesPanel()}${merchantRulesPanel()}<div class="panel"><h2>Gelir kategorileri</h2><p>${state.incomeCategories.map(esc).join(' · ')}</p><button data-action="incomeCategory">+ Gelir kategorisi</button></div><div class="panel"><h2>İlk deneme</h2><p>Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Gerçek belgelerini yüklemeden önce temel işlevleri deneyebilirsin.</p><button data-action="demo">Örnek cüzdan oluştur</button></div><div class="panel"><h2>Bu sürümün kapsamı</h2><p>Hesaplar, işlemler, PDF/CSV aktarımı, kategori düzenleme, manuel gider bölme, bütçe, aylık abonelik, rapor ve yedekleme. Çoklu profil, AI yorumu, otomatik eşleştirme, gelişmiş kurallar ve arka plan hatırlatmaları henüz yoktur.</p></div>`;
+ html=`<h1>Ayarlar</h1><p class="lead">${esc(installedVersionLabel())}</p><div class="actions"><button data-page="reminders">Hatırlatmalar</button><button data-page="review">İnceleme ve kaynak bağlantıları</button></div><div class="panel"><h2>Veriler ve yedek</h2><p>Kayıtların bu cihazda saklanır. Uygulamayı kaldırmadan veya yeni bir deneme APK’sı kurmadan önce yedek al.</p><div class="actions"><button data-action="backup">Yedek dışa aktar</button><button data-action="restore">Yedek yükle</button></div><p class="notice">Bu sürüm Android JSON yedeklerini açar. Masaüstü .db yedeği doğrudan aktarılamaz; kart hareketleri için CSV aktarımını kullan.</p></div><button data-action="recover">Geri yükleme öncesi cüzdanı kurtar</button>${expenseCategoriesPanel()}${merchantRulesPanel()}<div class="panel"><h2>Gelir kategorileri</h2><p>${state.incomeCategories.map(esc).join(' · ')}</p><button data-action="incomeCategory">+ Gelir kategorisi</button></div><div class="panel"><h2>İlk deneme</h2><p>Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Gerçek belgelerini yüklemeden önce temel işlevleri deneyebilirsin.</p><button data-action="demo">Örnek cüzdan oluştur</button></div><div class="panel"><h2>Bu sürümün kapsamı</h2><p>Hesaplar, işlemler, PDF/CSV aktarımı, kategori düzenleme, manuel gider bölme, bütçe, aylık abonelik, rapor ve yedekleme. Çoklu profil, AI yorumu, otomatik eşleştirme ve gelişmiş kurallar henüz yoktur.</p></div>`;
  }
  $('main').innerHTML=html;
  $('main').querySelector('h1')?.setAttribute('tabindex','-1');
@@ -556,6 +582,44 @@ function incomePlanForm(){if(!state.accounts.some(a=>a.type!=='card'))throw Erro
  modal('Düzenli gelir planla',field('name','Gelir adı','','text','required maxlength="200"')+select('account','Gelirin geleceği hesap',accountOptions(a=>a.type!=='card'))+field('amount','Beklenen tutar (TL)','','text','inputmode="decimal" required')+field('next','Planlanan gelir tarihi',C.today(),'date','required')+select('category','Gelir kategorisi',categoryOptions('income','Maaş'))+'<p class="notice">Plan oluşturmak bakiye veya aylık geliri artırmaz. Para geldiğinde “Gelir alındı” ile gerçek tarihi kaydet.</p>',f=>commit(W.addIncomePlan(state,{name:f.get('name').trim(),account:f.get('account'),amount:C.money(f.get('amount')),next:f.get('next'),category:f.get('category')})));
 }
 function receiveIncomeForm(id,due){const p=state.incomePlans.find(r=>r.id===id);if(!p)return;modal('Gelir alındı',`<p>${esc(p.name)} · Planlanan tarih ${esc(due)} · ${fmt(p.amount)}</p>`+select('account','Gelirin gerçekten geldiği hesap',accountOptions(a=>a.type!=='card',p.account))+field('receivedOn','Gerçekte alındığı tarih',C.today(),'date','required'),f=>commit(W.receiveIncome(state,id,{receivedOn:f.get('receivedOn'),expectedDue:due,account:f.get('account')})),'Geliri kaydet');}
+function changeSnooze(occurrence,date){
+ const before=reminderSnoozes(),snoozes=readSnoozes(before);
+ if(!dueItems(state).some(row=>row.occurrence===occurrence))throw Error('Bu vade değişti. Takvimi yeniden aç.');
+ if(date) snoozes[occurrence]=date;
+ else delete snoozes[occurrence];
+ if(!saveReminderSettings(before,JSON.stringify(snoozes)))throw Error('Hatırlatma güncellenemedi. Takvimi yeniden aç.');
+ reminderSyncFailed=false;
+ render();
+ notice(date?'Hatırlatma ertelendi.':'Erteleme kaldırıldı.');
+}
+
+function snoozeReminder(occurrence){
+ const row=dueItems(state).find(item=>item.occurrence===occurrence);
+ if(!row)return;
+ const date=new Date((row.date>C.today()?row.date:C.today())+'T00:00:00Z');
+ date.setUTCDate(date.getUTCDate()+1);
+ const earliest=date.toISOString().slice(0,10);
+ if(!C.validDate(earliest))throw Error('Bu vade daha ileri bir tarihe ertelenemiyor.');
+ modal('Hatırlatmayı ertele',`<p>${esc(row.name)} · ${esc(row.date)}</p>`+
+  field('reminder-day','Erteleme tarihi',earliest,'date',`required min="${earliest}"`),form=>{
+  const day=form.get('reminder-day');
+  if(!C.validDate(day)||day<earliest||day<=C.today())throw Error('İleri bir erteleme tarihi seç.');
+  changeSnooze(occurrence,day);
+ },'Ertele');
+}
+
+window.onRemindersChanged=()=>{
+ syncReminders();
+ if(page==='reminders'&&!$('modal').open){
+  const target=focusTarget(document.activeElement);
+  render();
+  if(target?.selector==='#reminders-enable')$('reminders-disable')?.focus();
+  else if(target?.selector==='#reminders-disable')$('reminders-enable')?.focus();
+  if(!document.activeElement.closest('#main')&&target)restoreFocus(target);
+ }
+};
+window.showReminders=()=>{if(!loadFailed)go('reminders');};
+
 function dateStatus(date){const days=Math.round((new Date(date+'T12:00:00')-new Date(C.today()+'T12:00:00'))/86400000);return `${esc(date)} · ${days<0?'Vadesi geçti':days===0?'Bugün':days<=7?'Yaklaşıyor':'Planlandı'}`;}
 function upcoming(){const items=C.upcomingPayments(state).filter(r=>r.days<=7).slice(0,3);return items.length?`<div class="panel"><h2>Yaklaşan / geciken ödemeler</h2>${items.map(r=>`<div class="row"><div><strong>${esc(r.name)}</strong><small>${dateStatus(r.date)}${r.estimated?' · kayıtlı ödemelere göre tahmin':''}</small></div><b>${r.amount===null?'Tutar bilinmiyor':fmt(r.amount)}</b></div>`).join('')}<button data-page="plan">Ödeme planına git</button></div>`:'';}
 function subscriptionPayment(rid,due){const r=state.subscriptions.find(r=>r.id===rid);if(!r)return;modal('Abonelik ödemesi',`<p>${esc(r.name)} · Planlanan vade ${esc(due)}</p><b>${fmt(r.amount)}</b>`+field('paidOn','Gerçek ödeme tarihi',C.today(),'date','required'),f=>commit(C.paySubscription(state,rid,{paidOn:f.get('paidOn'),expectedDue:due})),'Ödemeyi kaydet');}
@@ -751,6 +815,15 @@ function handleBackClick(){
 }
 
 const actions={
+ snoozeReminder:()=>snoozeReminder(actionTrigger.dataset.reminder),
+ undoReminderSnooze:()=>{
+  const target=focusTarget(actionTrigger);
+  changeSnooze(actionTrigger.dataset.reminder);
+  restoreFocus(target);
+ },
+ enableReminders:()=>Android.setRemindersEnabled(true),
+ disableReminders:()=>Android.setRemindersEnabled(false),
+ reminderSystemSettings:()=>Android.openReminderSettings(),
  applyCategorySuggestion:event=>{
   if(!actionTrigger.isConnected)return;
   const {transactionId,suggestedCategory}=actionTrigger.dataset;
@@ -920,3 +993,4 @@ $('csv-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';
 render();
 $('header-actions').hidden=false;
 $('nav').hidden=false;
+if(window.Android?.takeReminderLaunch?.())window.showReminders();
