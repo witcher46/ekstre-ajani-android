@@ -3,7 +3,7 @@ import * as W from './wallet.mjs';
 import {advancedReports,reportRows} from './reports.mjs';
 import {options,select} from './ui/form-controls.mjs';
 import {renderBalanceAccount} from './ui/balance-review.mjs';
-import {renderBackLink} from './ui/navigation.mjs';
+import {renderBackLink,uiIcon} from './ui/navigation.mjs';
 
 const kindNames = {expense:'Harcama',income:'Gelir',refund:'İade',payment:'Hesaptan kart ödemesi',cardPayment:'Ekstre kart ödemesi',transfer:'Transfer'};
 const statementFields = {previousDebt:'Önceki dönem borcu',statementDebt:'Dönem borcu',expectedDebt:'Beklenen dönem borcu',cut:'Hesap kesim tarihi',due:'Son ödeme tarihi'};
@@ -36,9 +36,19 @@ function sourceWarning(ctx) {
   return missing.length ? `<aside class="warning"><strong>${ctx.esc(missing.length)} ekstre ödemesinin kaynak hesabı bilinmiyor</strong><p>Kart ödemesi ekstrede görünüyor; hangi banka veya nakit hesabından çıktığı henüz kayıtlı değil. Kullanılabilir para tutarını doğrulamak için kaynağı bağla.</p><button data-page="wallet">Kartları ve ödeme kaynaklarını incele</button></aside>` : '';
 }
 
+function dashboardRow(icon,label,note,value) {
+  return `<span class="row-icon">${uiIcon(icon)}</span><span class="dashboard-row-label"><strong>${label}</strong><small>${note}</small></span><b class="dashboard-row-value">${value}</b>`;
+}
+
 function upcoming(ctx) {
   const rows = C.upcomingPayments(ctx.state).filter(r => r.days <= 7).slice(0,4);
-  return rows.length ? `<section class="panel"><div class="section-heading"><h2>Yaklaşan / geciken ödemeler</h2><button data-page="plan">Ödeme planı</button></div>${rows.map(r => `<div class="row"><div class="left"><strong>${ctx.esc(r.name)}</strong><small>${ctx.dateStatus(r.date)}${r.estimated ? ' · Kaydedilmiş ödemelere göre tahmin' : ''}</small></div><b>${amount(ctx,r.amount)}</b></div>`).join('')}<p class="notice">Takvim bankadaki ödeme durumunu doğrulamaz.</p></section>` : '';
+  if (!rows.length) return '';
+  return `<section class="dashboard-section" aria-labelledby="upcoming-heading">
+    <div class="section-heading"><h2 id="upcoming-heading">Yaklaşan / geciken ödemeler</h2><button class="section-link" data-page="plan">Ödeme planı ${uiIcon('next')}</button></div>
+    <div class="panel dashboard-list">${rows.map(r => `<div class="dashboard-row">${dashboardRow(r.estimated?'wallet':'plan',ctx.esc(r.estimated?accountName(ctx.state,r.account):r.name),
+      ctx.dateStatus(r.date)+(r.estimated?' · Kalan dönem borcu tahmini':''),amount(ctx,r.amount))}</div>`).join('')}</div>
+    <p class="notice">Takvim bankadaki ödeme durumunu doğrulamaz.</p>
+  </section>`;
 }
 
 const expensePercent = new Intl.NumberFormat('tr-TR',{style:'percent',maximumFractionDigits:1});
@@ -68,43 +78,76 @@ function expenseBreakdown(ctx,rows) {
   </section>`;
 }
 
+const statementShortcut = '<button data-page="import">'+uiIcon('import')+' Ekstre yükle</button>';
+
 export function homeView(ctx) {
   const {state,periodControl,transactionList} = ctx;
   const overview = W.overview(state,ctx.period);
-  const monthRows=C.rowsForPeriod(state,ctx.period);
+  const monthRows = C.rowsForPeriod(state,ctx.period);
   const recent = newest(monthRows).slice(0,5);
-  return shell(`<h1>Parana genel bakış</h1><p class="lead">Paran, gelirlerin ve kart borçların aynı cüzdanda.</p>
-    <section class="hero panel" aria-label="Cüzdan özeti"><small>BANKA VE NAKİT BAKİYESİ</small><div class="big" data-stat="cash">${amount(ctx,overview.cash)}</div>
-      <dl class="compact-totals">${compactStat(ctx,'cardDebt','Kart borcu tahmini',overview.cardDebt)}${overview.cardCredit > 0 ? compactStat(ctx,'cardCredit','Kart artı bakiyesi',overview.cardCredit) : ''}${compactStat(ctx,'netWorth','Net varlık',overview.netWorth)}</dl>
-      <p class="notice">Kayıtlarına göre tahmin; bankanın canlı bakiyesi değildir.</p>
+  return shell(`<div class="dashboard-surface">
+    <h1>Özet</h1>
+    <section class="panel dashboard-hero" aria-label="Cüzdan özeti">
+      <div class="dashboard-hero-caption"><small>Banka ve nakit bakiyesi</small><small>Kayıtlarına göre</small></div>
+      <div class="dashboard-amount" data-stat="cash">${amount(ctx,overview.cash)}</div>
+      <dl class="dashboard-totals">${compactStat(ctx,'cardDebt','Kart borcu tahmini',overview.cardDebt)}${compactStat(ctx,'netWorth','Net varlık',overview.netWorth)}${overview.cardCredit > 0 ? compactStat(ctx,'cardCredit','Kart artı bakiyesi',overview.cardCredit) : ''}</dl>
     </section>
-    ${quickActions()}
+    <div class="dashboard-actions"><button class="primary" data-action="quickAdd" aria-haspopup="dialog" aria-controls="modal">${uiIcon('plus')} İşlem ekle</button>${statementShortcut}</div>
     ${!state.accounts.length ? `<section class="panel empty"><b>Cüzdanını oluştur</b><p>Önce banka hesabı, nakit hesabı veya kart ekle. Açılış bakiyesi gelir veya gider sayılmaz.</p><div class="actions"><button class="primary" data-action="addAccount">Hesap ekle</button><button data-action="demo">Örnek cüzdan</button></div></section>` : ''}
-    <div class="section-heading month-heading"><div><h2>Aylık gelir ve gider</h2><p class="notice">Takvim ayı · işlem tarihine göre</p></div><button data-page="reports">Raporlar ↗</button></div>
-    <div class="toolbar">${periodControl}</div>
-    <section class="panel month-summary"><dl class="compact-totals">${compactStat(ctx,'income','Gelir',overview.income)}${compactStat(ctx,'netExpense','Net gider',overview.netExpense)}${compactStat(ctx,'margin','Gelir − gider',overview.margin)}</dl><p class="notice">İadeler giderden düşer. Kart ödemeleri ve transferler gider sayılmaz.</p></section>
+    ${upcoming(ctx)}
+    <section class="dashboard-section" aria-labelledby="month-heading">
+      <div class="section-heading"><h2 id="month-heading">Aylık özet</h2><div class="dashboard-period">
+        ${periodControl}<button class="section-link" data-page="reports">Raporlar ↗</button>
+      </div></div>
+      <div class="panel month-summary"><dl class="dashboard-totals">${compactStat(ctx,'income','Gelir',overview.income)}${compactStat(ctx,'netExpense','Net gider',overview.netExpense)}${compactStat(ctx,'margin','Gelir − gider',overview.margin)}</dl><p class="notice">İadeler giderden düşer. Kart ödemeleri ve transferler gider sayılmaz.</p></div>
+    </section>
+    ${reviewWarning(ctx)}${sourceWarning(ctx)}
+    <section class="dashboard-section" aria-labelledby="recent-heading"><div class="section-heading"><h2 id="recent-heading">Son hareketler</h2><button class="section-link" data-page="transactions">Tüm işlemler ${uiIcon('next')}</button></div><div class="panel dashboard-list dashboard-recent">${transactionList(recent)}</div></section>
     ${expenseBreakdown(ctx,monthRows)}
     ${overview.plannedIncome ? `<div class="panel planned-income"><div><strong>Bu ay planlanan gelir</strong><p class="notice">Alındı olarak onaylanana kadar bakiyeye ve gelire eklenmez.</p><b>${amount(ctx,overview.plannedIncome)}</b></div><button data-page="incomePlans">Gelir planları</button></div>` : ''}
-    ${reviewWarning(ctx)}${sourceWarning(ctx)}${upcoming(ctx)}
-    <section class="panel"><div class="section-heading"><h2>Son hareketler</h2><button data-page="transactions">Tüm işlemler</button></div>${transactionList(recent)}</section>
-    <div class="actions"><button data-page="import">Ekstre aktar</button><button data-page="incomePlans">Gelir planları</button></div>`);
+    ${quickActions()}
+    <div class="actions"><button data-page="incomePlans">Gelir planları</button></div>
+  </div>`);
+}
+
+function walletCard(ctx,account) {
+  const card = W.cardDetail(ctx.state,account.id);
+  const id = ctx.esc(account.id);
+  return `<article class="wallet-card">
+    <button class="panel wallet-card-hero" data-card-view="${id}">
+      <small>Kredi kartı</small><strong>${ctx.esc(account.name)}</strong>
+      <b class="dashboard-amount">${amount(ctx,card.debt)}</b><small>Güncel kart borcu tahmini</small>
+    </button>
+    <div class="panel dashboard-list">
+      <div class="dashboard-row">${dashboardRow('import','Dönem borcu',card.latest?'Son ekstre':'Henüz ekstre yok',amount(ctx,card.statementDebt))}</div>
+      <div class="dashboard-row">${dashboardRow('plan','Kalan dönem borcu',card.latest?.due?'Son ödeme · '+ctx.esc(card.latest.due):'Son ödeme tarihi bilinmiyor',amount(ctx,card.statementRemaining))}</div>
+      ${card.credit ? `<div class="dashboard-row">${dashboardRow('wallet','Kart artı bakiyesi','Kayıtlarına göre',amount(ctx,card.credit))}</div>` : ''}
+      <div class="dashboard-actions wallet-account-actions"><button data-account="${id}">Hesabı düzenle</button><button data-pay-card="${id}">Ödeme kaydet</button></div>
+    </div>
+  </article>`;
 }
 
 export function walletView(ctx) {
   const {state,esc} = ctx;
   const overview = W.overview(state,ctx.period);
-  let html = `<h1>Cüzdanım</h1><p class="lead">Banka ve nakit varlıklarını, kart borcunu ve kart artı bakiyesini ayrı takip et.</p><div class="toolbar"><button class="primary" data-action="addAccount">+ Hesap / kart ekle</button><button data-action="transfer">Hesaplar arası transfer</button></div>
-    <div class="summary-grid">${metric(ctx,'cash','Banka ve nakit',overview.cash)}${metric(ctx,'cardDebt','Kart borcu tahmini',overview.cardDebt)}${metric(ctx,'cardCredit','Kart artı bakiyesi',overview.cardCredit)}</div>`;
-  for (const [type,label] of [['bank','Banka hesapları'],['cash','Nakit'],['card','Kredi kartları']]) {
-    const accounts = state.accounts.filter(a => a.type === type);
-    if (!accounts.length) continue;
-    html += `<section aria-label="${esc(label)}"><h2 class="divider">${esc(label)}</h2><div class="account-grid">${accounts.map(a => {
-      const card = type === 'card' ? W.cardDetail(state,a.id) : null;
-      return `<article class="panel account-tile"><button class="account-open" ${card ? 'data-card-view' : 'data-account-view'}="${esc(a.id)}"><span class="account-title">${esc(a.name)}<span aria-hidden="true">↗</span></span><small>${card ? 'Güncel kart borcu tahmini' : 'Kaydedilmiş kullanılabilir bakiye'}</small><b>${amount(ctx,card ? card.debt : C.balance(state,a))}</b>${card ? `<small>Kart artı bakiyesi</small><b class="card-credit">${amount(ctx,card.credit)}</b><small>Son ödeme: ${esc(card.latest?.due || 'Henüz ekstre yok')}</small>` : ''}</button><div class="actions"><button data-account="${esc(a.id)}">Hesabı düzenle</button>${card ? `<button class="primary" data-pay-card="${esc(a.id)}">Borç öde</button>` : ''}</div></article>`;
-    }).join('')}</div></section>`;
-  }
-  if (!state.accounts.length) html += `<section class="panel empty"><b>Henüz hesap yok</b><p>Banka veya nakit bakiyeni ve kartlarını ekleyerek başla.</p><button data-action="demo">Örnek cüzdan</button></section>`;
-  return shell(html + reviewWarning(ctx) + sourceWarning(ctx));
+  const cards = state.accounts.filter(a => a.type === 'card');
+  const accounts = state.accounts.filter(a => a.type !== 'card');
+  return shell(`<div class="dashboard-surface">
+    <h1>Cüzdan</h1>
+    ${cards.length ? `<section class="wallet-cards" aria-label="Kredi kartları">${cards.map(a => walletCard(ctx,a)).join('')}</section>` : ''}
+    <div class="dashboard-actions"><button class="primary" data-action="addAccount">${uiIcon('plus')} Hesap ekle</button>${statementShortcut}</div>
+    ${!state.accounts.length ? `<section class="panel empty"><b>Henüz hesap yok</b><p>Banka veya nakit bakiyeni ve kartlarını ekleyerek başla.</p><button data-action="demo">Örnek cüzdan</button></section>` : ''}
+    <section class="dashboard-section" aria-labelledby="available-cash">
+      <div class="section-heading"><h2 id="available-cash">Banka ve nakit bakiyesi</h2><b data-stat="cash">${amount(ctx,overview.cash)}</b></div>
+      <div class="panel dashboard-list">${accounts.map(account => `<div class="wallet-account-row">
+        <button class="dashboard-row" type="button" data-account-view="${esc(account.id)}">${dashboardRow(account.type,esc(account.name),account.type==='bank'?'Banka hesabı':'Nakit hesabı',amount(ctx,C.balance(state,account)))}</button>
+        <button class="icon wallet-account-edit" type="button" data-account="${esc(account.id)}" aria-label="${esc(account.name+' hesabını düzenle')}">${uiIcon('edit')}</button>
+      </div>`).join('') || noRows('Henüz banka veya nakit hesabı yok.')}</div>
+    </section>
+    <section class="panel" aria-label="Cüzdan toplamı"><dl class="dashboard-totals">${compactStat(ctx,'cardDebt','Toplam kart borcu tahmini',overview.cardDebt)}${compactStat(ctx,'cardCredit','Toplam kart artı bakiyesi',overview.cardCredit)}${compactStat(ctx,'netWorth','Net varlık',overview.netWorth)}</dl><p class="notice">Borç ve bakiye, uygulamadaki kayıtlara göre gösterilir.</p></section>
+    <button data-action="transfer">Hesaplar arası transfer</button>
+    ${reviewWarning(ctx)}${sourceWarning(ctx)}
+  </div>`);
 }
 
 function installmentPanel(ctx,installments) {

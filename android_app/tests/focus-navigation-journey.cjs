@@ -1,3 +1,4 @@
+const openRoute=require('./journey-navigation.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'playwright');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
@@ -21,6 +22,218 @@ async function serveWallet(page,appSuffix=''){
   });
 }
 
+async function checkMoreNavigation(browser){
+  const fixture=require('./fixtures/android-0.2.0.json');
+  const page=await browser.newPage({viewport:{width:390,height:680},isMobile:true,hasTouch:true});
+  try{
+    page.setDefaultTimeout(5000);
+    const errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    await serveWallet(page);
+    const transactions=Array.from({length:25},(_,i)=>({
+      id:'slice1-'+i,account:'synthetic-bank',date:'2026-11-02',period:'2026-11',
+      kind:'expense',amount:12500,category:'Sentetik özel kategori',desc:'Sentetik uzun işlem açıklaması '+i,
+    }));
+    await page.addInitScript(wallet=>localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet)),
+      {...fixture,transactions});
+    await page.goto('https://wallet.test/');
+    const nav=page.getByRole('navigation',{name:'Ana menü'});
+    const main=page.getByRole('main');
+    const more=nav.getByRole('button',{name:'Diğer',exact:true});
+    const menu=page.getByRole('dialog',{name:'Diğer',exact:true});
+    const heading=main.getByRole('heading',{level:1});
+    const focused=locator=>locator.evaluate(el=>el===document.activeElement);
+    const nativeBack=()=>page.evaluate(()=>window.handleBack());
+    const selectRoute=async name=>{
+      await more.click();
+      await menu.getByRole('button',{name:new RegExp('^'+name)}).click();
+    };
+    const snapshot=()=>page.evaluate(()=>({
+      scroll:scrollY,query:document.querySelector('#search')?.value,
+      account:document.querySelector('#f-account-filter')?.value,
+      kind:document.querySelector('#f-kind-filter')?.value,
+      data:localStorage.getItem('ekstre-android-v1'),
+    }));
+    const current=nav.locator('[aria-current=page]');
+    assert.deepEqual((await nav.getByRole('button').allTextContents()).map(text=>text.trim()),
+      ['Özet','Cüzdan','Raporlar','Diğer'],'four fixed controls in the approved order');
+    assert.equal(await more.getAttribute('aria-haspopup'),'dialog');
+    assert.equal(await current.getAttribute('data-page'),'home');
+    assert.equal(await main.getByRole('button',{name:/^Raporlar/}).count(),1);
+    await main.getByRole('button',{name:'İşlem ekle',exact:true}).click();
+    await page.getByRole('dialog',{name:'Hızlı Ekle'}).waitFor();
+    assert.equal(await nativeBack(),true);
+    await main.getByRole('button',{name:'Ekstre yükle',exact:true}).click();
+    assert.equal(await heading.textContent(),'Ekstreler');
+    assert.equal(await nativeBack(),true);
+    await nav.getByRole('button',{name:'Raporlar',exact:true}).click();
+    assert.equal(await current.getAttribute('data-page'),'reports');
+    assert(await focused(heading));
+
+    await selectRoute('İşlemler');
+    assert.equal(await heading.textContent(),'İşlemler');
+    assert(await focused(heading));
+    assert.equal(await current.count(),0);
+    await page.locator('#search').fill('Sentetik uzun');
+    await page.locator('#f-account-filter').selectOption('synthetic-bank');
+    await page.locator('#f-kind-filter').selectOption('expense');
+    await page.evaluate(()=>scrollTo(0,700));
+    const before=await snapshot();
+    assert(before.scroll>0);
+    const checkDismiss=async dismiss=>{
+      await more.focus();
+      await page.keyboard.press('Enter');
+      await menu.waitFor();
+      assert.equal(await current.count(),0);
+      assert(await focused(menu.getByRole('heading',{name:'Diğer'})));
+      assert.equal(await menu.getByRole('button').count(),5);
+      await page.mouse.move(12,24);
+      await page.mouse.wheel(0,300);
+      await settle(page);
+      assert.equal(await page.evaluate(()=>scrollY),before.scroll,'the modal blocks background scroll');
+      const last=menu.getByRole('button',{name:/^Kategoriler/});
+      await page.keyboard.press('Shift+Tab');
+      assert(await focused(last),'reverse tab wraps from the title');
+      await page.keyboard.press('Tab');
+      assert(await focused(menu.getByRole('button',{name:'Kapat'})),'tab stays in the panel');
+      await dismiss();
+      await menu.waitFor({state:'hidden'});
+      assert(await focused(more));
+      assert.deepEqual(await snapshot(),before);
+    };
+    await checkDismiss(()=>menu.getByRole('button',{name:'Kapat'}).dblclick());
+    await checkDismiss(()=>page.keyboard.press('Escape'));
+    await checkDismiss(async()=>assert.equal(await nativeBack(),true));
+    await more.click();
+    await menu.getByRole('button',{name:/^Kategoriler/}).dblclick();
+    assert.equal(await heading.textContent(),'Kategoriler');
+    assert(await focused(heading));
+    assert.equal(await current.count(),0);
+    assert.equal(await nativeBack(),true);
+    assert.equal(await heading.textContent(),'İşlemler','double tap creates one history entry');
+    assert(await focused(more),'Back restores the persistent navigation opener');
+    assert.deepEqual(await snapshot(),before);
+
+    await selectRoute('Kategoriler');
+    const categoryTitles=['Gider kategorileri','Satıcı kategori kuralları','Gelir kategorileri'];
+    for(const name of categoryTitles)assert.equal(await main.getByRole('heading',{name,exact:true}).count(),1);
+    await main.getByRole('button',{name:'+ Gelir kategorisi'}).click();
+    await page.locator('#modal [name=name]').fill('Sentetik ek gelir');
+    await page.locator('#submit').click();
+    await main.getByText(/Sentetik ek gelir/).waitFor();
+    await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
+    await main.getByText(/Sentetik ek gelir/).waitFor();
+
+    await more.focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    assert(await focused(menu.getByRole('button',{name:/^Plan/})));
+    await page.keyboard.press('Enter');
+    assert.equal(await heading.textContent(),'Planlama');
+    assert(await focused(heading));
+    assert.equal(await current.count(),0);
+
+    await selectRoute('Ekstre');
+    assert.equal(await heading.textContent(),'Ekstreler');
+    assert(await focused(heading));
+    assert.equal(await current.count(),0);
+    assert.deepEqual(errors,[]);
+    console.log('Slice 1 fixed navigation, Diğer dismissal and selection, route focus, filters, scroll and shared category settings passed');
+  }finally{
+    await page.close();
+  }
+}
+
+async function checkDashboardLayouts(browser){
+  const fixture=require('./fixtures/android-0.2.0.json');
+  const shots=process.env.EA06_SCREENSHOTS;
+  if(shots)fs.mkdirSync(shots,{recursive:true});
+  const row=(id,account,date,kind,amount,category,desc,extra={})=>
+    ({id,account,date,period:'2026-11',kind,amount,category,desc,...extra});
+  for(const width of [390,320]){
+    const narrow=width===320;
+    const page=await browser.newPage({viewport:{width,height:844},isMobile:true,hasTouch:true,locale:'tr-TR'});
+    try{
+      page.setDefaultTimeout(5000);
+      const errors=[];
+      page.on('pageerror',error=>errors.push(error.message));
+      await serveWallet(page);
+      const wallet={...fixture,
+        accounts:[
+          {id:'synthetic-bank',name:narrow?'Sentetik Uzun Banka Hesabı '.repeat(3).trim():'Sentetik maaş hesabı',type:'bank',opening:narrow?987654321123:3543050},
+          {id:'synthetic-cash',name:'Sentetik nakit',type:'cash',opening:284500},
+          {id:'synthetic-card',name:narrow?'Sentetik Çok Uzun Kredi Kartı '.repeat(2).trim():'Sentetik günlük kart',type:'card',opening:0},
+        ],
+        statements:[{...fixture.statements[0],id:'synthetic-card|2026-11',period:'2026-11',cut:'2026-11-01',due:'2026-11-28',debt:570000}],
+        transactions:[
+          row('payment','synthetic-bank','2026-11-03','payment',246000,'Kart ödemesi','Sentetik kart ödemesi',{target:'synthetic-card'}),
+          row('card-expense','synthetic-card','2026-11-04','expense',318000,'Giyim','Sentetik kart alışverişi'),
+          row('coffee','synthetic-cash','2026-11-25','expense',14500,'Dışarıda yeme','Sentetik kahve'),
+          row('market','synthetic-bank','2026-11-26','expense',82050,'Market / Gıda',
+            narrow?'Sentetik Uzun İşlem Açıklaması '.repeat(4).trim():'Sentetik market alışverişi'),
+        ],
+      };
+      await page.addInitScript(wallet=>localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet)),wallet);
+      await page.goto('https://wallet.test/');
+      const main=page.getByRole('main');
+      const nav=page.getByRole('navigation',{name:'Ana menü'});
+      const more=nav.getByRole('button',{name:'Diğer',exact:true});
+      const screenshot=async name=>{
+        if(shots)await page.screenshot({path:path.join(shots,name+'-'+width+'.png')});
+      };
+      const checkFit=async selector=>{
+        await settle(page);
+        const issues=await page.locator(selector).evaluateAll(elements=>elements.flatMap(el=>{
+          const bounds=el.getBoundingClientRect();
+          const label=el.textContent.trim().slice(0,100);
+          const issues=[];
+          if(bounds.left<0||bounds.right>innerWidth+1||el.scrollWidth>el.clientWidth+1)issues.push(label+' overflows');
+          if(el.matches('button')&&(bounds.width<48||bounds.height<48))issues.push(label+' has a small target');
+          return issues;
+        }));
+        assert.deepEqual(issues,[],width+'px '+selector);
+        assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+      };
+      await main.getByRole('heading',{name:'Özet',exact:true}).waitFor();
+      if(!narrow){
+        assert.match(await main.locator('[data-stat=cash]').textContent(),/34\.850,00/);
+        assert.match(await main.locator('[data-stat=netWorth]').textContent(),/28\.430,00/);
+      }
+      await checkFit('#nav button, main .panel, main .dashboard-actions button');
+      await screenshot('ozet');
+      await nav.getByRole('button',{name:'Cüzdan',exact:true}).click();
+      assert.match(await main.getByRole('button',{name:/Güncel kart borcu tahmini/}).textContent(),/6\.420,00/);
+      assert.match(await main.locator('.dashboard-row',{hasText:'Dönem borcu'}).first().textContent(),/5\.700,00/);
+      assert.match(await main.locator('.dashboard-row',{hasText:'Kalan dönem borcu'}).textContent(),/3\.240,00/);
+      await checkFit('#nav button, main .panel, main .dashboard-actions button, main [data-account-view]');
+      await screenshot('cuzdan');
+      await main.getByRole('button',{name:'Ödeme kaydet',exact:true}).click();
+      const payment=page.getByRole('dialog',{name:'Kart ödemesi kaydet',exact:true});
+      assert.equal(await payment.locator('[name=target]').inputValue(),'synthetic-card');
+      await page.keyboard.press('Escape');
+      await more.click();
+      await page.getByRole('dialog',{name:'Diğer',exact:true}).waitFor();
+      assert.equal(await nav.locator('[aria-current=page]').getAttribute('data-page'),'wallet');
+      await checkFit('#modal[open] button:not([hidden])');
+      await screenshot('diger');
+      await page.keyboard.press('Escape');
+      if(narrow){
+        await page.evaluate(()=>{document.documentElement.style.fontSize='200%';});
+        await checkFit('#nav button, main .panel, main .dashboard-actions button, main [data-account-view]');
+        await more.click();
+        await checkFit('#modal[open] button:not([hidden])');
+        await page.keyboard.press('Escape');
+      }
+      assert.deepEqual(errors,[]);
+      console.log(width+'px synthetic Özet, Cüzdan and Diğer fit with accessible targets');
+    }finally{
+      await page.close();
+    }
+  }
+}
+
+
 async function checkTransactionEmptyStates(browser){
   const fixture=require('./fixtures/android-0.2.0.json');
   const row={id:'u06-bank-expense',account:'synthetic-bank',date:'2026-11-02',
@@ -34,7 +247,7 @@ async function checkTransactionEmptyStates(browser){
     await serveWallet(page);
     const goToTransactions=async()=>{
       await page.goto('https://wallet.test/');
-      await page.locator('nav [data-page=transactions]').click();
+      await openRoute(page,'transactions');
     };
     const list=page.locator('#transactions-list');
     const search=page.getByRole('searchbox');
@@ -147,7 +360,7 @@ async function checkShowMore(browser){
 
     await goHome();
     const original=await stored();
-    await page.locator('nav [data-page=transactions]').click();
+    await openRoute(page,'transactions');
     await page.locator('#search').fill('Sentetik U05');
     await expand('transactions with search',transactionView,'Enter',rowIds,150,suggestionTab);
     await expand('transactions final page',transactionView,'Space',rowIds,300);
@@ -161,14 +374,14 @@ async function checkShowMore(browser){
       ['report movements','#report-movements',[other.id,...rowIds],'Space'],
     ]){
       await goHome();
-      await page.locator('[data-page=reports]').click();
+      await page.locator('main [data-page=reports]').click();
       await page.locator('#f-report-category').selectOption('category:'+category);
       await page.locator('#report-movements-toggle').click();
       await expand(name,page.locator(scope),key,ids,150);
     }
 
     await goHome();
-    await page.locator('nav [data-page=import]').click();
+    await openRoute(page,'import');
     await page.locator('[data-statement-view]').click();
     await expand('statement detail',transactionView,'Enter',rowIds,150);
     assert.deepEqual(errors,[]);
@@ -199,7 +412,7 @@ async function checkBackNavigation(browser){
     await serveWallet(page,'\nwindow.clearBackHistoryForTest=()=>{history.length=0;render();};\n');
     await page.addInitScript(wallet=>localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet)),wallet);
     const home=()=>page.goto('https://wallet.test/');
-    const tab=route=>page.locator('nav [data-page="'+route+'"]').click();
+    const tab=route=>openRoute(page,route);
     const button=selector=>page.locator('main button'+selector);
     const heading=()=>page.locator('main h1').innerText();
     const nativeBack=()=>page.evaluate(()=>window.handleBack());
@@ -278,10 +491,10 @@ async function checkBackNavigation(browser){
     await checkBack(back,renamedCard);
     check('card history opener restored',await focused(historyStatement),true);
     check('card history scroll restored',await scroll(),historyScroll);
-    await checkBack(back,'Cüzdanım');
+    await checkBack(back,'Cüzdan');
     check('wallet card opener restored',await focused(walletCard),true);
     check('native Back unwinds normal history',await nativeBack(),true);
-    check('normal history returns to home',await heading(),'Parana genel bakış');
+    check('normal history returns to home',await heading(),'Özet');
     check('native Back yields at the root',await nativeBack(),false);
 
     await home();
@@ -313,7 +526,7 @@ async function checkBackNavigation(browser){
       await checkBack(balanceBack,bank);
       check(route+' opener restored',await focused(opener),true);
       await opener.click();
-      await checkFallback(balanceBack,'Cüzdanım');
+      await checkFallback(balanceBack,'Cüzdan');
     }
 
     assert.deepEqual(errors,[]);
@@ -347,7 +560,7 @@ async function checkIncomePlansHeading(browser){
       'standalone income plans must have one focusable and focused h1');
     assert.deepEqual(await plans.getByRole('heading',{level:2}).allTextContents(),panels);
 
-    await page.locator('nav [data-page=plan]').click();
+    await openRoute(page,'plan');
     assert.deepEqual(await routeHeading(),{titles:['Planlama'],tabIndex:'-1',focused:true},
       'Planlama must keep its sole h1 and receive route focus');
     assert.deepEqual(await plans.getByRole('heading',{level:2}).allTextContents(),['Gelir planları']);
@@ -413,7 +626,7 @@ async function checkReviewCheckbox(browser){
     await serveWallet(page);
     await page.addInitScript(wallet=>localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet)),wallet);
     await page.goto('https://wallet.test/');
-    await page.locator('nav [data-page=transactions]').click();
+    await openRoute(page,'transactions');
 
     const transaction=page.getByRole('button',{name:/Sentetik inceleme/});
     const dialog=page.getByRole('dialog',{name:'İşlem ayrıntısı'});
@@ -513,6 +726,14 @@ async function checkDialog(page,opener,expectedTitle){
 (async()=>{
   const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||undefined});
   try{
+    async function checkSlice1(){
+      await checkMoreNavigation(browser);
+      await checkDashboardLayouts(browser);
+    }
+    if(process.argv.includes('--slice1')){
+      await checkSlice1();
+      return;
+    }
     if(process.argv.includes('--u10')){
       await checkReviewCheckbox(browser);
       return;
@@ -524,6 +745,7 @@ async function checkDialog(page,opener,expectedTitle){
     }
     await checkIncomePlansHeading(browser);
     if(onlyIncomePlans)return;
+    await checkSlice1();
     await checkTransactionEmptyStates(browser);
     await checkShowMore(browser);
     await checkReviewCheckbox(browser);
@@ -538,7 +760,7 @@ async function checkDialog(page,opener,expectedTitle){
       await page.locator('[data-action=demo]').click();
       failures.push(...(await checkWalletFocus(page,scale)).map(failure=>({scale,...failure})));
       await checkDialog(page,page.locator('#quick-add'),'Hızlı Ekle');
-      await page.locator('nav [data-page=transactions]').click();
+      await openRoute(page,'transactions');
       await checkDialog(page,page.locator('[data-edit]').first(),'İşlem ayrıntısı');
       assert.deepEqual(errors,[]);
       await page.close();
