@@ -48,7 +48,9 @@ function expenseBreakdown(ctx,rows) {
   let total=0;
   for (const row of rows) {
     if (row.kind !== 'expense' || row.amount <= 0) continue;
-    totals.set(row.category,C.addCents(totals.get(row.category) || 0,row.amount));
+    for(const {category,amount} of C.expenseCategoryAmounts(ctx.state,row)){
+      totals.set(category,C.addCents(totals.get(category) || 0,amount));
+    }
     total=C.addCents(total,row.amount);
   }
   const categories=[...totals].sort((a,b)=>C.compareCents(b[1],a[1])||a[0].localeCompare(b[0],'tr'));

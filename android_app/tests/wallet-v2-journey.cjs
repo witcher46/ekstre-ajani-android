@@ -15,6 +15,95 @@ function serveAssets(page){
 }
 
 
+async function expenseAllocationAvailabilityJourney(browser){
+  const page=await browser.newPage();
+  page.setDefaultTimeout(3500);
+  try{
+    await serveAssets(page);
+    await page.addInitScript(()=>{
+      const accounts=[
+        {id:'card',name:'Synthetic card',type:'card',opening:0},
+        {id:'bank',name:'Synthetic bank',type:'bank',opening:0},
+        {id:'cash',name:'Synthetic cash',type:'cash',opening:0},
+      ];
+      localStorage.setItem('ekstre-android-v1',JSON.stringify({format:'ekstre-android',version:1,
+        accounts,transactions:[],statements:[],subscriptions:[],budgets:{},categories:['Food','Travel']}));
+    });
+    await page.goto('https://wallet.test/');
+    const field=id=>page.locator('#f-'+id);
+    const read=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')));
+    const dialog=page.locator('dialog[open]');
+    const start=async desc=>{
+      await page.locator('[data-action=addTransaction]').click();
+      await field('account').selectOption('card');
+      await field('desc').fill(desc);
+      await field('amount').fill('1000');
+      await page.locator('#start-expense-allocation').click();
+      await field('allocation-category-1').selectOption('Food');
+      await field('allocation-amount-1').fill('600');
+    };
+    const status=()=>page.evaluate(()=>{
+      const group=document.querySelector('#expense-allocation-parts');
+      const form=document.querySelector('#form');
+      return {hidden:group.hidden,disabled:group.disabled,hasAllocation:new FormData(form).has('allocation-category-1'),valid:form.checkValidity()};
+    });
+    const suspended={hidden:true,disabled:true,hasAllocation:false,valid:true};
+    const restored=async()=>{
+      assert.deepEqual(await status(),{hidden:false,disabled:false,hasAllocation:true,valid:false});
+      assert.equal(await field('allocation-category-1').inputValue(),'Food');
+      assert.equal(await field('allocation-amount-1').inputValue(),'600');
+    };
+    const saveWithoutSplit=async(kind,expected={})=>{
+      await page.locator('#submit').click();
+      await dialog.waitFor({state:'hidden'});
+      const wallet=await read();
+      assert.equal(wallet.version,1);
+      assert.equal(Object.hasOwn(wallet,'expenseAllocations'),false);
+      const row=wallet.transactions.at(-1);
+      assert.equal(row.kind,kind);
+      for(const [key,value] of Object.entries(expected))assert.equal(row[key],value);
+    };
+
+    await start('Synthetic income');
+    await field('kind').selectOption('income');
+    assert.deepEqual(await status(),suspended);
+    await saveWithoutSplit('income');
+
+    await start('Synthetic transfer');
+    await field('kind').selectOption('income');
+    assert.deepEqual(await status(),suspended);
+    assert.equal(await page.locator('label[for=f-category]').textContent(),'Kategori');
+    await field('kind').selectOption('expense');
+    await restored();
+    await field('kind').selectOption('transfer');
+    await field('account').selectOption('bank');
+    await field('target').selectOption('cash');
+    assert.deepEqual(await status(),suspended);
+    await saveWithoutSplit('transfer',{account:'bank',target:'cash'});
+
+    await start('Synthetic installment');
+    await field('installment').fill('1/2');
+    assert.deepEqual(await status(),suspended);
+    await field('installment').clear();
+    await restored();
+    await field('installmentCount').fill('2');
+    assert.deepEqual(await status(),suspended);
+    await field('installmentCount').clear();
+    await restored();
+    await field('installment').fill('1/2');
+    await saveWithoutSplit('expense',{installment:'1/2'});
+
+    await start('Synthetic installment plan');
+    await field('installmentCount').fill('2');
+    assert.deepEqual(await status(),suspended);
+    await saveWithoutSplit('expense',{installment:'2/2'});
+    assert.deepEqual((await read()).transactions.slice(-2).map(row=>row.installment),['1/2','2/2']);
+    console.log('Expense split availability, draft restoration and nonsplit v1 saves passed');
+  }finally{
+    await page.close();
+  }
+}
+
 async function futureManualPaymentJourney(browser){
   const page=await browser.newPage({timezoneId:'UTC'});
   page.setDefaultTimeout(3500);
@@ -716,6 +805,7 @@ async function reconciliationJourney(browser){
  await ambiguousStatementPaymentJourney(browser);
  await ambiguousStatementPaymentJourney(browser,{bankFirst:true});
  await futureManualPaymentJourney(browser);
+ await expenseAllocationAvailabilityJourney(browser);
  const page=await browser.newPage({viewport:{width:360,height:840}}),errors=[];page.setDefaultTimeout(3500);page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
  await serveAssets(page);
  await page.goto('https://wallet.test/');const read=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')));

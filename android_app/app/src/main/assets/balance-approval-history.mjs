@@ -75,7 +75,7 @@ export function evaluateStoredBalanceApproval(state,approval){
 }
 
 export function balanceApprovalHistory(state,accountId,currentState=state,{offset=0,limit=Infinity,approvalId}={}){
-  if(state.version!==3)return [];
+  if(state.version<3)return [];
   const rows = state.balanceReconciliation.approvals.map((approval,index)=>({
     approval,index,evidence:readBalanceApprovalEvidence(approval),
   })).filter(row=>row.evidence?.accountId===accountId&&(approvalId===undefined||row.approval.id===approvalId));

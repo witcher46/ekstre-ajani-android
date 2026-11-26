@@ -64,8 +64,8 @@ export function reportRows(state, periods, {accountId = '', category} = {}) {
   const months = new Set(periods);
   const calendarRows = [...months].flatMap(period => C.rowsForPeriod(state, period));
   if (category !== undefined) {
-    return calendarRows.filter(row => (!accountId || row.account === accountId) &&
-      row.category === category && (row.kind === 'expense' || row.kind === 'refund'));
+    return calendarRows.filter(row => !accountId || row.account === accountId)
+      .map(row => C.expenseCategoryRow(state,row,category)).filter(Boolean);
   }
   const account=state.accounts.find(account=>account.id===accountId);
   const bankAccount=account?.type==='card'?undefined:account?.id;

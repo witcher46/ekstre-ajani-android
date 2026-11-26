@@ -682,6 +682,88 @@ public class WalletJourneyTest {
   }
  }
 
+
+ @Test public void splitExpenseFormSavesOneParentAndKeepsFocusAndLargeTextUsable() throws Exception {
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=addAccount]')");
+   account(a,"Sentetik kart","card","0");
+   transaction(a,"expense",0,-1,"1000","Sentetik bölünebilir gider");
+   click(a,"nav [data-page=transactions]");
+   js(a,"(()=>{const p=document.querySelector('#period');p.value='2026-10';p.dispatchEvent(new Event('change',{bubbles:true}));})()");
+   waitJs(a,"!!document.querySelector('#transactions-list [data-edit]')");
+   click(a,"#transactions-list [data-edit]");
+   a.onActivity(activity->web(activity).getSettings().setTextZoom(200));
+   click(a,"#start-expense-allocation");
+   waitJs(a,"document.activeElement.id==='f-allocation-category-1'");
+   waitJs(a,"document.querySelector('#modal').scrollWidth===document.querySelector('#modal').clientWidth");
+   value(a,"allocation-category-1","Market / Gıda");value(a,"allocation-amount-1","600");
+   value(a,"allocation-category-2","Dışarıda yeme");value(a,"allocation-amount-2","399,99");
+   click(a,"#submit");
+   waitJs(a,"document.activeElement.id==='form-error' && JSON.parse(Android.load()).version===1");
+   value(a,"allocation-amount-2","400");
+   click(a,"#add-expense-allocation");
+   waitJs(a,"document.activeElement.id==='f-allocation-category-3'");
+   click(a,"[data-remove-allocation='3']");
+   waitJs(a,"document.activeElement.id==='f-allocation-category-2'");
+   submit(a);
+   waitJs(a,"document.activeElement.matches('#transactions-list [data-edit]')");
+   waitJs(a,"(()=>{const w=JSON.parse(Android.load());const t=w.transactions[0];return w.version===4&&w.transactions.length===1&&t.amount===100000&&w.expenseAllocations[t.id].map(p=>p.amount).join()==='60000,40000';})()");
+   click(a,"#transactions-list [data-edit]");
+   click(a,"#clear-expense-allocation");
+   device.pressBack();
+   waitJs(a,"!document.querySelector('dialog[open]') && document.activeElement.matches('#transactions-list [data-edit]')");
+   waitJs(a,"Object.keys(JSON.parse(Android.load()).expenseAllocations).length===1");
+  }
+ }
+
+ @Test public void splitBridgeRejectsInvalidReplayAndStaleWritesAtomically() throws Exception {
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('[data-action=addAccount]')");
+   account(a,"Sentetik kurtarma","cash","0");
+   JSONObject v3=syntheticApprovalHistory();
+   assertEquals("true",js(a,"Android.restoreChecked(Android.loadForCompare().slice(0,64),1,Android.loadForCompare().slice(0,64),"+JSONObject.quote(v3.toString())+")"));
+   Map<Integer,String> original=nativeSnapshots(context);
+   String token=BalanceApprovalStorage.sha256(original.get(1));
+   JSONObject v4=new JSONObject(original.get(1)).put("version",4).put("expenseAllocations",
+    new JSONObject().put("card-expense",new JSONArray("[{\"category\":\"Market / Gıda\",\"amount\":600},{\"category\":\"Diğer\",\"amount\":200}]")));
+   JSONObject invalid=new JSONObject(v4.toString());
+   invalid.getJSONObject("expenseAllocations").getJSONArray("card-expense").getJSONObject(1).put("amount",199);
+   assertEquals("false",js(a,"Android.save("+JSONObject.quote(invalid.toString())+","+JSONObject.quote(token)+")"));
+   assertEquals("false",js(a,"Android.restoreChecked("+JSONObject.quote(token)+",1,"+JSONObject.quote(token)+","+JSONObject.quote(invalid.toString())+")"));
+   assertEquals(original,nativeSnapshots(context));
+   JSONObject erasedHistory=new JSONObject(v4.toString());
+   erasedHistory.getJSONObject("balanceReconciliation").put("approvals",new JSONArray());
+   assertEquals("false",js(a,"Android.save("+JSONObject.quote(erasedHistory.toString())+","+JSONObject.quote(token)+")"));
+   assertEquals(original,nativeSnapshots(context));
+   assertEquals("true",js(a,"Android.save("+JSONObject.quote(v4.toString())+","+JSONObject.quote(token)+")"));
+   Map<Integer,String> saved=nativeSnapshots(context);
+   assertEquals(original.get(1),saved.get(2));
+   assertEquals(original.get(3),saved.get(3));
+   assertEquals(v4.toString(),saved.get(1));
+   String current=BalanceApprovalStorage.sha256(saved.get(1));
+   JSONObject stale=new JSONObject(v4.toString());
+   stale.getJSONObject("expenseAllocations").remove("card-expense");
+   assertEquals("false",js(a,"Android.save("+JSONObject.quote(v4.toString())+","+JSONObject.quote(token)+")"));
+   assertEquals("false",js(a,"Android.save("+JSONObject.quote(stale.toString())+","+JSONObject.quote(token)+")"));
+   assertEquals("false",js(a,"Android.save("+JSONObject.quote(v3.toString())+","+JSONObject.quote(current)+")"));
+   JSONObject financialChange=new JSONObject(v4.toString());
+   JSONArray postedRows=financialChange.getJSONArray("transactions");
+   for(int i=0;i<postedRows.length();i++){
+    JSONObject row=postedRows.getJSONObject(i);
+    if("card-expense".equals(row.getString("id")))row.put("amount",801);
+   }
+   financialChange.getJSONObject("expenseAllocations").getJSONArray("card-expense").getJSONObject(0).put("amount",601);
+   assertEquals("false",js(a,"Android.save("+JSONObject.quote(financialChange.toString())+","+JSONObject.quote(current)+")"));
+   assertEquals(saved,nativeSnapshots(context));
+   a.recreate();
+   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]') && JSON.parse(Android.load()).version===4");
+   openNativeApprovalHistory(a,"bank");
+   assertEquals("2",js(a,"document.querySelectorAll('[data-balance-approval-entry]').length"));
+   assertEquals(saved,nativeSnapshots(context));
+  }
+ }
+
  private Map<Integer,String> nativeSnapshots(Context context) {
   Map<Integer,String> snapshots=new LinkedHashMap<>();
   try(SQLiteDatabase database=context.openOrCreateDatabase("wallet.db",Context.MODE_PRIVATE,null);

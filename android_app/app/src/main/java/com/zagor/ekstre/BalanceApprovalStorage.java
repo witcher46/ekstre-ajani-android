@@ -42,13 +42,15 @@ final class BalanceApprovalStorage {
  }
 
  static boolean preservesHistory(JSONObject current, JSONObject next, boolean mayAppend) throws JSONException {
-  boolean nextIsV3 = next.getDouble("version") == 3;
-  if (current == null || current.getDouble("version") != 3) {
-   if (!nextIsV3) return true;
+  double nextVersion = next.getDouble("version");
+  if (current == null || current.getDouble("version") < 3) {
+   if (nextVersion < 3) return true;
    JSONObject oldSection = current == null ? null : current.optJSONObject("balanceReconciliation");
-   return mayAppend && (oldSection == null || !oldSection.has("approvals"));
+   if (oldSection != null && oldSection.has("approvals")) return false;
+   if (nextVersion == 4) return !mayAppend && next.getJSONObject("balanceReconciliation").getJSONArray("approvals").length() == 0;
+   return mayAppend;
   }
-  if (!nextIsV3) return false;
+  if (nextVersion < 3) return false;
   JSONArray before = current.getJSONObject("balanceReconciliation").getJSONArray("approvals");
   JSONArray after = next.getJSONObject("balanceReconciliation").getJSONArray("approvals");
   if (after.length() < before.length() || (!mayAppend && after.length() != before.length())) return false;

@@ -5,7 +5,7 @@ Her uygulama kendi yerel deposuna sahiptir. Bunlar otomatik eşitlenmez; taşım
 | Platform | Yerel şema/depo | Yedek biçimi | Mevcut taşıma sınırı |
 |---|---|---|---|
 | Windows masaüstü | SQLite `PRAGMA user_version=4`; dosya kullanıcı profilinin yerel uygulama veri klasöründedir | SQLite veritabanı ve yerel kurtarma kopyaları | Bu depodaki masaüstü şeması `db.py` içinde sürümlenir. Web aktarımı yalnızca doğrulanmış SQLite v4 dosyasını salt okunur işler; parola/kimlik bilgileri aktarılmaz. |
-| Android | Uygulamaya özel yerel SQLite | JSON `format="ekstre-android"`, `version` değeri `1`, `2` veya `3` | v1, v2 ve v3 geri yüklenebilir. Dışa aktarma, kaydedilmiş cüzdanın JSON sürümünü korur. |
+| Android | Uygulamaya özel yerel SQLite | JSON `format="ekstre-android"`, `version` değeri `1`, `2`, `3` veya `4` | v1, v2, v3 ve v4 geri yüklenebilir. Dışa aktarma, kaydedilmiş cüzdanın JSON sürümünü korur. |
 | Web | Tarayıcı IndexedDB veritabanı sürüm 2 | Web JSON yedeği `version=2` | IndexedDB v1→v2 göçü ve eski web JSON v1 geri yüklemesi desteklenir. Android JSON v1 ve masaüstü SQLite v4 aktarımı önizleme ile yapılır. |
 
 ## Android JSON sürümleri
@@ -14,7 +14,11 @@ Her uygulama kendi yerel deposuna sahiptir. Bunlar otomatik eşitlenmez; taşım
 - **v2**, v1 cüzdana ilk bakiye gözlemi kaydedildiğinde oluşur ve `balanceReconciliation.observations` dizisini taşır. Son gözlem silinse de cüzdan v2 olarak kalır. [Gözlem saklama sözleşmesi](ANDROID_ACCOUNT_BALANCE_RECONCILIATION_PHASE_2_STORAGE.md)
 - **v3**, v2 cüzdanda ilk mutabakat onayı kalıcı olarak kaydedildiğinde oluşur. Sürüm geçişi ve onay aynı atomik yazmada kaydedilir. v3 yedeği gözlemlerin yanında `balanceReconciliation.approvals` dizisini taşır. Gözlem düzenleme veya silme v3’ü ve onay geçmişini korur. [Onay saklama sözleşmesi](ANDROID_ACCOUNT_BALANCE_RECONCILIATION_PHASE_2_APPROVAL_STORAGE.md)
 
-**Ayarlar → Yedek dışa aktar**, kaydedilmiş cüzdanın JSON sürümünü dosyaya yazar. **Ayarlar → Yedek yükle**, sürümü yazmadan önce doğrular. Yalnız v1 destekleyen Android okuyucuları v2 ve v3 dosyalarını, en çok v2 destekleyenler ise v3 dosyalarını mevcut cüzdanı değiştirmeden reddeder. v2 veya v3 dosyasını geri yüklemek için o JSON sürümünü destekleyen bir Android APK’sı gerekir. Android v1 ile sınırlı web aktarımı v2 ve v3 dosyalarını açamaz.
+- **v4**, ilk manuel gider bölümleri kaydedildiğinde oluşur. `expenseAllocations` nesnesi, ana işlem kimliğini `{category, amount}` dizisine eşler. Her dizide en az iki satır bulunur. Tutarlar pozitif tamsayı kuruştur ve toplamları ana işlemle aynıdır. v4, `balanceReconciliation.observations` ve `balanceReconciliation.approvals` dizilerini taşır. Geçiş, önceki anlık görüntüyü koruyan aynı SQLite CAS yazmasında kaydedilir. Cüzdanı açmak veya son bölümleri kaldırmak sürümü değiştirmez. v1/v2/v3 yedekleri özgün sürümlerinde açılır. Bilinmeyen eski veri ayrılmış bir alanla çakışıyorsa ilk bölüm yazımı reddedilir ve veri korunur.
+
+**Ayarlar → Yedek dışa aktar**, kaydedilmiş cüzdanın JSON sürümünü dosyaya yazar. **Ayarlar → Yedek yükle**, sürümü yazmadan önce doğrular. Yalnız v1 destekleyen Android okuyucuları v2 ve v3 dosyalarını, en çok v2 destekleyenler ise v3 dosyalarını mevcut cüzdanı değiştirmeden reddeder. v2 veya v3 dosyasını geri yüklemek için o JSON sürümünü destekleyen bir Android APK’sı gerekir. v3 ile sınırlı Android uygulamaları v4 yedeğini SQLite yazımı başlamadan reddeder. v4 cüzdanı kullanmak için v4 okuyucusu gerekir. Eski uygulamaya dönülecekse yalnızca önceden alınmış v1–v3 yedeği o sürüme geri yüklenebilir. Android v1 ile sınırlı web aktarımı v2–v4 dosyalarını açamaz.
+
+İşlem bölümleri yalnızca bağlantısız, taksitsiz manuel TL giderlerinde kullanılabilir. Bakiye, borç ve net gider ana işlemi bir kez işler. Kategori özeti, bütçe ve raporlar bölüm tutarlarını kullanır. Bir bölümün kategorisi yeniden adlandırıldığında etiketi güncellenir. Bölümde kullanılan kategoriyi silmeden veya bölünmüş gideri bir belgeye bağlamadan önce ilgili bölümleri düzenlemek ya da kaldırmak gerekir.
 
 ## Güvenli taşıma ilkeleri
 
