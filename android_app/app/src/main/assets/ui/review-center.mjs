@@ -2,6 +2,7 @@
 // Financial effects remain exclusively in core.resolveCandidate().
 import * as C from '../core.mjs';
 import {escapeHtml as esc} from './form-controls.mjs';
+import {renderBackLink} from './navigation.mjs';
 
 const reasons=Object.freeze({
   csvRepeatedRow:'Tekrar eden CSV satırı',
@@ -30,7 +31,12 @@ function rowSummary(state,row) {
   return '<span class="review-record-description">'+esc(row.desc)+'</span>'+
     '<small>'+esc(row.date)+' · '+esc(accountName(state,row.account))+
     ' · '+esc(sourceLabel(row))+'</small>'+
-    '<strong class="review-record-amount">'+money(row.amount)+'</strong>';
+    '<strong class="review-record-amount"><span class="money">'+money(row.amount)+'</span></strong>';
+}
+
+export function reviewDecisionRecords(state,row,candidate) {
+  const record=(label,item)=>'<section class="review-decision-record"><h3>'+label+'</h3>'+rowSummary(state,item)+'</section>';
+  return record('İncelenen kayıt',row)+(candidate?record('Seçilen kaynak',candidate):'');
 }
 
 function candidatesFor(state,row,byId) {
@@ -74,8 +80,8 @@ function renderPending(state,row,index,byId,backTitle) {
   }
 
   html+='<div class="review-decisions" role="group" aria-label="'+esc('İnceleme kararı · '+row.desc)+'">';
-  if(candidates.length)html+='<button type="button" class="primary" data-link="'+esc(row.id)+'">Aynı işlem</button>';
-  html+='<button type="button" data-distinct="'+esc(row.id)+'">Ayrı gerçek işlem</button>';
+  if(candidates.length)html+='<button type="button" class="primary" data-link="'+esc(row.id)+'" aria-haspopup="dialog" aria-controls="modal">Aynı işlem</button>';
+  html+='<button type="button" data-distinct="'+esc(row.id)+'" aria-haspopup="dialog" aria-controls="modal">Ayrı gerçek işlem</button>';
   html+='<button type="button" data-action="back">Sonra incele · '+esc(backTitle)+'</button>';
   html+='</div>';
   html+='<details class="review-destructive"><summary>Diğer seçenekler</summary>';
@@ -99,6 +105,7 @@ export function renderReviewCenter(state,backTitle='Ekstreler') {
   const linked=transactions.filter(t=>Boolean(t.linkedTo));
   const byId=new Map(transactions.map(t=>[t.id,t]));
   let html='<section class="review-center" aria-labelledby="review-title">';
+  html+=renderBackLink(backTitle);
   html+='<h1 id="review-title">İnceleme Merkezi</h1>';
   html+='<p class="lead">Şüpheli kayıtları karşılaştır, aynı işlemi birleştir veya bağımsız hareket olarak onayla.</p>';
   html+='<div class="review-counts"><div><strong>'+pending.length+'</strong><span>Bekleyen karar</span></div>'+

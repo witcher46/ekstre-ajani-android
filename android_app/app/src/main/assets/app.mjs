@@ -9,7 +9,7 @@ import {createDialog} from './ui/dialog.mjs';
 import {escapeHtml as esc,options,field,select} from './ui/form-controls.mjs';
 import {expenseAllocationFields,attachExpenseAllocationFields} from './ui/expense-allocations.mjs';
 import {activeBottomPage,renderBottomNavigation,renderMoreNavigation,uiIcon} from './ui/navigation.mjs';
-import {renderReviewCenter} from './ui/review-center.mjs';
+import {renderReviewCenter,reviewDecisionRecords} from './ui/review-center.mjs';
 import {compareBalanceObservation} from './balance-reconciliation.mjs';
 import {prepareBalanceApproval,readBalanceApprovalSnapshot,saveBalanceApproval} from './balance-approval-flow.mjs';
 import {addReviewedBalanceRecord,balanceObservationFields,readBalanceAnchor,readBalanceCoverage,renderBalanceReview} from './ui/balance-review.mjs';
@@ -583,6 +583,20 @@ function confirmTransactionRemoval(id){
   commit(C.removeTransaction(state,id));
   closeModal();
  }catch(error){showDialogError(error.message);}
+}
+function confirmReviewDecision(id,decision){
+ const row=state.transactions.find(item=>item.id===id);
+ if(!row)return;
+ const linking=decision==='link';
+ const candidateId=linking?$('match-'+id).value:undefined;
+ const candidate=state.transactions.find(item=>item.id===candidateId);
+ const consequence=linking
+  ?'İki kaynak aynı işleme bağlanır. Tutar ikinci kez sayılmaz.'
+  :'Bu hareket kendi türüne göre finansal toplamlara dahil edilir.';
+ modal(linking?'Kaynakları aynı işleme bağla':'Ayrı işlem olarak say',
+  `<p class="review-decision-note">${consequence}</p>`+reviewDecisionRecords(state,row,candidate),
+  ()=>commit(C.resolveCandidate(state,id,decision,candidateId)),
+  linking?'Kaynakları bağla':'Ayrı olarak say',undefined,{variant:'review-decision',dismissLabel:'Vazgeç'});
 }
 function merchantRuleForm(rule){
  settingsDialog(rule?'Satıcı kuralını düzenle':'Satıcı kuralı ekle',
@@ -1201,7 +1215,7 @@ const actions={
  },
  cancelImport:()=>{invalidatePdfPreview();document.querySelector('[data-action="pdf"]')?.focus();}
 };
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if('balanceHistory' in b.dataset){go('balanceApprovalHistory',b.dataset.balanceHistory);}else if(b.dataset.balanceApproval){go('balanceApprovalDetail',b.dataset.balanceApproval);}else if(b.dataset.balanceReapprove){reexamineBalanceApproval(b.dataset.balanceReapprove);}else if(b.dataset.balanceReview){go('balanceReview',b.dataset.balanceReview);}else if('reportCategory' in b.dataset){go('reportCategory',b.dataset.reportCategory);}else if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete)confirmIncomePlanRemoval(b.dataset.incomeDelete);else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action](e);else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule)confirmMerchantRuleRemoval(b.dataset.removeRule);else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link){if(confirm('Bu iki kaynak aynı işlemi mi gösteriyor? İkinci kez sayılmayacak.'))commit(C.resolveCandidate(state,b.dataset.link,'link',$('match-'+b.dataset.link).value));}else if(b.dataset.distinct){if(confirm('Bu ayrı bir gerçek işlem mi? Toplama ayrıca eklenecek.'))commit(C.resolveCandidate(state,b.dataset.distinct,'distinct'));}else if(b.dataset.subdelete)confirmSubscriptionRemoval(b.dataset.subdelete);else if(b.dataset.budget)confirmBudgetRemoval(b.dataset.budget);}catch(error){if(b.closest('#quick-add-options'))showDialogError(error.message);else if(b.dataset.action==='backup'||b.dataset.action==='recover')showBackupFailure(error.message,focusTarget(b));else errorNotice(error.message);}finally{actionTrigger=null;}});
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if('balanceHistory' in b.dataset){go('balanceApprovalHistory',b.dataset.balanceHistory);}else if(b.dataset.balanceApproval){go('balanceApprovalDetail',b.dataset.balanceApproval);}else if(b.dataset.balanceReapprove){reexamineBalanceApproval(b.dataset.balanceReapprove);}else if(b.dataset.balanceReview){go('balanceReview',b.dataset.balanceReview);}else if('reportCategory' in b.dataset){go('reportCategory',b.dataset.reportCategory);}else if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete)confirmIncomePlanRemoval(b.dataset.incomeDelete);else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action](e);else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule)confirmMerchantRuleRemoval(b.dataset.removeRule);else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link)confirmReviewDecision(b.dataset.link,'link');else if(b.dataset.distinct)confirmReviewDecision(b.dataset.distinct,'distinct');else if(b.dataset.subdelete)confirmSubscriptionRemoval(b.dataset.subdelete);else if(b.dataset.budget)confirmBudgetRemoval(b.dataset.budget);}catch(error){if(b.closest('#quick-add-options'))showDialogError(error.message);else if(b.dataset.action==='backup'||b.dataset.action==='recover')showBackupFailure(error.message,focusTarget(b));else errorNotice(error.message);}finally{actionTrigger=null;}});
 function updateImportTarget(field){
  field.nextElementSibling.firstElementChild.textContent=field.selectedOptions[0]?.textContent??'';
 }

@@ -347,11 +347,15 @@ module.exports=async function recoveryJourney(browser,url){
   });
   await page.locator('#form').evaluate(form=>form.requestSubmit());
   assert.equal((await details()).slots[1],newer,'A normal save must preserve the newer budget and reject the stale edit');
+  assert.equal((await details()).saves,0);
+  assert.equal(await page.locator('#fields [name=name]').inputValue(),'Sentetik eski düzenleme');
+  assert.equal(await page.locator('#form-error').evaluate(node=>node===document.activeElement),true);
   assert.match(await page.locator('#form-error').innerText(),/cüzdan .*değişti/i);
   assert.match((await details()).confirmations.at(-1),/güncel cüzdanı aç/i);
   await page.evaluate(()=>{window.io.accept=true;});
   await Promise.all([page.waitForEvent('framenavigated'),page.locator('#submit').click()]);
   assert.equal((await details()).slots[1],newer);
+  assert.equal((await details()).saves,0);
   assert.equal(await page.locator('dialog[open]').count(),0);
 
   const settingsOnly=JSON.stringify({...wallet,accounts:[],categories:['Sentetik özel kategori'],
