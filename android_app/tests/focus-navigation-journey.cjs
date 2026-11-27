@@ -598,6 +598,14 @@ async function checkDashboardLayouts(browser){
         assert.deepEqual(issues,[],width+'px '+selector);
         assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
       };
+      const moreSheet=page.getByRole('dialog',{name:'Diğer',exact:true});
+      const checkMoreFit=async()=>{
+        // Measure stable bounds after the entrance transform.
+        await moreSheet.evaluate(async sheet=>{
+          await sheet.getAnimations().find(animation=>animation.animationName==='menu-sheet-in')?.finished;
+        });
+        await checkFit('#modal[open] button:not([hidden])');
+      };
       await main.getByRole('heading',{name:'Özet',exact:true}).waitFor();
       if(!narrow){
         assert.match(await main.locator('[data-stat=cash]').textContent(),/34\.850,00/);
@@ -698,16 +706,16 @@ async function checkDashboardLayouts(browser){
       assert.equal(await payment.locator('[name=target]').inputValue(),'synthetic-card');
       await page.keyboard.press('Escape');
       await more.click();
-      await page.getByRole('dialog',{name:'Diğer',exact:true}).waitFor();
+      await moreSheet.waitFor();
       assert.equal(await nav.locator('[aria-current=page]').getAttribute('data-page'),'wallet');
-      await checkFit('#modal[open] button:not([hidden])');
+      await checkMoreFit();
       await screenshot('diger');
       await page.keyboard.press('Escape');
       if(narrow){
         await page.evaluate(()=>{document.documentElement.style.fontSize='200%';});
         await checkFit('#nav button, main .panel, main .dashboard-actions button, main [data-account-view]');
         await more.click();
-        await checkFit('#modal[open] button:not([hidden])');
+        await checkMoreFit();
         await page.keyboard.press('Escape');
       }
       assert.deepEqual(errors,[]);
