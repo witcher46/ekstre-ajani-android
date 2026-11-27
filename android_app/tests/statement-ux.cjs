@@ -248,6 +248,7 @@ async function run() {
     assert.equal(await acknowledgement.isChecked(),true);
     assert.equal(await suggestion.isChecked(),true);
     await page.locator('#settings').click();
+    await page.locator('summary').and(page.getByText('Gider kategorileri',{exact:true})).click();
     await page.getByRole('button',{name:'Diğer kategorisini düzenle'}).click();
     await page.getByRole('button',{name:'Kategoriyi sil'}).click();
     await page.getByLabel('Başka kategoriye taşı').check();
