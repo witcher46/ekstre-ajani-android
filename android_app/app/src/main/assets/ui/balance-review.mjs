@@ -1,6 +1,6 @@
 import * as C from '../core.mjs';
 import {escapeHtml as esc,field,options,select} from './form-controls.mjs';
-import {renderBackLink} from './navigation.mjs';
+import {renderBackLink,uiIcon} from './navigation.mjs';
 
 const sourceLabels = {bankDocument:'Banka belgesi',manualBank:'Elle aktarılan banka bakiyesi',cashCount:'Nakit sayımı'};
 const ledgerSources = {manual:'Elle kaydedilen işlem',pdf:'PDF aktarımı',csv:'CSV aktarımı',unknown:'Kayıt kaynağı tanınmıyor'};
@@ -23,14 +23,14 @@ function sourceRef(data,key){
 export function renderBalanceAccount(state,account) {
  const records = observations(state).filter(row=>row.accountId===account.id)
   .sort((a,b)=>b.observedDate.localeCompare(a.observedDate)||b.createdAt.localeCompare(a.createdAt));
- return `<section class="panel" id="balance-reconciliation" aria-labelledby="balance-reconciliation-title">
+ return `<section class="panel balance-evidence" id="balance-reconciliation" aria-labelledby="balance-reconciliation-title">
   <h2 id="balance-reconciliation-title">Bakiye mutabakatı</h2>
   ${records.length?'':'<p>Gün sonu bakiyeni ve karşılaştırmak için daha eski bir bağımsız dayanağı kaydet.</p>'}
   <div class="actions"><button type="button" data-action="balanceAddAnchor">Dayanak ekle</button>
    <button type="button" data-action="balanceAddObservation">Gözlem ekle</button>
    <button type="button" data-balance-history="${esc(account.id)}">Onay Geçmişi</button></div>
-  ${records.map(row=>`<div class="row"><div><strong>${row.role==='anchor'?'Dayanak':'Gözlem'} · ${esc(row.observedDate)}</strong>
-   ${amount(row.observedAmountCents)}<small>${esc(sourceLabels[row.sourceKind])}${row.note?` · ${esc(row.note)}`:''}</small></div>
+  ${records.map(row=>`<div class="row wallet-detail-record"><div class="left"><strong>${row.role==='anchor'?'Dayanak':'Gözlem'} · ${esc(row.observedDate)}</strong>
+   <small>${esc(sourceLabels[row.sourceKind])}${row.note?` · ${esc(row.note)}`:''}</small></div>${amount(row.observedAmountCents)}
    ${row.role==='observation'?`<button type="button" data-balance-review="${esc(row.id)}" aria-label="Mutabakatı incele · ${esc(row.observedDate)}">Mutabakatı incele</button>`:''}</div>`).join('')}
  </section>`;
 }
@@ -217,23 +217,27 @@ function finalForm(prepared){
 export function renderBalanceReview(state,observationId,draft,storageAvailable,backTitle='Cüzdanım'){
  const observation = observations(state).find(row=>row.id===observationId&&row.role==='observation');
  const account = state.accounts.find(row=>row.id===observation?.accountId);
- const header = `${renderBackLink(backTitle,'balanceBack')}<h1>Bakiye mutabakatı</h1>`;
+ const header = `${renderBackLink(backTitle,'balanceBack')}<div class="wallet-detail-heading">
+  <span class="row-icon">${uiIcon('wallet')}</span><h1>Bakiye mutabakatı</h1></div>`;
  const error = '<p id="balance-review-error" role="alert" tabindex="-1" hidden></p>';
- if(draft.clockBehind)return `<div class="wallet-v2 balance-review">${header}<section class="panel">
+ if(draft.clockBehind)return `<div class="wallet-v2 wallet-detail balance-review">${header}<section class="panel">
   <h2 id="balance-clock-title" tabindex="-1">Cihaz saatini düzelt</h2>
   <p>Cihaz saati önceki onaydan geride. Önceki onay · <time datetime="${esc(draft.clockBehind)}">${esc(draft.clockBehind)} UTC</time>.</p>
   <p>Cihazın tarihini ve saatini düzeltip güncel kayıtları yeniden incele.</p>
   <button type="button" data-action="balanceRestart">Yeniden incele</button>${error}</section></div>`;
- if(draft.saved)return `<div class="wallet-v2 balance-review">${header}<section class="panel"><h2 id="balance-review-saved">İnceleme onayı kaydedildi</h2><p>${esc(draft.saved.accountName)} · ${esc(draft.saved.date)}</p></section></div>`;
- if(draft.restart)return `<div class="wallet-v2 balance-review">${header}<section class="panel">
+ if(draft.saved)return `<div class="wallet-v2 wallet-detail balance-review">${header}<section class="panel balance-review-saved"><h2 id="balance-review-saved">İnceleme onayı kaydedildi</h2><p>${esc(draft.saved.accountName)} · ${esc(draft.saved.date)}</p></section></div>`;
+ if(draft.restart)return `<div class="wallet-v2 wallet-detail balance-review">${header}<section class="panel">
   <h2 id="balance-review-result" tabindex="-1">Yeniden inceleme gerekli</h2>
   <p>${esc(draft.restart)}</p><button type="button" data-action="balanceRestart">Yeniden incele</button>${error}</section></div>`;
- if(draft.prepared)return `<div class="wallet-v2 balance-review">${header}${finalForm(draft.prepared)}${error}</div>`;
- if(!account)return `<div class="wallet-v2 balance-review">${header}<p class="warning">Gözlem veya ilgili hesap artık bulunamıyor.</p></div>`;
- const intro = `<p class="lead">${esc(account.name)} · ${esc(observation.observedDate)} · Gözlenen bakiye ${amount(observation.observedAmountCents)}</p>`;
+ if(draft.prepared)return `<div class="wallet-v2 wallet-detail balance-review">${header}${finalForm(draft.prepared)}${error}</div>`;
+ if(!account)return `<div class="wallet-v2 wallet-detail balance-review">${header}<p class="warning">Gözlem veya ilgili hesap artık bulunamıyor.</p></div>`;
+ const intro = `<section class="panel balance-review-observation" aria-labelledby="balance-observation-title">
+  <h2 id="balance-observation-title">Gözlenen bakiye</h2>
+  <p class="lead">${esc(account.name)} · ${esc(observation.observedDate)}</p>
+  <b class="dashboard-amount">${amount(observation.observedAmountCents)}</b></section>`;
  const unavailable = storageAvailable?'':'<p class="warning">Kalıcı onay için Android kayıt alanı gerekli.</p>';
  const body = draft.comparison?comparisonDetails(draft.comparison,account.name)+coverageForm(state,draft.comparison,storageAvailable):anchorForm(state,account,observation);
- return `<div class="wallet-v2 balance-review">${header}${intro}
+ return `<div class="wallet-v2 wallet-detail balance-review">${header}${intro}
   <p>Bağımsız belgeleri veya kayıtları bu ekranın dışında incele. Kaynaklara erişemiyorsan onayı tamamlayamazsın. Hesap numarası veya belge içeriği yerine kısa, kişisel bilgi içermeyen referanslar kullan.</p>
   ${unavailable}${body}${error}</div>`;
 }

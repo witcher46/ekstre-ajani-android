@@ -47,7 +47,7 @@ test('known statement: payment is not an expense; refund and post-cut purchases 
   assert.match(html,/Belgedeki dönem borcu/);
   assert.match(html,/Ödemelere göre kalan dönem borcu/);
   assert.match(html,/Gerçekleşen iadeler/);
-  assert.match(html,/Bu kartın borcunu öde/);
+  assert.match(html,/<button\b[^>]*data-pay-card="card"[^>]*>Ödeme kaydet<\/button>/u);
   assert.match(html,/Ekstre toplamları doğrulandı/);
   assert.match(html,/data-statement-view="card\|2026-10"/);
   assert.ok(html.includes(C.formatMoney(140_000)));
@@ -67,13 +67,16 @@ test('latest statement without debt: shows Unknown instead of a manufactured 0, 
   assert.equal(d.statementRemaining,null);
   assert.equal(d.paidAfterCut,0);
   const html=htmlFor(s);
-  assert.match(html,/Güncel borç tahmini/);
+  assert.match(html,/Güncel kart borcu tahmini/);
   assert.match(html,/Son ekstrede dönem borcu okunamadı/);
   assert.match(html,/önceki bilinen ekstreye dayanıyor/);
+  assert.match(html,/2026-10 ekstresi \(kesim 2026-10-05\)/u);
+  assert.match(html,/Ekstre: 2026-11/u);
+  assert.match(html,/data-stat="cardStatementDebt"><span class="muted">Bilinmiyor<\/span>/u);
   assert.match(html,/data-stat="cardStatementRemaining"><span class="muted">Bilinmiyor<\/span>/);
   assert.match(html,/data-stat="cardPaidAfterCut"><span class="muted">Bilinmiyor<\/span>/);
   assert.match(html,/Aktarımda belgedeki toplamlar tam doğrulanamadı\./);
-  assert.ok(html.includes(C.formatMoney(250_000)));
+  assert.ok(html.match(/data-stat="cardDebt">(.*?)<\/b>/u)?.[1].includes(C.formatMoney(250_000)));
   assert.ok(!html.includes('<img src=x onerror=alert(1)>'), 'card names are never raw HTML');
   assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
 });
@@ -119,9 +122,11 @@ test('without statements, due date and statement debt are not shown as zero or i
   const s=base();
   const html=htmlFor(s);
   assert.match(html,/Henüz ekstre aktarılmadı/);
-  assert.match(html,/Dönem borcu, kalan ekstre borcu ve son ödeme tarihi bilinmiyor/);
+  assert.match(html,/<dt>Son ödeme tarihi<\/dt><dd>Bilinmiyor<\/dd>/u);
   assert.match(html,/Son ekstre kesim tarihi olmadığı için/);
-  assert.ok(!html.includes('data-stat="cardStatementRemaining"'));
+  for(const stat of ['cardStatementDebt','cardStatementRemaining']){
+    assert.ok(html.includes(`data-stat="${stat}"><span class="muted">Bilinmiyor</span>`),stat);
+  }
   assert.ok(!html.includes('data-stat="postCutExpenses"'));
   assert.equal(C.cardStatus(s,'card').current,0);
 });

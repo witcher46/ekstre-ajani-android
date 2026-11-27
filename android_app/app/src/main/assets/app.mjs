@@ -8,7 +8,7 @@ import {parseStatementCsv} from './csv.mjs';
 import {createDialog} from './ui/dialog.mjs';
 import {escapeHtml as esc,options,field,select} from './ui/form-controls.mjs';
 import {expenseAllocationFields,attachExpenseAllocationFields} from './ui/expense-allocations.mjs';
-import {renderBottomNavigation,renderMoreNavigation,uiIcon} from './ui/navigation.mjs';
+import {activeBottomPage,renderBottomNavigation,renderMoreNavigation,uiIcon} from './ui/navigation.mjs';
 import {renderReviewCenter} from './ui/review-center.mjs';
 import {compareBalanceObservation} from './balance-reconciliation.mjs';
 import {prepareBalanceApproval,readBalanceApprovalSnapshot,saveBalanceApproval} from './balance-approval-flow.mjs';
@@ -404,7 +404,7 @@ function importCategoryOption(merchant,current,index,selectedCategory,category=C
 }
 function render(){
  $('nav').innerHTML=renderBottomNavigation(page);
- document.body.dataset.surface=loadFailed?'':isReportPage(page)?'reports':page;
+ document.body.dataset.surface=loadFailed?'':activeBottomPage(page);
  if(loadFailed){
   const buttons=[];
   for(const slot of [3,2]){

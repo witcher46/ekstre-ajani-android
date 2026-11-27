@@ -1,6 +1,6 @@
 import {formatMoney} from '../core.mjs';
 import {escapeHtml as esc} from './form-controls.mjs';
-import {renderBackLink} from './navigation.mjs';
+import {renderBackLink,uiIcon} from './navigation.mjs';
 
 const statuses = {
  current:'Kayıtlarla güncel',
@@ -110,7 +110,8 @@ function historicalMovement(row,sourceRows,reveal){
 function historyDetail(entry,reveal,movementLimit){
  const {approval,evidence,evaluation} = entry;
  const sourceRows = new Map(evidence.coverage.matches.map(row=>[row.id,row.sourceRowId]));
- return `<section class="panel">
+ return `<section class="panel balance-approval-evidence" aria-labelledby="balance-approval-evidence-title">
+  <h2 id="balance-approval-evidence-title">Kayıtlı kanıt</h2>
   <p class="balance-approval-date">Onay tarihi · ${instant(approval.approvedAt)}</p>
   ${status(evaluation)}${evidenceSummary(evidence,reveal)}
   <dl class="comparison-values balance-history-identifiers">
@@ -141,9 +142,11 @@ export function renderBalanceApprovalHistory({accountName,entries,reveal=false,u
    (hasMore?'<button type="button" data-action="balanceHistoryMore">Daha fazla onay</button>':''):
    '<section class="panel"><p>Bu hesap için kayıtlı onay bulunmuyor.</p></section>':
   selected?historyDetail(selected,reveal,movementLimit):'<p class="warning">Seçilen onay bu hesabın kayıtlı geçmişinde bulunamıyor.</p>';
- return `<div class="wallet-v2 balance-history" id="${id}">
+ return `<div class="wallet-v2 wallet-detail balance-history" id="${id}">
   ${renderBackLink(backTitle,'balanceHistoryBack')}
-  <h1>${heading}</h1><p class="lead">${esc(accountName)}</p>
+  <div class="wallet-detail-heading"><span class="row-icon">${uiIcon('import')}</span>
+   <div><h1>${heading}</h1><p class="lead">${esc(accountName)}</p></div>
+  </div>
   ${unavailable?'<p class="warning" role="alert">Güncel kayıtlar okunamadı. Geçmişte saklanan kanıt gösteriliyor, güncellik değerlendirilemiyor.</p>':''}
   ${commonControls(reveal)}
   <p class="notice">Güncellik, bu ekran açılırken veya yeniden değerlendirilirken okunan kayıtlara dayanır. Bağımsız kaynak incelemesi onayı veren kullanıcının beyanına dayanır.</p>
