@@ -835,12 +835,18 @@ async function checkTransactionForms(browser){
   }finally{await page.close();}
 }
 
-async function checkDialog(page,opener,expectedTitle){
+async function checkDialog(page,opener,expectedTitle,{checkAccountLabel=false}={}){
   await opener.focus();
   await page.keyboard.press('Enter');
   const dialog=page.locator('#modal[open]');
   await dialog.waitFor();
   assert.equal(await dialog.locator('#dialog-title').textContent(),expectedTitle);
+  if(checkAccountLabel){
+    const label=dialog.locator('label[for=f-name]');
+    assert(await label.evaluate(node=>parseFloat(getComputedStyle(node).fontSize)>=.875*parseFloat(getComputedStyle(document.documentElement).fontSize)));
+    const nameField=await dialog.getByLabel('Hesap adı',{exact:true}).boundingBox();
+    assert(nameField.width>=48&&nameField.height>=48);
+  }
   const scroll=await page.evaluate(()=>scrollY);
   for(const key of ['Tab','Tab','Shift+Tab']){
     await page.keyboard.press(key);
@@ -894,6 +900,7 @@ async function checkDialog(page,opener,expectedTitle){
       await page.evaluate(scale=>{document.documentElement.style.fontSize=scale+'%';},scale);
       await page.locator('[data-action=demo]').click();
       failures.push(...(await checkWalletFocus(page,scale)).map(failure=>({scale,...failure})));
+      await checkDialog(page,page.locator('main [data-action=addAccount]').first(),'Hesap / kart ekle',{checkAccountLabel:true});
       await checkDialog(page,page.locator('#quick-add'),'Hızlı Ekle');
       await openRoute(page,'transactions');
       await checkDialog(page,page.locator('[data-edit]').first(),'İşlem ayrıntısı');

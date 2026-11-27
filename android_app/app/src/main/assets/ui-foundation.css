@@ -646,6 +646,7 @@ body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[
 .csv-import-preview .csv-source-card :is(label,.statement-period) {margin:0 0 6px}
 .csv-import-preview .import-row {padding:8px 0;border-top:1px solid var(--shell-line)}
 .review-center {overflow-wrap:anywhere}
+.review-center > .back-link {margin-bottom:12px}
 .review-center .review-principle {background:var(--shell-panel);border-radius:0 12px 12px 0}
 .review-center .review-counts > div {background:var(--shell-panel)}
 .review-center .review-candidates {padding:10px 12px;border-radius:12px;background:var(--shell-bg)}
@@ -891,7 +892,7 @@ body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[
 #modal:is([data-variant="plan"],[data-variant="plan-removal"]) #form-error:not(:empty),
 .plan-dialog-note {padding:10px 12px;border:1px solid currentColor;border-radius:12px}
 .plan-dialog-note {margin:10px 0;color:var(--plan-muted);background:var(--plan-bg)}
-#modal[data-variant="plan-removal"] #submit {color:#321718;background:#ffb6b1;border-color:#ffb6b1}
+#modal[data-variant="plan-removal"] #submit {position:static;box-shadow:none;color:#321718;background:#ffb6b1;border-color:#ffb6b1}
 
 @media (max-width:360px) {
   .plan-surface .plan-intro h1 {font-size:1.25rem}
@@ -910,8 +911,11 @@ body:is([data-surface="settings"],[data-surface="categories"],[data-surface="rec
   color:var(--text);
   min-height:100vh;
 }
-body:is([data-surface="settings"],[data-surface="categories"],[data-surface="recovery"]) > header {padding-block:8px}
-body:is([data-surface="settings"],[data-surface="categories"],[data-surface="recovery"]) :is(.brand strong,.brand .mark,#quick-add .quick-add-label) {display:none}
+body:is([data-surface="settings"],[data-surface="categories"],[data-surface="recovery"],
+  [data-surface="plan"],[data-surface="incomePlans"],[data-surface="savingsGoals"],[data-surface="reminders"]) > header {padding-block:8px}
+body:is([data-surface="settings"],[data-surface="categories"],[data-surface="recovery"],
+  [data-surface="plan"],[data-surface="incomePlans"],[data-surface="savingsGoals"],[data-surface="reminders"])
+  :is(.brand strong,.brand .mark,#quick-add .quick-add-label) {display:none}
 
 .settings-surface {overflow-wrap:anywhere}
 .settings-surface > .back-link {margin-bottom:12px}
@@ -949,7 +953,7 @@ body:is([data-surface="settings"],[data-surface="categories"],[data-surface="rec
 .settings-tags {display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0}
 .settings-tags li {padding:6px 10px;border:1px solid var(--shell-line);border-radius:10px;background:var(--shell-bg);max-width:100%}
 .settings-surface :is(button,input,select),
-#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"]) :is(button,input:not([type="radio"]),select) {
+#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"],[data-variant="review-decision"]) :is(button,input:not([type="radio"]),select) {
   min-height:48px;
   min-width:48px;
   overflow-wrap:anywhere;
@@ -967,7 +971,7 @@ body:is([data-surface="settings"],[data-surface="categories"],[data-surface="rec
 .settings-feedback :is(h2,p),#modal .settings-preview p {margin:0}
 .settings-feedback p {color:inherit}
 
-#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"]) {
+#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"],[data-variant="review-decision"]) {
   --panel:var(--shell-panel);
   --muted:var(--shell-muted);
   --line:var(--shell-line);
@@ -976,10 +980,10 @@ body:is([data-surface="settings"],[data-surface="categories"],[data-surface="rec
   max-width:calc(100% - 20px);
   overflow-wrap:anywhere;
 }
-#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"]) .dialog-head {position:static;flex-wrap:wrap}
-#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"]) #close {width:auto;font-size:inherit;padding:6px 10px}
-#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"]) #form-error:empty {display:none}
-#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"]) #form-error:not(:empty) {padding:10px;border:1px solid currentColor;border-radius:12px}
+#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"],[data-variant="review-decision"]) .dialog-head {position:static;flex-wrap:wrap}
+#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"],[data-variant="review-decision"]) #close {width:auto;font-size:inherit;padding:6px 10px}
+#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"],[data-variant="review-decision"]) #form-error:empty {display:none}
+#modal:is([data-variant="settings"],[data-variant="settings-removal"],[data-variant="backup-replace"],[data-variant="review-decision"]) #form-error:not(:empty) {padding:10px;border:1px solid currentColor;border-radius:12px}
 #modal:is([data-variant="settings-removal"],[data-variant="backup-replace"]) #submit {
   position:static;
   box-shadow:none;
@@ -991,7 +995,17 @@ body:is([data-surface="settings"],[data-surface="categories"],[data-surface="rec
 #modal .category-rule-choices {min-width:0;margin:12px 0;padding:8px;border:1px solid var(--line);border-radius:10px}
 #modal .category-rule-choice {display:flex;align-items:center;gap:8px;min-height:48px}
 #modal .category-rule-choices input[type="radio"] {width:20px;min-height:20px;padding:0;flex:none;accent-color:var(--accent)}
-#modal:is([data-variant="settings"],[data-variant="settings-removal"]) label {font-size:.875rem}
+#modal:is([data-variant=""],[data-variant="settings"],[data-variant="settings-removal"]) label {font-size:.875rem}
+#modal[data-variant="review-decision"] #submit {position:static;box-shadow:none}
+.review-decision-note,.review-decision-record {
+  padding:12px;
+  border:1px solid var(--shell-line);
+  border-radius:12px;
+  background:var(--shell-bg);
+}
+.review-decision-note {color:var(--shell-text)}
+.review-decision-record {display:grid;gap:6px;margin-bottom:8px}
+.review-decision-record h3 {margin:0;font-size:1rem}
 
 @media (max-width:360px) {
   .settings-intro h1 {font-size:1.25rem}

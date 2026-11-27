@@ -4,6 +4,7 @@ const fs=require('fs'),path=require('path'),assert=require('assert');
 const {createHash}=require('node:crypto');
 const root=path.resolve(__dirname,'../app/src/main/assets'),out=path.resolve(__dirname,'../test-output/wallet-v2');fs.mkdirSync(out,{recursive:true});
 const approveBackup=page=>page.getByRole('dialog',{name:'JSON yedeğini incele'}).getByRole('button',{name:'Cüzdanı değiştir'}).click();
+const approveLink=page=>page.getByRole('dialog',{name:'Kaynakları aynı işleme bağla',exact:true}).getByRole('button',{name:'Kaynakları bağla',exact:true}).click();
 
 function serveAssets(page){
   return page.route('https://wallet.test/**',route=>{
@@ -336,6 +337,7 @@ async function ambiguousStatementPaymentJourney(browser,{bankFirst=false}={}){
     assert.deepEqual(await candidate.locator('option').evaluateAll(items=>items.map(item=>item.value)),documentIds);
     await candidate.selectOption(documentIds[1]);
     await page.locator('[data-link="'+payment.id+'"]').click();
+    await approveLink(page);
     const confirmed=(await read()).transactions;
     assert.equal(confirmed.find(row=>row.id===documentIds[1]).linkedTo,payment.id);
     assert.equal(confirmed.find(row=>row.id===documentIds[0]).linkedTo,undefined);
@@ -898,7 +900,12 @@ async function reconciliationJourney(browser){
  await page.locator('nav [data-page=wallet]').click();await page.locator(`[data-card-view="${card}"]`).click();await page.locator('[data-pay-card]').click();await page.locator('[name=account]').selectOption(bank);await page.locator('[name=amount]').fill('2000');await page.locator('[name=date]').fill('2026-10-03');await page.locator('#submit').click();
  await page.locator('nav [data-page=home]').click();assert((await page.locator('[data-stat=cash]').innerText()).includes('48.000,00'));assert((await page.locator('[data-stat=cardDebt]').innerText()).includes('0,00'));assert((await page.locator('[data-stat=margin]').innerText()).includes('28.000,00'));
  const pdf='QNB\nHesap Kesim Tarihi: 05/10/2026\nOnceki Donem Hesap Ozeti Borcu: 0.00\nDonem Borcu: 0.00\n03/10/2026 SENTETIK MARKET 2000.00\n03/10/2026 ODEME TESEKKUR 2000.00';await page.evaluate(t=>window.onPdfText(t),pdf);await page.locator('#import-account').selectOption(card);await page.locator('[data-action=confirmImport]').click();s=await read();assert.equal(s.transactions.filter(t=>t.matchStatus==='pending').length,2);
- await page.locator('nav [data-page=home]').click();await page.locator('[data-page=review]').first().click();while(await page.locator('[data-link]').count())await page.locator('[data-link]').first().click();s=await read();assert.equal(s.transactions.filter(t=>t.linkedTo).length,2);const count=s.transactions.length;
+ await page.locator('nav [data-page=home]').click();await page.locator('[data-page=review]').first().click();
+ while(await page.locator('[data-link]').count()){
+  await page.locator('[data-link]').first().click();
+  await approveLink(page);
+ }
+ s=await read();assert.equal(s.transactions.filter(t=>t.linkedTo).length,2);const count=s.transactions.length;
  await page.evaluate(t=>window.onPdfText(t),pdf);await page.locator('#import-account').selectOption(card);await page.locator('[data-action=confirmImport]').click();assert.equal((await read()).transactions.length,count);
  await page.locator('nav [data-page=home]').click();assert((await page.locator('[data-stat=cash]').innerText()).includes('48.000,00'));assert((await page.locator('[data-stat=netExpense]').innerText()).includes('2.000,00'));
  await openRoute(page,'plan');await page.locator('[data-action=incomePlan]').click();await page.locator('[name=name]').fill('Sentetik düzenli maaş');await page.locator('[name=account]').selectOption(bank);await page.locator('[name=amount]').fill('30000');await page.locator('[name=next]').fill('2026-11-03');await page.locator('#submit').click();const before=(await read()).transactions.length;await page.locator('nav [data-page=home]').click();assert((await page.locator('[data-stat=cash]').innerText()).includes('48.000,00'));assert.equal((await read()).transactions.length,before);

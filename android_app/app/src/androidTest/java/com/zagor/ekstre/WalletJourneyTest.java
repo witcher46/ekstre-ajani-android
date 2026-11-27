@@ -305,9 +305,11 @@ public class WalletJourneyTest {
     assertEquals("5",js(a,"JSON.parse(Android.load()).transactions.length"));
     click(a,"nav [data-page=home]");click(a,"[data-page=review]");
     for(int count=1;count<=2;count++){
-     js(a,"setTimeout(()=>document.querySelector('[data-link]').click(),0);true");
-     UiObject2 positive=device.wait(Until.findObject(By.res("android:id/button1").text(java.util.regex.Pattern.compile("(?iu)onayla"))),10000);
-     assertNotNull("Matching requires explicit native confirmation",positive);positive.click();
+     String before=js(a,"Android.load()");
+     click(a,"[data-link]");
+     waitJs(a,"document.querySelector('#modal[open][data-variant=review-decision] #submit')?.textContent==='Kaynakları bağla'");
+     assertEquals("Review preview must not write before confirmation",before,js(a,"Android.load()"));
+     submit(a);
      waitJs(a,"JSON.parse(Android.load()).transactions.filter(t=>t.linkedTo).length==="+count);
     }
     click(a,"nav [data-page=home]");assertEquals("No second bank outflow from PDF","true",js(a,"document.querySelector('[data-stat=cash]').textContent.includes('48.000,00')"));

@@ -33,6 +33,15 @@ async function checkPlan(browser,wallet,width,scale) {
   const dialog = page.getByRole('dialog');
   const heading = main.getByRole('heading',{level:1});
   const errors = [];
+  const checkHeader = async () => {
+    const header = page.locator('body > header');
+    const geometry = await header.evaluate(node=>({
+      height:node.getBoundingClientRect().height,
+      small:[...node.querySelectorAll('button')].some(button=>button.offsetWidth<48||button.offsetHeight<48),
+    }));
+    assert(geometry.height<=96,`Plan header is ${geometry.height}px at ${width}px/${scale}%`);
+    assert.equal(geometry.small,false);
+  };
   const screenshot = async name => {
     if (!output) return;
     await page.evaluate(() => document.querySelector('#toast').classList.remove('visible'));
@@ -48,6 +57,7 @@ async function checkPlan(browser,wallet,width,scale) {
     await opener.click();
     assert.equal(await heading.textContent(),name);
     assert.equal(await focused(heading),true);
+    await checkHeader();
     await checkGeometry(main);
     return opener;
   };
@@ -65,9 +75,14 @@ async function checkPlan(browser,wallet,width,scale) {
     });
     await page.addInitScript(raw => localStorage.setItem('ekstre-android-v1',raw),wallet);
     await page.goto('https://wallet.test/');
+    for(const colorScheme of ['no-preference','light','dark']){
+      await page.emulateMedia({colorScheme});
+      assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).colorScheme),'dark');
+    }
     await page.evaluate(percent => { document.documentElement.style.fontSize = percent+'%'; },scale);
     await openRoute(page,'plan');
     assert.equal(await focused(heading),true);
+    await checkHeader();
     await checkGeometry(main);
     await screenshot('plan');
 
@@ -133,6 +148,12 @@ async function checkPlan(browser,wallet,width,scale) {
     assert.equal(incomeRow.incomePlanDue,'2026-11-28');
     const removeIncome = main.getByRole('button',{name:/gelir planını sil$/});
     await openForm(removeIncome,'Gelir planı kaldırılsın mı?');
+    assert.equal(await dialog.evaluate(node=>{
+      const note=node.querySelector('.plan-dialog-note').getBoundingClientRect();
+      const submit=node.querySelector('#submit').getBoundingClientRect();
+      return submit.top>=note.bottom;
+    }),true,'The removal button must follow the consequence text without covering it');
+    await screenshot('gelir-plani-kaldirma');
     await dialog.getByRole('button',{name:'Planı kaldır',exact:true}).click();
     assert.equal((await read()).incomePlans.length,0);
     assert.equal((await read()).transactions.find(row => row.id === incomeRow.id).amount,20000);
@@ -181,7 +202,7 @@ async function checkPlan(browser,wallet,width,scale) {
         desc:'Sentetik Kasım taksiti',category:'Ulaşım',amount:13000,installment:'2/2'},
     ],
     subscriptions:[{id:'subscription',name:'Uzun adlı sentetik internet aboneliği',account:'bank',next:'2026-11-26',amount:10000}],
-    incomePlans:[{id:'income',name:'Sentetik düzenli gelir',account:'bank',next:'2026-11-28',amount:20000}],
+    incomePlans:[{id:'income',name:'Sentetik düzenli gelir ' + 'uzun açıklama '.repeat(11),account:'bank',next:'2026-11-28',amount:20000}],
     statements:[{id:'card|2026-11',account:'card',period:'2026-11',cut:'2026-11-20',due:'2026-11-30',debt:null}],
   },{id:'goal',name:'Uzun adlı sentetik birikim hedefi',account:'bank',due:'2027-01-10',target:999999999999,reserved:50000}));
   if (output) fs.mkdirSync(output,{recursive:true});

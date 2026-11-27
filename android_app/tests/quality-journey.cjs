@@ -391,7 +391,7 @@ async function reviewCenterJourney(page) {
     ];
     const manual={
       id:'review-manual',source:'manual',kind:'expense',account:'review-card',
-      date:'2026-11-10',period:'2026-11',amount:12345,desc:'Sentetik market',
+      date:'2026-11-10',period:'2026-11',amount:12345,desc:'Sentetik market '+ 'uzun kaynak açıklaması '.repeat(8),
       category:'Market / Gıda',note:'',
     };
     const pdf={...manual,id:'review-pdf',source:'pdf',
@@ -410,7 +410,64 @@ async function reviewCenterJourney(page) {
   await page.getByRole('button',{name:'Sonra incele'}).click();
   assert.deepEqual(await wallet(),original);
   await page.getByRole('button',{name:'İnceleme Merkezi'}).click();
-  await page.getByRole('button',{name:'Aynı işlem'}).click();
+  const link=page.getByRole('button',{name:'Aynı işlem',exact:true});
+  const separate=page.getByRole('button',{name:'Ayrı gerçek işlem',exact:true});
+  const decision=page.getByRole('dialog');
+  const setTextScale=scale=>page.evaluate(value=>{document.documentElement.style.fontSize=value+'%';},scale);
+  const screenshot=async name=>{
+    if(!process.env.PARITY_SCREENSHOTS)return;
+    fs.mkdirSync(process.env.PARITY_SCREENSHOTS,{recursive:true});
+    await page.screenshot({path:path.join(process.env.PARITY_SCREENSHOTS,name)});
+  };
+  await setTextScale(200);
+  await separate.focus();
+  await page.keyboard.press('Enter');
+  await decision.getByRole('heading',{name:'Ayrı işlem olarak say',exact:true}).waitFor();
+  assert.match(await decision.innerText(),/finansal toplamlara dahil/);
+  assert.deepEqual(await wallet(),original);
+  await screenshot('ayri-islem-320-200.png');
+  await page.keyboard.press('Escape');
+  assert.equal(await separate.evaluate(node=>node===document.activeElement),true);
+  assert.deepEqual(await wallet(),original);
+
+  await link.click();
+  const title=decision.getByRole('heading',{name:'Kaynakları aynı işleme bağla',exact:true});
+  assert.equal(await title.evaluate(node=>node===document.activeElement),true);
+  assert.match(await decision.innerText(),/PDF ekstresi/);
+  assert.match(await decision.innerText(),/Manuel kayıt/);
+  assert.match(await decision.innerText(),/ikinci kez sayılmaz/);
+  const geometry=await decision.evaluate(node=>{
+    const buttons=[...node.querySelectorAll('button')];
+    const note=node.querySelector('.review-decision-note').getBoundingClientRect();
+    const submit=node.querySelector('#submit').getBoundingClientRect();
+    return {
+      overflow:node.scrollWidth>node.clientWidth+1||document.documentElement.scrollWidth>innerWidth+1,
+      small:buttons.some(button=>button.offsetWidth<48||button.offsetHeight<48),
+      overlap:submit.top<note.bottom,
+    };
+  });
+  assert.deepEqual(geometry,{overflow:false,small:false,overlap:false});
+  const contrast=await decision.evaluate(node=>{
+    function luminance(color){
+      const channels=color.match(/\d+(?:\.\d+)?/g).slice(0,3).map(value=>Number(value)/255);
+      const [r,g,b]=channels.map(value=>value<=.04045?value/12.92:((value+.055)/1.055)**2.4);
+      return .2126*r+.7152*g+.0722*b;
+    }
+    return ['.review-decision-note','#submit'].map(selector=>{
+      const {color,backgroundColor}=getComputedStyle(node.querySelector(selector));
+      const text=luminance(color),background=luminance(backgroundColor);
+      return (Math.max(text,background)+.05)/(Math.min(text,background)+.05);
+    });
+  });
+  assert(contrast.every(ratio=>ratio>=4.5),`Review warning and action contrast: ${contrast}`);
+  await screenshot('kaynaklari-bagla-320-200.png');
+  assert.equal(await page.evaluate(()=>window.handleBack()),true);
+  assert.equal(await link.evaluate(node=>node===document.activeElement),true);
+  assert.deepEqual(await wallet(),original);
+
+  await setTextScale(100);
+  await link.click();
+  await decision.getByRole('button',{name:'Kaynakları bağla',exact:true}).click();
   await page.waitForFunction(()=>{
     const s=JSON.parse(localStorage.getItem('ekstre-android-v1'));
     return s.transactions.some(t=>t.id==='review-pdf'&&t.linkedTo==='review-manual');
@@ -421,6 +478,8 @@ async function reviewCenterJourney(page) {
   await page.locator('details.review-history').evaluate(d=>d.open=true);
   assert.equal(await page.getByRole('button',{name:'Yeniden incele'}).count(),1);
   assert.equal(await page.locator('.review-item').count(),0);
+  await page.locator('main .back-link').click();
+  assert.equal(await page.getByRole('button',{name:'İnceleme Merkezi'}).evaluate(node=>node===document.activeElement),true);
   await page.evaluate(async()=>{
     const C=await import('/core.mjs');
     const s=JSON.parse(localStorage.getItem('ekstre-android-v1'));
@@ -718,6 +777,16 @@ async function reportsSliceJourney(browser) {
     await page.locator('[name=category]').selectOption('Giyim');
     await page.getByLabel('Bu satıcı için kategori önerisini hatırla').check();
     const originalMerchant = await page.locator('[name=desc]').inputValue();
+    const draftNote=page.locator('#modal [name=note]');
+    const beforeSingleDelete=await page.evaluate(()=>localStorage.getItem('ekstre-android-v1'));
+    await draftNote.fill('Kaydedilmemiş tek işlem notu');
+    acceptConfirmation=false;
+    await page.getByRole('button',{name:'İşlemi sil',exact:true}).click();
+    assert.match(confirmations.at(-1),/İşlemi silmek/i);
+    assert.equal(await draftNote.inputValue(),'Kaydedilmemiş tek işlem notu');
+    assert.equal(await page.evaluate(()=>localStorage.getItem('ekstre-android-v1')),beforeSingleDelete);
+    await draftNote.fill('');
+    acceptConfirmation=true;
     await page.locator('#submit').click();
     await page.waitForFunction(() => document.activeElement.matches('button[data-edit]'));
 
@@ -768,11 +837,14 @@ async function reportsSliceJourney(browser) {
     await page.locator('#period').fill('2026-02');
     await page.getByRole('button',{name:/Sentetik taksitli alışveriş/}).click();
     const deletePlan = page.getByRole('button',{name:'Taksit planını sil'});
+    const seriesDraft=page.locator('#modal [name=note]');
+    await seriesDraft.fill('Kaydedilmemiş taksit notu');
     acceptConfirmation = false;
     await deletePlan.click();
     assert.match(confirmations.at(-1),/3 taksit/i);
     assert.match(confirmations.at(-1),/100,00/);
     assert.deepEqual(await stored(),beforeDeletion);
+    assert.equal(await seriesDraft.inputValue(),'Kaydedilmemiş taksit notu');
     acceptConfirmation = true;
     await deletePlan.click();
     assert.deepEqual((await stored()).transactions,beforeDeletion.transactions.filter(t=>!t.installmentPlan));
@@ -929,6 +1001,7 @@ async function reportsSliceJourney(browser) {
     await csvReview.waitFor();
     assert.equal(await csvReview.getByRole('button',{name:'Aynı işlem',exact:true}).count(),0);
     await csvReview.getByRole('button',{name:'Ayrı gerçek işlem'}).click();
+    await page.getByRole('dialog',{name:'Ayrı işlem olarak say',exact:true}).getByRole('button',{name:'Ayrı olarak say',exact:true}).click();
     assert.equal((await stored()).transactions.filter(t=>t.source==='csv'&&t.matchStatus==='distinct').length,1);
     const reviewed=await stored();
     await uploadCsv();
