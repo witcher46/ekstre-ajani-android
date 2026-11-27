@@ -539,14 +539,19 @@ function confirmSavingsGoalRemoval(id){
 }
 
 function categorySettings({disclosure=false}={}){
- return expenseCategoriesPanel(disclosure)+merchantRulesPanel()+
-  '<section class="panel" aria-labelledby="settings-income-categories"><h2 id="settings-income-categories">Gelir kategorileri</h2>'+
-  '<ul class="settings-tags">'+state.incomeCategories.map(name=>'<li>'+esc(name)+'</li>').join('')+'</ul>'+
-  '<button type="button" data-action="incomeCategory" aria-haspopup="dialog" aria-controls="modal">+ Gelir kategorisi</button></section>';
+ const heading=disclosure?'h3':'h2',panel=disclosure?'settings-category-section':'panel';
+ const expense=expenseCategoriesPanel(disclosure);
+ const income=`<section class="${panel}" aria-labelledby="settings-income-categories">
+  <${heading} id="settings-income-categories">Gelir kategorileri</${heading}>
+  <ul class="settings-tags">${state.incomeCategories.map(name=>'<li>'+esc(name)+'</li>').join('')}</ul>
+  <button type="button" data-action="incomeCategory" aria-haspopup="dialog" aria-controls="modal">+ Gelir kategorisi</button>
+ </section>`;
+ const merchant=merchantRulesPanel(panel,heading);
+ return expense+(disclosure?income+merchant:merchant+income);
 }
-function merchantRulesPanel(){
+function merchantRulesPanel(panel,heading){
  const rules=state.merchantCategoryRules||[];
- return `<section class="panel" aria-labelledby="settings-rules"><h2 id="settings-rules">Satıcı kategori kuralları</h2>
+ return `<section class="${panel}" aria-labelledby="settings-rules"><${heading} id="settings-rules">Satıcı kategori kuralları</${heading}>
   <p>Satıcı eşleştiğinde gider kategorisi önerilir. Öneriyi kaydetmeden önce inceleyebilirsin.</p>
   <button type="button" data-action="merchantRule" aria-haspopup="dialog" aria-controls="modal">+ Satıcı kuralı</button>
   ${rules.map(rule=>`<div class="settings-record"><div><strong>${esc(rule.merchant)}</strong><small>Öneri · ${esc(rule.category)}</small></div>
@@ -558,7 +563,7 @@ function expenseCategoriesPanel(disclosure){
  const content=`<button type="button" data-action="category" aria-haspopup="dialog" aria-controls="modal">+ Kategori ekle</button>${rows}`;
  if(disclosure){
   const open=$('settings-expense-disclosure')?.open;
-  return `<details class="panel settings-disclosure" id="settings-expense-disclosure"${open?' open':''}>
+  return `<details class="settings-disclosure" id="settings-expense-disclosure"${open?' open':''}>
    <summary class="settings-row">Gider kategorileri ${uiIcon('next')}</summary>
    <div class="settings-disclosure-content">${content}</div>
   </details>`;

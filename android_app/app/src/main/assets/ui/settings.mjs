@@ -75,46 +75,63 @@ const failureBanner = (failure,...actions) => failure && actions.includes(failur
     <p>${esc(failure.message)}</p><p>${failureCopy[failure.action][1]}</p>
   </section>`
   : '';
-const settingsRow = (label,attributes) =>
-  `<button type="button" class="settings-row" ${attributes}>${label} ${uiIcon('next')}</button>`;
+function settingsRow(label,attributes,detail) {
+  const copy = detail
+    ? `<span class="settings-row-copy"><span id="${detail.id}-label">${label}</span><small id="${detail.id}-detail">${detail.text}</small></span>`
+    : label;
+  const accessibleCopy = detail
+    ? ` aria-labelledby="${detail.id}-label" aria-describedby="${detail.id}-detail"`
+    : '';
+  return `<button type="button" class="settings-row" ${attributes}${accessibleCopy}>${copy} ${uiIcon('next')}</button>`;
+}
 
 export function settingsView({backTitle,version,categorySections,backupFailure}) {
-  return `<div class="settings-surface">
+  return `<div class="settings-surface settings-home">
     ${renderBackLink(backTitle)}
-    <div class="settings-intro">
-      <h1>Ayarlar</h1>
-      <p>${esc(version)}</p>
-    </div>
-    <div class="panel settings-group">
-      ${settingsRow('Hatırlatmalar','data-page="reminders"')}
-      ${settingsRow('İnceleme ve kaynak bağlantıları','data-page="review"')}
-    </div>
-    <section class="panel" aria-labelledby="settings-export">
-      <h2 id="settings-export">Yedek dışa aktarma</h2>
-      <p>Silme veya yeniden kurma öncesinde cüzdanın bir kopyasını seçtiğin konuma kaydet.</p>
-      ${failureBanner(backupFailure,'backup')}
-      ${settingsRow('Yedek dışa aktar','data-action="backup"')}
-    </section>
-    <section class="panel" aria-labelledby="settings-replace">
-      <h2 id="settings-replace">Cüzdanı geri yükleme</h2>
-      <p>Android JSON yedeğini veya önceki kopyayı incele. Onay verdiğinde seçtiğin kopya güncel cüzdanın yerini alır.</p>
-      ${failureBanner(backupFailure,'restore','recover')}
-      <div class="settings-group">
-        ${settingsRow('Yedek yükle','data-action="restore"')}
-        ${settingsRow('Geri yükleme öncesi cüzdanı kurtar','data-action="recover" aria-haspopup="dialog" aria-controls="modal"')}
+    <div class="settings-intro"><h1>Ayarlar</h1></div>
+    <section class="settings-section" aria-labelledby="settings-data">
+      <h2 id="settings-data">Veriler ve yedek</h2>
+      <div class="panel settings-list">
+        <section aria-label="Yedek dışa aktarma">
+          ${failureBanner(backupFailure,'backup')}
+          ${settingsRow('Yedek dışa aktar','data-action="backup"',
+            {id:'settings-export',text:'Kurulum veya kaldırma öncesi bir kopya kaydet.'})}
+        </section>
+        <section class="settings-list" aria-label="Cüzdanı geri yükleme">
+          ${failureBanner(backupFailure,'restore')}
+          ${settingsRow('Yedek yükle','data-action="restore"',
+            {id:'settings-restore',text:'Bir Android JSON yedeği seç ve incele.'})}
+          ${failureBanner(backupFailure,'recover')}
+          ${settingsRow('Önceki cüzdanı kurtar','data-action="recover" aria-haspopup="dialog" aria-controls="modal"',
+            {id:'settings-recover',text:'Geri yükleme öncesindeki cihaz kopyasını incele.'})}
+        </section>
       </div>
-      <p class="notice">Android JSON yedekleri desteklenir. Kart hareketlerini Ekstre bölümünden CSV olarak aktarabilirsin.</p>
+      <p class="settings-section-note">Yedek veya önceki kopya, onayından sonra mevcut cüzdanın yerini alır. Kart hareketlerini Ekstre bölümünden CSV olarak aktarabilirsin.</p>
     </section>
-    ${categorySections}
-    <section class="panel" aria-labelledby="settings-privacy">
-      <h2 id="settings-privacy">Gizlilik</h2>
-      <p>Cüzdan kayıtları bu cihazda saklanır. Cüzdan görüntüsü Android’in son uygulamalar ekranında gizlenir.</p>
-      <p>Dışa aktardığın JSON dosyası cüzdan kayıtlarını içerir. Dosyayı erişimini kontrol edebildiğin bir konumda sakla.</p>
+    <section class="settings-section settings-organization" aria-labelledby="settings-organization">
+      <h2 id="settings-organization">Düzen ve bildirimler</h2>
+      <div class="panel settings-list">
+        ${settingsRow('Hatırlatmalar','data-page="reminders"',
+          {id:'settings-reminders',text:'Vadeler ve planlanan ödemeler.'})}
+        ${categorySections}
+      </div>
     </section>
-    <section class="panel" aria-labelledby="settings-demo">
-      <h2 id="settings-demo">İlk deneme</h2>
-      <p>Henüz kaydedilmiş bir cüzdanın yoksa yapay kayıtlarla uygulamayı deneyebilirsin.</p>
-      ${settingsRow('Örnek cüzdan oluştur','data-action="demo"')}
+    <section class="settings-section" aria-labelledby="settings-application">
+      <h2 id="settings-application">Uygulama</h2>
+      <div class="panel settings-list">
+        ${settingsRow('İnceleme ve kaynak bağlantıları','data-page="review"')}
+        ${settingsRow('Örnek cüzdan oluştur','data-action="demo"',
+          {id:'settings-demo',text:'Henüz kayıt yoksa yapay verilerle dene.'})}
+        <div class="settings-intro settings-version">
+          <h3>Sürüm bilgisi</h3>
+          <p>${esc(version)}</p>
+        </div>
+        <section class="settings-privacy" aria-labelledby="settings-privacy">
+          <h3 id="settings-privacy">Gizlilik</h3>
+          <p>Cüzdan kayıtları bu cihazda saklanır. Cüzdan görüntüsü Android’in son uygulamalar ekranında gizlenir.</p>
+          <p>Dışa aktardığın JSON dosyası cüzdan kayıtlarını içerir. Dosyayı erişimini kontrol edebildiğin bir konumda sakla.</p>
+        </section>
+      </div>
     </section>
   </div>`;
 }
