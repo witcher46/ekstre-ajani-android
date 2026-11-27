@@ -339,7 +339,7 @@ async function checkShowMore(browser){
       if(!scope.contains(active))return 'outside list ('+tagName+')';
       return dataset.edit??[dataset.action,dataset.transactionId].filter(Boolean).join(':');
     });
-    async function expand(name,list,key,ids,shown,tabTarget){
+    async function expand(name,list,key,ids,shown,tabTarget,checkIntermediateTab){
       const more=list.getByRole('button',{name:'Daha fazla göster',exact:true});
       const renderedIds=()=>list.locator('button[data-edit]').evaluateAll(buttons=>buttons.map(button=>button.dataset.edit));
       assert.deepEqual(await renderedIds(),ids.slice(0,shown),name+' before expanding');
@@ -349,6 +349,7 @@ async function checkShowMore(browser){
       assert.equal(await more.count(),ids.length>shown+150?1:0,name+' continuation');
       const focused=await activeIn(list);
       await page.keyboard.press('Tab');
+      if(checkIntermediateTab)await checkIntermediateTab(ids[shown]);
       const tab=await activeIn(list);
       const expectedFocus=ids[shown],expectedTab=tabTarget??ids[shown+1];
       if(focused!==expectedFocus||tab!==expectedTab)failures.push({name,key,focused,expectedFocus,tab,expectedTab});
@@ -387,7 +388,20 @@ async function checkShowMore(browser){
     await goHome();
     await openRoute(page,'import');
     await page.locator('[data-statement-view]').click();
-    await expand('statement detail',transactionView,'Enter',rowIds,150);
+    const statementRows=page.locator('#statement-transactions');
+    await expand('statement detail',transactionView,'Enter',rowIds,150,undefined,async rowId=>{
+      const row=statementRows.locator('article').filter({has:page.locator(`button[data-edit="${rowId}"]`)});
+      const disclosure=row.locator('details');
+      const summary=disclosure.locator('summary');
+      assert.equal(await summary.textContent(),'Orijinal banka açıklaması');
+      assert.equal(await summary.evaluate(element=>element===document.activeElement),true,
+        'Tab from the first newly revealed edit button focuses that row’s source disclosure');
+      assert.equal(await disclosure.evaluate(element=>element.open),false);
+      await page.keyboard.press('Enter');
+      assert.equal(await disclosure.evaluate(element=>element.open),true,'Enter opens the focused source disclosure');
+      assert.equal(await disclosure.getByText('SENTETIK MARKET',{exact:true}).isVisible(),true);
+      await page.keyboard.press('Tab');
+    });
     assert.deepEqual(errors,[]);
     assert.deepEqual(failures,[],'U05 must focus the first new primary control and continue from it with Tab');
     console.log('U05 Enter/Space and Tab passed in transactions, category drilldown, both report lists, and statement detail');
