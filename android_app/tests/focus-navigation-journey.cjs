@@ -581,6 +581,8 @@ async function checkIncomePlansHeading(browser){
     await openRoute(page,'plan');
     assert.deepEqual(await routeHeading(),{titles:['Planlama'],tabIndex:'-1',focused:true},
       'Planlama must keep its sole h1 and receive route focus');
+    assert.match(await main.locator('.lead').first().textContent(),/kaydedilen para/i,
+      'Planlama explains the distinction between estimates and recorded money');
     assert.deepEqual(await plans.getByRole('heading',{level:2}).allTextContents(),['Gelir planları']);
     assert.deepEqual(await plans.getByRole('heading',{level:3}).allTextContents(),panels);
     assert.equal(await page.evaluate(()=>window.readBackTitleForTest()),'Gelir planları');

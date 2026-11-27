@@ -746,7 +746,7 @@ async function reportsSliceJourney(browser) {
     await page.waitForFunction(() => document.activeElement.textContent === 'İnceleme ve kaynak bağlantıları');
 
     await openRoute(page,'plan');
-    await page.getByRole('button',{name:'+ Bütçe'}).click();
+    await page.getByRole('button',{name:'Bütçe ekle',exact:true}).click();
     await page.locator('[name=amount]').fill('5000');
     await page.locator('#submit').click();
     await page.getByRole('progressbar',{name:'Toplam bütçe kullanımı'}).waitFor();

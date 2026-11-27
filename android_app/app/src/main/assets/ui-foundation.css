@@ -785,3 +785,116 @@ body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[
   }
   .wallet-detail .wallet-detail-values dd,.wallet-detail .wallet-movement-history .transaction .amount {text-align:start}
 }
+
+.plan-surface,#modal:is([data-variant="plan"],[data-variant="plan-removal"]) {
+  --plan-accent:#d3c3ff;
+  --plan-ink:#241737;
+  --plan-bg:#1b1727;
+  --plan-panel:#241e33;
+  --plan-line:#4b3e60;
+  --plan-muted:#d4c8e5;
+  color:var(--shell-text);
+  overflow-wrap:anywhere;
+}
+.plan-surface .panel,.plan-intro {
+  background:var(--plan-panel);
+  border:1px solid var(--plan-line);
+  border-radius:var(--surface-radius);
+}
+.plan-intro {
+  padding:16px;
+  margin:0 0 var(--surface-gap);
+  background:linear-gradient(125deg,#35284d,var(--plan-panel));
+}
+.plan-surface .plan-intro h1 {font-size:1.75rem;letter-spacing:0;margin:0 0 8px}
+.plan-surface :is(h2,h3) {margin:0 0 8px;line-height:1.3}
+.plan-surface h2 {font-size:1.125rem}
+.plan-surface h3 {font-size:1rem}
+.plan-surface :is(p,dt,small) {color:var(--plan-muted)}
+.plan-surface .lead {margin:0 0 12px}
+.plan-surface .plan-note {border-inline-start:3px solid var(--plan-accent)}
+.plan-surface .empty-note {margin:12px 0 0}
+.plan-surface .plan-record {
+  margin-top:12px;
+  padding:12px;
+  min-width:0;
+  background:var(--plan-bg);
+  border:1px solid var(--plan-line);
+  border-radius:12px;
+}
+.plan-surface .plan-list {list-style:none;margin:0;padding:0}
+.plan-surface .plan-values {margin:8px 0}
+.plan-values > div {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  align-items:baseline;
+  gap:4px 12px;
+  padding:6px 0;
+  border-bottom:1px solid var(--plan-line);
+}
+.plan-values > div:last-child {border-bottom:0}
+.plan-values dd {margin:0;text-align:end;font-weight:700}
+.plan-surface :is(.plan-meta,.plan-status) {margin:4px 0}
+.plan-surface .plan-status {color:var(--plan-accent);font-weight:650}
+.plan-surface .plan-status.danger {color:#ffb6b1}
+.plan-surface .bar {display:block;accent-color:var(--plan-accent)}
+.plan-actions {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr));
+  gap:8px;
+  margin-top:10px;
+}
+.plan-shortcuts {grid-template-columns:repeat(auto-fit,minmax(min(100%,6rem),1fr))}
+.plan-surface .plan-intro .ui-icon {margin-inline-end:4px}
+.plan-surface .transaction {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  gap:6px 10px;
+}
+.plan-surface .transaction .amount {max-width:none;color:var(--shell-text)}
+.plan-surface .warning {color:#f1d6a1;background:#3d3424;border-color:#6a5835}
+.plan-surface :is(button,input),
+#modal:is([data-variant="plan"],[data-variant="plan-removal"]) :is(button,input,select) {
+  min-height:48px;
+  min-width:48px;
+  overflow-wrap:anywhere;
+}
+.plan-surface button:not(.primary):not(.transaction),
+#modal:is([data-variant="plan"],[data-variant="plan-removal"]) button:not(.primary) {
+  background:var(--plan-bg);
+  border-color:var(--plan-line);
+}
+.plan-surface .primary,#modal[data-variant="plan"] .primary {
+  color:var(--plan-ink);
+  background:var(--plan-accent);
+  border-color:var(--plan-accent);
+}
+.plan-surface :focus-visible,#modal:is([data-variant="plan"],[data-variant="plan-removal"]) :focus-visible {
+  outline-color:var(--plan-accent);
+}
+#modal:is([data-variant="plan"],[data-variant="plan-removal"]) {
+  --panel:var(--plan-panel);
+  --line:var(--plan-line);
+  --muted:var(--plan-muted);
+  background:var(--plan-panel);
+  border-color:var(--plan-line);
+  max-width:calc(100% - 20px);
+}
+#modal:is([data-variant="plan"],[data-variant="plan-removal"]) .dialog-head {position:static;flex-wrap:wrap}
+#modal[data-variant="plan"] label {font-size:.875rem}
+#modal:is([data-variant="plan"],[data-variant="plan-removal"]) #close {
+  width:auto;
+  font-size:inherit;
+  padding:6px 10px;
+}
+#modal:is([data-variant="plan"],[data-variant="plan-removal"]) #form-error:empty {display:none}
+#modal:is([data-variant="plan"],[data-variant="plan-removal"]) #form-error:not(:empty),
+.plan-dialog-note {padding:10px 12px;border:1px solid currentColor;border-radius:12px}
+.plan-dialog-note {margin:10px 0;color:var(--plan-muted);background:var(--plan-bg)}
+#modal[data-variant="plan-removal"] #submit {color:#321718;background:#ffb6b1;border-color:#ffb6b1}
+
+@media (max-width:360px) {
+  .plan-surface .plan-intro h1 {font-size:1.25rem}
+  .plan-surface .plan-values > div,.plan-surface .transaction {grid-template-columns:minmax(0,1fr)}
+  .plan-surface :is(.plan-values dd,.transaction .amount) {text-align:start}
+}

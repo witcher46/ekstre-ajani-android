@@ -650,16 +650,110 @@ export function importView(ctx,pending,failure) {
 }
 
 
+export function planView(ctx,summary,rows) {
+  const {state,period,periodControl,fmt,dateStatus,transactionList} = ctx;
+  const budgets = Object.entries(state.budgets).filter(([key]) => key.startsWith(period+'|'));
+  const statements = C.upcomingPayments(state).filter(item => item.type === 'statement');
+  const installments = rows.filter(row => row.installment);
+  const budgetCards = budgets.map(([key,limit]) => {
+    const category = key.slice(8);
+    const used = category === 'Toplam' ? summary.net : summary.categories.find(([name]) => name === category)?.[1] || 0;
+    const over = used > limit;
+    const valueText = `Net gider ${C.formatMoney(used)} · Bütçe sınırı ${C.formatMoney(limit)}${over ? ' · Bütçe aşıldı' : ''}`;
+    return `<article class="plan-record">
+      <h3>${esc(category)}</h3>
+      <dl class="plan-values">${detail(ctx,'Kaydedilen net gider',used,true)}${detail(ctx,'Bütçe sınırı',limit,true)}</dl>
+      ${over ? '<p class="plan-status danger">Bütçe aşıldı</p>' : ''}
+      <progress class="bar" aria-label="${esc(category)} bütçe kullanımı" aria-valuetext="${esc(valueText)}" max="${Math.max(limit,1)}" value="${C.positiveCents(used)}"></progress>
+      <div class="plan-actions"><button type="button" data-budget="${esc(key)}" aria-haspopup="dialog" aria-controls="modal">Bütçeyi kaldır</button></div>
+    </article>`;
+  });
+  const subscriptions = state.subscriptions.map(item => `<article class="plan-record">
+    <h3>${esc(item.name)}</h3>
+    <p class="plan-status">${dateStatus(item.next)}</p>
+    <p class="plan-meta">${esc(accountName(state,item.account))}</p>
+    <dl class="plan-values">${detail(ctx,'Planlanan ödeme',item.amount,true)}</dl>
+    <div class="plan-actions">
+      <button type="button" class="primary" data-pay="${esc(item.id)}" data-due="${esc(item.next)}" aria-haspopup="dialog" aria-controls="modal">Ödendi</button>
+      <button type="button" data-subdelete="${esc(item.id)}" aria-haspopup="dialog" aria-controls="modal">Aboneliği sil</button>
+    </div>
+  </article>`);
+  const statementCards = statements.map(item => `<article class="plan-record">
+    <h3>${esc(item.name)}</h3>
+    <p class="plan-status">${dateStatus(item.date)}</p>
+    <dl class="plan-values">${item.amount === null ? detail(ctx,'Tahmini kalan','Tutar bilinmiyor') : detail(ctx,'Tahmini kalan',item.amount,true)}</dl>
+  </article>`);
+  return shell(`<div class="plan-intro">
+    <h1>Planlama</h1>
+    <p class="lead">Gelirini, gider sınırlarını ve vadelerini planla. Planlanan tutarlar ve tahminler ile kaydedilen para hareketlerini ayrı takip et.</p>
+    <div class="plan-actions plan-shortcuts">
+      <button type="button" data-page="incomePlans">${uiIcon('transactions')} Gelir planları</button>
+      <button type="button" data-page="savingsGoals">${uiIcon('wallet')} Birikim hedefleri</button>
+      <button type="button" data-page="reminders">${uiIcon('plan')} Hatırlatmalar</button>
+    </div>
+  </div>
+  <section class="panel" aria-labelledby="plan-budgets">
+    <h2 id="plan-budgets">Aylık bütçe</h2>
+    <p>Seçtiğin ayın bütçe sınırını, net giderini ve taksitli hareketlerini gör.</p>
+    <div class="plan-actions">${periodControl}<button type="button" class="primary" data-action="budget" aria-haspopup="dialog" aria-controls="modal">Bütçe ekle</button></div>
+    ${budgetCards.join('') || noRows('Bu ay için bütçe yok. Toplam gider veya bir kategori için sınır belirleyebilirsin.')}
+  </section>
+  <section class="panel" aria-labelledby="plan-subscriptions">
+    <h2 id="plan-subscriptions">Abonelikler</h2>
+    <p>Ödeme yaptıktan sonra gerçek ödeme tarihini kaydet. Her vade için bir ödeme kaydedilir.</p>
+    <button type="button" class="primary" data-action="subscription" aria-haspopup="dialog" aria-controls="modal">Abonelik ekle</button>
+    ${subscriptions.join('') || noRows('Henüz aylık abonelik yok.')}
+  </section>
+  <section class="panel" aria-labelledby="plan-statements">
+    <h2 id="plan-statements">Ekstre ödeme takvimi</h2>
+    <p>Kalan tutarlar kaydettiğin ödemelere göre tahmin edilir. Ödeme durumunu bankandan kontrol et.</p>
+    ${statementCards.join('') || noRows('Takvimi görmek için son ödeme tarihi bulunan bir ekstre aktar.')}
+  </section>
+  ${incomePlansView(ctx,{embedded:true})}
+  <section class="panel" aria-labelledby="plan-installments">
+    <h2 id="plan-installments">Taksitli hareketler</h2>
+    <p>Taksit ayrıntıları ve kalan taksit tahmini kartın ayrıntısında gösterilir. Gelecekteki taksitler bugünün giderine eklenmez.</p>
+    ${installments.length ? transactionList(installments) : noRows('Bu ay için taksitli hareket yok.')}
+  </section>`,'plan-surface');
+}
+
 export function incomePlansView(ctx,{embedded=false}={}) {
-  const {state,esc,transactionList} = ctx;
+  const {state,transactionList,backTitle} = ctx;
   const titleTag = embedded ? 'h2' : 'h1';
   const panelTag = embedded ? 'h3' : 'h2';
   const plans = state.incomePlans || [];
   const categories = W.normalizeWallet(state).incomeCategories;
   const received = state.transactions.filter(t => t.incomePlanId);
-  return shell(`<section class="income-plans" aria-label="Gelir planları"><${titleTag} class="view-title">Gelir planları</${titleTag}><p class="lead">Maaşını veya düzenli gelirini planla; gerçek para geldiğinde alındı olarak onayla.</p><div class="toolbar"><button class="primary" data-action="incomePlan">+ Gelir planı</button><button data-action="addIncome">Tek seferlik gelir ekle</button></div>
-    <aside class="panel"><${panelTag}>Planlanan gelir bakiye değildir</${panelTag}><p>Plan oluşturmak hesabına para eklemez. Alındı onayı gerçek tarihi ve alıcı hesabı sorar. Aynı vade yalnızca bir kez gelir olarak kaydedilir.</p></aside>
-    <section class="panel"><${panelTag}>Alındı onayı bekleyen planlar</${panelTag}>${plans.map(plan => `<article class="income-plan"><div class="row"><div class="left"><strong>${esc(plan.name)}</strong><small>${ctx.dateStatus(plan.next)}<br>${esc(accountName(state,plan.account))} · ${esc(plan.category)}</small></div><b>${amount(ctx,plan.amount)}</b></div><div class="actions"><button class="primary" data-income-receive="${esc(plan.id)}" data-due="${esc(plan.next)}">Gelir alındı</button><button data-income-delete="${esc(plan.id)}" aria-label="${esc(plan.name)} gelir planını sil">Planı sil</button></div></article>`).join('') || noRows('Henüz düzenli gelir planın yok.')}</section>
-    <section class="panel"><div class="section-heading"><${panelTag}>Gelir kategorileri</${panelTag}><button data-action="incomeCategory">+ Kategori ekle</button></div><p>${categories.map(category => esc(category)).join(' · ')}</p></section>
-    <section class="panel"><${panelTag}>Alınmış planlı gelirler</${panelTag}>${transactionList(newest(received))}</section></section>`);
+  const section = `<section class="income-plans" aria-label="Gelir planları">
+    <div class="plan-intro">
+      <${titleTag}>Gelir planları</${titleTag}>
+      <div class="plan-actions">
+        <button type="button" class="primary" data-action="incomePlan" aria-haspopup="dialog" aria-controls="modal">Gelir planı ekle</button>
+        <button type="button" data-action="addIncome" aria-haspopup="dialog" aria-controls="modal">Tek seferlik gelir ekle</button>
+      </div>
+    </div>
+    <aside class="panel plan-note"><${panelTag}>Planlanan gelir bakiye değildir</${panelTag}>
+      <p>Para geldiğinde gerçek tarihi ve hesabı onayla. Aynı vade için bir gelir kaydedilir.</p>
+    </aside>
+    <section class="panel"><${panelTag}>Alındı onayı bekleyen planlar</${panelTag}>
+      ${plans.map(plan => `<article class="plan-record">
+        <strong>${esc(plan.name)}</strong>
+        <p class="plan-status">${ctx.dateStatus(plan.next)}</p>
+        <p class="plan-meta">${esc(accountName(state,plan.account))} · ${esc(plan.category || 'Diğer gelir')}</p>
+        <dl class="plan-values">${detail(ctx,'Beklenen gelir',plan.amount,true)}</dl>
+        <div class="plan-actions">
+          <button type="button" class="primary" data-income-receive="${esc(plan.id)}" data-due="${esc(plan.next)}" aria-haspopup="dialog" aria-controls="modal">Gelir alındı</button>
+          <button type="button" data-income-delete="${esc(plan.id)}" aria-label="${esc(plan.name)} gelir planını sil" aria-haspopup="dialog" aria-controls="modal">Planı sil</button>
+        </div>
+      </article>`).join('') || noRows('Henüz düzenli gelir planın yok.')}
+    </section>
+    <section class="panel"><${panelTag}>Gelir kategorileri</${panelTag}>
+      <p>${categories.map(esc).join(' · ')}</p>
+      <button type="button" data-action="incomeCategory" aria-haspopup="dialog" aria-controls="modal">Kategori ekle</button>
+    </section>
+    <section class="panel"><${panelTag}>Alınmış planlı gelirler</${panelTag}>
+      ${received.length ? transactionList(newest(received)) : noRows('Henüz alınmış planlı gelir kaydı yok.')}
+    </section>
+  </section>`;
+  return embedded ? section : shell(renderBackLink(backTitle)+section,'plan-surface');
 }
