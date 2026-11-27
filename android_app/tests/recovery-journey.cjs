@@ -17,7 +17,7 @@ async function settingsLayoutJourney(browser,url,width,scale){
  const stored=()=>page.evaluate(()=>localStorage.getItem('ekstre-android-v1'));
  const checkGeometry=async scope=>{
   const result=await scope.evaluate(root=>{
-   const controls=[...root.querySelectorAll('button,input:not([type=radio]),select,.category-rule-choice')].filter(node=>node.getClientRects().length);
+   const controls=[...root.querySelectorAll('button,summary,input:not([type=radio]),select,.category-rule-choice')].filter(node=>node.checkVisibility());
    return {
     overflow:document.documentElement.scrollWidth>innerWidth+1||root.scrollWidth>root.clientWidth+1,
     undersized:controls.filter(node=>node.offsetWidth<48||node.offsetHeight<48).map(node=>node.id||node.textContent.trim()),
@@ -38,15 +38,71 @@ async function settingsLayoutJourney(browser,url,width,scale){
  page.on('pageerror',error=>errors.push(error.message));
  try{
   page.setDefaultTimeout(4000);
+  await page.clock.setFixedTime(new Date('2026-11-26T12:00:00Z'));
   await page.goto(url);
   const settings=page.getByRole('button',{name:'Ayarlar',exact:true});
   await settings.waitFor();
   await page.evaluate(({good,wallet})=>{
-   localStorage.setItem('ekstre-android-v1',JSON.stringify({...wallet,categories:['Diğer','Sentetik gider kategorisi']}));
+   localStorage.setItem('ekstre-android-v1',JSON.stringify({...wallet,
+    accounts:[...wallet.accounts,{id:'card',type:'card',name:'Sentetik kredi kartı',opening:137500}],
+    transactions:[
+     {id:'polish-expense',kind:'expense',account:'card',date:'2026-11-10',period:'2026-11',desc:'Sentetik gider',category:'Diğer',amount:12345},
+     {id:'polish-refund',kind:'refund',account:'card',date:'2026-10-14',period:'2026-10',desc:'Sentetik iade',category:'Diğer',amount:500},
+    ],
+    categories:['Diğer','Sentetik gider kategorisi'],
+   }));
    localStorage.setItem('ekstre-android-v1-recovery',good);
   },{good,wallet});
   await page.reload();
   await page.evaluate(scale=>{document.documentElement.style.fontSize=scale+'%';},scale);
+  const palette=()=>page.evaluate(()=>{
+   const style=getComputedStyle(document.body);
+   return [style.backgroundColor,style.getPropertyValue('--accent').trim()];
+  });
+  const sharedPalette=await palette();
+  const paletteSamples=[];
+  const surface=element=>element.evaluate(node=>{
+   const style=getComputedStyle(node);
+   return [style.backgroundColor,style.backgroundImage,style.borderTopColor];
+  });
+  const walletTab=page.getByRole('button',{name:'Cüzdan',exact:true});
+  await walletTab.click();
+  paletteSamples.push(await palette());
+  const bankItem=main.locator('[data-account-view="bank"]');
+  const cardItem=main.locator('[data-card-view="card"]');
+  const bankSurface=await surface(bankItem);
+  const cardSurface=await surface(cardItem);
+  const amountSize=button=>button.locator('.money').evaluate(node=>getComputedStyle(node).fontSize);
+  const bankSize=await amountSize(bankItem),cardSize=await amountSize(cardItem);
+  await screenshot('cuzdan');
+  assert.match(await bankItem.getAttribute('aria-label'),/Banka hesabı · Kullanılabilir bakiye ₺743,25/);
+  await bankItem.click();
+  const nestedSurface=await surface(main.locator('.wallet-balance-hero'));
+  paletteSamples.push(await palette());
+  assert.equal(await back(),true);
+  assert.equal(await focused(bankItem),true);
+  await openRoute(page,'plan');
+  const planSurface=await surface(main.locator('.plan-intro').first());
+  paletteSamples.push(await palette());
+  await main.getByRole('button',{name:'Gelir planları',exact:true}).click();
+  paletteSamples.push(await palette());
+  const incomeSurface=await surface(main.locator('.plan-intro').first());
+  await screenshot('gelir-planlari');
+  await page.getByRole('button',{name:'Raporlar',exact:true}).click();
+  paletteSamples.push(await palette());
+  const chart=main.locator('.report-column');
+  assert(await chart.count(),'report columns are present');
+  const chartSeries=await chart.evaluateAll(columns=>columns.map(column=>{
+   const style=getComputedStyle(column);
+   const kind=column.classList.contains('negative')?'negative':column.closest('[aria-current]')?'selected':'positive';
+   const item=column.closest('li');
+   return {kind,fill:style.getPropertyValue('--column-fill').trim(),token:style.getPropertyValue('--chart-'+kind).trim(),
+    label:item.querySelector('.report-column-value').textContent,month:item.querySelector('time .sr-only').textContent};
+  }));
+  assert(chartSeries.some(column=>column.kind==='negative'&&/^-/.test(column.label)));
+  assert(chartSeries.every(column=>column.fill&&column.fill===column.token&&column.label&&column.month));
+  await openRoute(page,'import');
+  paletteSamples.push(await palette());
   await settings.click();
   const heading=main.getByRole('heading',{level:1});
   assert.equal(await focused(heading),true);
@@ -56,13 +112,75 @@ async function settingsLayoutJourney(browser,url,width,scale){
   const restore=replace.getByRole('button',{name:'Yedek yükle',exact:true});
   await checkGeometry(main);
   await screenshot('ayarlar');
-  const before=await stored();
-  await selectFile(restore,broken);
-  await main.getByRole('heading',{name:'Yedekleme işlemi tamamlanamadı'}).waitFor();
-  assert.equal(await focused(restore),true);
-  assert.equal(await stored(),before);
+  paletteSamples.push(await palette());
+  assert.deepEqual(paletteSamples,paletteSamples.map(()=>sharedPalette),'representative routes share canvas and accent');
+  assert.deepEqual(bankSurface,cardSurface,'bank and credit cards use the same visual surface');
+  assert.deepEqual(nestedSurface,bankSurface,'wallet detail keeps the wallet card surface');
+  assert.equal(bankSize,cardSize,'bank and credit card amounts use the same size');
+  assert.deepEqual(incomeSurface,planSurface,'Plan and Income Plans use the same introductory surface');
+  assert.deepEqual(await surface(main.locator('.settings-intro')),planSurface,'Settings uses the same introductory surface');
+  const expenseDisclosure=main.locator('#settings-expense-disclosure');
+  const summary=expenseDisclosure.locator('summary');
+  assert.equal((await summary.innerText()).trim(),'Gider kategorileri');
+  const editExpense=main.getByRole('button',{name:'Sentetik gider kategorisi kategorisini düzenle',exact:true});
+  assert.equal(await editExpense.isVisible(),false);
+  await summary.focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await editExpense.isVisible(),true);
   await checkGeometry(main);
+  await editExpense.click();
+  assert.equal(await back(),true);
+  assert.equal(await focused(editExpense),true);
+  await editExpense.click();
+  await dialog.getByLabel('Kategori adı').fill('Sentetik güncel kategori');
+  await dialog.getByRole('button',{name:'Kaydet',exact:true}).click();
+  assert.equal(await expenseDisclosure.evaluate(node=>node.open),true);
+  await walletTab.click();
+  assert.equal(await back(),true);
+  assert.equal(await expenseDisclosure.evaluate(node=>node.open),false);
+  const before=await stored();
+  const feedback=replace.getByRole('region',{name:'Yedek açılamadı'});
+  const announcement=page.locator('#error-announcement');
+  const assertRestoreFailure=async (reason,excluded)=>{
+   await feedback.waitFor();
+   const bannerText=await feedback.innerText();
+   const announcementText=await announcement.textContent();
+   if(excluded){
+    assert.doesNotMatch(bannerText,excluded);
+    assert.doesNotMatch(announcementText,excluded);
+   }
+   assert.match(bannerText,reason);
+   assert.match(bannerText,/Başka bir Android JSON yedeği seç/);
+   assert.match(announcementText,reason);
+   assert.equal(await page.locator('#toast.visible').count(),0);
+   assert.equal(await focused(restore),true);
+   assert.equal(await stored(),before);
+   assert.equal(await page.evaluate(()=>localStorage.getItem('ekstre-android-v1-recovery')),good);
+  };
+  const parserDetails=/GizliX|Unexpected token|not valid JSON|SyntaxError|position \d+/i;
+  await selectFile(restore,'GizliX-Isaret-123');
+  await assertRestoreFailure(/Yedek dosyası geçerli bir JSON biçiminde değil/,parserDetails);
   await screenshot('yedek-hatasi');
+  await selectFile(restore,JSON.stringify({...wallet,version:99}));
+  await assertRestoreFailure(/Bu Android cüzdan yedeği sürümü desteklenmiyor/);
+  await selectFile(restore,JSON.stringify({...wallet,accounts:[null]}));
+  await assertRestoreFailure(/Yedek dosyası okunamadı/,/Cannot read|TypeError/);
+  const decoder=await page.evaluateHandle(()=>{
+   const original=File.prototype.text;
+   File.prototype.text=async()=>{throw Error('Synthetic decoder exception GizliX');};
+   return original;
+  });
+  await selectFile(restore,good);
+  await assertRestoreFailure(/Yedek dosyası okunamadı/,/GizliX|Synthetic decoder exception/);
+  await page.evaluate(original=>{File.prototype.text=original;},decoder);
+  await decoder.dispose();
+  await page.locator('#backup-file').evaluate(input=>{
+   input.click=()=>{throw Error('Synthetic chooser exception');};
+  });
+  await restore.click();
+  await assertRestoreFailure(/Dosya seçici açılamadı/,/Synthetic chooser exception/);
+  await page.locator('#backup-file').evaluate(input=>{delete input.click;});
+  await checkGeometry(main);
   await selectFile(restore,good);
   assert.equal(await focused(dialog.getByRole('heading',{name:'JSON yedeğini incele'})),true);
   assert.equal(await stored(),before);
@@ -91,11 +209,12 @@ async function settingsLayoutJourney(browser,url,width,scale){
 
   await openRoute(page,'categories');
   assert.equal(await focused(heading),true);
+  assert.equal(await main.getByRole('button',{name:'Sentetik güncel kategori kategorisini düzenle',exact:true}).isVisible(),true);
   const addRule=main.getByRole('button',{name:'+ Satıcı kuralı',exact:true});
   await addRule.click();
   await checkGeometry(dialog);
   await dialog.getByLabel('Satıcı adı').fill('Sentetik uzun satıcı kuralı');
-  await dialog.getByLabel('Önerilecek kategori').selectOption('Sentetik gider kategorisi');
+  await dialog.getByLabel('Önerilecek kategori').selectOption('Sentetik güncel kategori');
   await dialog.getByRole('button',{name:'Kaydet',exact:true}).click();
   assert.equal(await focused(addRule),true);
   await checkGeometry(main);
@@ -113,6 +232,7 @@ async function settingsLayoutJourney(browser,url,width,scale){
   assert.equal(await focused(heading),true);
   assert.equal(await back(),true);
   assert.equal(await heading.textContent(),'Ayarlar');
+  assert.equal(await expenseDisclosure.evaluate(node=>node.open),false);
 
   await page.evaluate(broken=>localStorage.setItem('ekstre-android-v1',broken),broken);
   await page.reload();

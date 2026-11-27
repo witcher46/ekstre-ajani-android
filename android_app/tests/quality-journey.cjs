@@ -811,9 +811,10 @@ async function reportsSliceJourney(browser) {
     await page.locator('#submit').click();
     await page.waitForFunction(() => document.activeElement.textContent === 'Kuralı düzenle');
     assert.match(await page.locator('main').innerText(), /Diğer/);
-    await page.getByRole('button',{name:'İnceleme ve kaynak bağlantıları'}).click();
+    const reviewShortcut=page.getByRole('button',{name:'İnceleme ve kaynak bağlantıları',exact:true});
+    await reviewShortcut.click();
     assert.equal(await page.evaluate(() => window.handleBack()), true);
-    await page.waitForFunction(() => document.activeElement.textContent === 'İnceleme ve kaynak bağlantıları');
+    assert.equal(await reviewShortcut.evaluate(button=>button===document.activeElement),true);
 
     await openRoute(page,'plan');
     await page.getByRole('button',{name:'Bütçe ekle',exact:true}).click();
@@ -854,6 +855,7 @@ async function reportsSliceJourney(browser) {
     await page.getByLabel('Satıcı adı').fill('MIGROS 5432 ANKARA');
     await page.locator('[name=category]').selectOption('Giyim');
     await page.locator('#submit').click();
+    await page.locator('#settings-expense-disclosure > summary').click();
     await page.getByRole('button',{name:'Giyim kategorisini düzenle'}).click();
     await page.getByLabel('Kategori adı').fill('Giyim ve aksesuar');
     await page.locator('#submit').click();
@@ -888,6 +890,7 @@ async function reportsSliceJourney(browser) {
     await page.keyboard.press('Escape');
 
     await page.locator('#settings').click();
+    await page.locator('#settings-expense-disclosure > summary').click();
     await page.getByRole('button',{name:'Eğitim kategorisini düzenle'}).click();
     await page.getByRole('button',{name:'Kategoriyi sil'}).click();
     await page.getByLabel('İlgili kuralları kaldır').check();
@@ -928,7 +931,7 @@ async function reportsSliceJourney(browser) {
       name:'sentetik-gecersiz.json', mimeType:'application/json',
       buffer:Buffer.from(JSON.stringify({...before,transactions:[{id:'bozuk'}]})),
     });
-    await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('geçersiz'));
+    await page.waitForFunction(() => document.querySelector('#backup-feedback')?.textContent.includes('geçersiz'));
     assert.deepEqual(await stored(), before);
 
     const corrupted=structuredClone(before);
@@ -942,7 +945,7 @@ async function reportsSliceJourney(browser) {
       name:'sentetik-bozuk-baglanti.json',mimeType:'application/json',
       buffer:Buffer.from(JSON.stringify(corrupted)),
     });
-    await page.waitForFunction(()=>/bağlantı|eşleşme/i.test(document.querySelector('#toast').textContent));
+    await page.waitForFunction(()=>/bağlantı|eşleşme/i.test(document.querySelector('#backup-feedback')?.textContent));
     assert.deepEqual(await stored(),before);
     assert.equal(await page.evaluate(()=>localStorage.getItem('ekstre-android-v1-recovery')),beforeRecovery);
     assert.equal(confirmations.length,beforeConfirmations);

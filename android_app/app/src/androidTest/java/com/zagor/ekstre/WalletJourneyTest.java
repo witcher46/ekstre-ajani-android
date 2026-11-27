@@ -351,7 +351,9 @@ public class WalletJourneyTest {
    JSONObject corrupted=new JSONObject(original);
    JSONArray rows=corrupted.getJSONArray("transactions");
    rows.getJSONObject(1).put("source","csv").put("matchStatus","linked").put("linkedTo",rows.getJSONObject(0).getString("id"));
-   assertRejectedRestore(a,context,bridge.get(),"synthetic-invalid-link.json",corrupted,"işlem bağlantısı");
+   assertRejectedRestore(a,context,bridge.get(),"synthetic-malformed.json","GizliX-Isaret-123",
+    "Yedek dosyası geçerli bir JSON biçiminde değil.","GizliX|Unexpected token|not valid JSON|SyntaxError");
+   assertRejectedRestore(a,context,bridge.get(),"synthetic-invalid-link.json",corrupted.toString(),"işlem bağlantısı",null);
 
    JSONObject distant=new JSONObject(original);
    JSONArray distantRows=distant.getJSONArray("transactions");
@@ -372,18 +374,22 @@ public class WalletJourneyTest {
     if(!pdf)payment.put("csvKey","synthetic-legacy-csv");
     distantRows.put(payment);
    }
-   assertRejectedRestore(a,context,bridge.get(),"synthetic-distant-link.json",distant,"PDF ve CSV ödemelerinin tarihleri");
+   assertRejectedRestore(a,context,bridge.get(),"synthetic-distant-link.json",distant.toString(),"PDF ve CSV ödemelerinin tarihleri",null);
    assertEquals(original,bridge.get().load());
    assertEquals(recovery,bridge.get().recovery());
   }
  }
  private void assertRejectedRestore(ActivityScenario<MainActivity> a,Context context,MainActivity.Bridge bridge,
-                                    String name,JSONObject corrupted,String error)throws Exception{
+                                    String name,String corrupted,String error,String excluded)throws Exception{
   String original=bridge.load(),recovery=bridge.recovery();
-  Uri file=document(name,"application/json",corrupted.toString().getBytes(StandardCharsets.UTF_8));
+  Uri file=document(name,"application/json",corrupted.getBytes(StandardCharsets.UTF_8));
   try{
    openBackupPicker(a);selectDownload(name);
-   waitJs(a,"document.querySelector('#toast').textContent.includes("+JSONObject.quote(error)+")");
+   waitJs(a,"document.querySelector('#backup-feedback')?.textContent.includes("+JSONObject.quote(error)+")");
+   assertEquals("true",js(a,"document.querySelector('#error-announcement').textContent.includes("+JSONObject.quote(error)+")"));
+   if(excluded!=null)assertEquals("false",js(a,"new RegExp("+JSONObject.quote(excluded)+",'i').test("
+    +"document.querySelector('#backup-feedback').textContent+document.querySelector('#error-announcement').textContent)"));
+   assertEquals("true",js(a,"document.activeElement.matches('[data-action=restore]') && !document.querySelector('#toast.visible')"));
    assertEquals(original,bridge.load());
    assertEquals(recovery,bridge.recovery());
   }finally{context.getContentResolver().delete(file,null,null);}

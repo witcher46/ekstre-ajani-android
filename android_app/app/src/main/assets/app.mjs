@@ -19,7 +19,7 @@ import {renderBalanceApprovalHistory} from './ui/balance-history.mjs';
 import {renderSavingsGoals,savingsGoalFields} from './ui/savings-goals.mjs';
 import {dueItems,notificationPlan,readSnoozes} from './reminders.mjs';
 import {renderReminders} from './ui/reminders.mjs';
-import {settingsView,categoriesView,recoveryView,replacementDetails} from './ui/settings.mjs';
+import {settingsView,categoriesView,recoveryView,replacementDetails,backupFailureHeading,restoreReadFailureMessage,unreadableRestoreFile} from './ui/settings.mjs';
 const $=id=>document.getElementById(id);
 const plainMoney=C.formatMoney;
 const fmt=n=>`<span class="money">${plainMoney(n)}</span>`,key='ekstre-android-v1';
@@ -28,7 +28,7 @@ const history=[];
 let importDraft;
 let pdfRequest=null,importFailure=null;
 let actionTrigger=null,csvOpener=null;
-let backupFileOpener=null,backupFailure='';
+let backupFileOpener=null,backupFailure=null;
 let state=W.normalizeWallet(C.empty()),detailId=null,expenseCategory=null,page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,toastTimer,loadFailed=false;
 const accountHistoryLimits=new Map();
 const accountHistoryKey=id=>JSON.stringify([detailId,id,id==='account-month-history'?period:null]);
@@ -50,6 +50,7 @@ function notice(message,{error=false}={}){
  const live=$(error?'error-announcement':'status-announcement');
  live.textContent=message;
  $('toast').textContent=message;
+ $('toast').dataset.tone=error?'error':'status';
  $('toast').classList.add('visible');
  clearTimeout(toastTimer);
  toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),7000);
@@ -123,7 +124,7 @@ function commit(next){
 }
 const copyLabel=slot=>slot===3?'Geri yükleme öncesi kopya':'Son kayıt öncesi kopya';
 function finishReplacement(wallet,raw){
- loadFailed=false;backupFailure='';setWallet(wallet,tokenOf(raw));
+ loadFailed=false;backupFailure=null;setWallet(wallet,tokenOf(raw));
  pending=null;pdfRequest=null;history.length=0;detailId=null;
  balanceDraft={};balanceReviewToken=null;balanceHistoryArchive=null;balanceHistoryView={};
  page='home';render();focusMain();
@@ -203,6 +204,10 @@ function restoreFocus(target,{returning=false}={}){
  if(!opener){focusMain();return;}
  if(returning){
   for(let section=opener.closest('details');section;section=section.parentElement.closest('details')){
+   if(section.id==='settings-expense-disclosure'&&!section.open){
+    section.querySelector('summary').focus({preventScroll:true});
+    return;
+   }
    if(!section.querySelector(':scope > summary')?.contains(opener))section.open=true;
   }
  }
@@ -235,13 +240,20 @@ window.handleBack=()=>{
  render();restoreFocus(previous.opener,{returning:true});window.scrollTo(0,previous.scroll);
  return true;
 };
-function showBackupFailure(message,opener=focusTarget(document.activeElement)){
- backupFailure=message;
- if((loadFailed||page==='settings')&&!$('modal').open){
+function showBackupFailure(message,opener=focusTarget(document.activeElement),action='backup'){
+ backupFailure=message?{message,action}:null;
+ const inline=(loadFailed||page==='settings')&&!$('modal').open;
+ if(inline){
   render();
-  restoreFocus(opener,{returning:true});
+  restoreFocus(opener,{returning:!message});
  }
- if(message)errorNotice(message);
+ if(!message){
+  $('error-announcement').textContent='';
+ }else if(inline){
+  clearTimeout(toastTimer);
+  $('toast').classList.remove('visible');
+  $('error-announcement').textContent=backupFailureHeading(action)+'. '+message;
+ }else errorNotice(message);
 }
 window.nativeError=showBackupFailure;window.nativeNotice=message=>notice(message);
 function invalidatePdfPreview(){
@@ -466,7 +478,7 @@ function render(){
  }else if(page==='review'){
  html=renderReviewCenter(state,backTitle);
  }else{
-  html=settingsView({backTitle,version:installedVersionLabel(),categorySections:categorySettings(),backupFailure});
+  html=settingsView({backTitle,version:installedVersionLabel(),categorySections:categorySettings({disclosure:true}),backupFailure});
  }
  $('main').innerHTML=html;
  $('main').querySelector('h1')?.setAttribute('tabindex','-1');
@@ -526,8 +538,8 @@ function confirmSavingsGoalRemoval(id){
  },'Hedefi sil',true);
 }
 
-function categorySettings(){
- return expenseCategoriesPanel()+merchantRulesPanel()+
+function categorySettings({disclosure=false}={}){
+ return expenseCategoriesPanel(disclosure)+merchantRulesPanel()+
   '<section class="panel" aria-labelledby="settings-income-categories"><h2 id="settings-income-categories">Gelir kategorileri</h2>'+
   '<ul class="settings-tags">'+state.incomeCategories.map(name=>'<li>'+esc(name)+'</li>').join('')+'</ul>'+
   '<button type="button" data-action="incomeCategory" aria-haspopup="dialog" aria-controls="modal">+ Gelir kategorisi</button></section>';
@@ -541,10 +553,18 @@ function merchantRulesPanel(){
     <button type="button" data-merchant-rule="${esc(rule.id)}" aria-haspopup="dialog" aria-controls="modal">Kuralı düzenle</button></div>`).join('')||'<p class="empty-note">Henüz kaydedilmiş satıcı kuralı yok.</p>'}
  </section>`;
 }
-function expenseCategoriesPanel(){
+function expenseCategoriesPanel(disclosure){
  const rows=state.categories.map(name=>`<div class="settings-record expense-category-setting"><span>${esc(name)}</span><button type="button" data-expense-category-edit="${esc(name)}" aria-label="${esc(name+' kategorisini düzenle')}" aria-haspopup="dialog" aria-controls="modal">Düzenle</button></div>`).join('');
+ const content=`<button type="button" data-action="category" aria-haspopup="dialog" aria-controls="modal">+ Kategori ekle</button>${rows}`;
+ if(disclosure){
+  const open=$('settings-expense-disclosure')?.open;
+  return `<details class="panel settings-disclosure" id="settings-expense-disclosure"${open?' open':''}>
+   <summary class="settings-row">Gider kategorileri ${uiIcon('next')}</summary>
+   <div class="settings-disclosure-content">${content}</div>
+  </details>`;
+ }
  return `<section class="panel" aria-labelledby="settings-expense-categories"><h2 id="settings-expense-categories">Gider kategorileri</h2>
-  <button type="button" data-action="category" aria-haspopup="dialog" aria-controls="modal">+ Kategori ekle</button>${rows}
+  ${content}
  </section>`;
 }
 function expenseCategoryForm(category){
@@ -1189,9 +1209,13 @@ const actions={
  },
  retryImport:()=>{if(importFailure)actions[importFailure.format]();},
  restore:()=>{
-  backupFileOpener=focusTarget(actionTrigger);
-  if(backupFailure)showBackupFailure('',backupFileOpener);
-  $('backup-file').click();
+  const opener=backupFileOpener=focusTarget(actionTrigger);
+  if(backupFailure)showBackupFailure('',opener);
+  try{$('backup-file').click();}
+  catch{
+   backupFileOpener=null;
+   showBackupFailure('Dosya seçici açılamadı.',opener,'restore');
+  }
  },
  backup:()=>{
   if(backupFailure)showBackupFailure('',focusTarget(actionTrigger));
@@ -1215,7 +1239,7 @@ const actions={
  },
  cancelImport:()=>{invalidatePdfPreview();document.querySelector('[data-action="pdf"]')?.focus();}
 };
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if('balanceHistory' in b.dataset){go('balanceApprovalHistory',b.dataset.balanceHistory);}else if(b.dataset.balanceApproval){go('balanceApprovalDetail',b.dataset.balanceApproval);}else if(b.dataset.balanceReapprove){reexamineBalanceApproval(b.dataset.balanceReapprove);}else if(b.dataset.balanceReview){go('balanceReview',b.dataset.balanceReview);}else if('reportCategory' in b.dataset){go('reportCategory',b.dataset.reportCategory);}else if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete)confirmIncomePlanRemoval(b.dataset.incomeDelete);else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action](e);else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule)confirmMerchantRuleRemoval(b.dataset.removeRule);else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link)confirmReviewDecision(b.dataset.link,'link');else if(b.dataset.distinct)confirmReviewDecision(b.dataset.distinct,'distinct');else if(b.dataset.subdelete)confirmSubscriptionRemoval(b.dataset.subdelete);else if(b.dataset.budget)confirmBudgetRemoval(b.dataset.budget);}catch(error){if(b.closest('#quick-add-options'))showDialogError(error.message);else if(b.dataset.action==='backup'||b.dataset.action==='recover')showBackupFailure(error.message,focusTarget(b));else errorNotice(error.message);}finally{actionTrigger=null;}});
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if('balanceHistory' in b.dataset){go('balanceApprovalHistory',b.dataset.balanceHistory);}else if(b.dataset.balanceApproval){go('balanceApprovalDetail',b.dataset.balanceApproval);}else if(b.dataset.balanceReapprove){reexamineBalanceApproval(b.dataset.balanceReapprove);}else if(b.dataset.balanceReview){go('balanceReview',b.dataset.balanceReview);}else if('reportCategory' in b.dataset){go('reportCategory',b.dataset.reportCategory);}else if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete)confirmIncomePlanRemoval(b.dataset.incomeDelete);else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action](e);else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule)confirmMerchantRuleRemoval(b.dataset.removeRule);else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link)confirmReviewDecision(b.dataset.link,'link');else if(b.dataset.distinct)confirmReviewDecision(b.dataset.distinct,'distinct');else if(b.dataset.subdelete)confirmSubscriptionRemoval(b.dataset.subdelete);else if(b.dataset.budget)confirmBudgetRemoval(b.dataset.budget);}catch(error){if(b.closest('#quick-add-options'))showDialogError(error.message);else if(b.dataset.action==='backup'||b.dataset.action==='recover')showBackupFailure(error.message,focusTarget(b),b.dataset.action);else errorNotice(error.message);}finally{actionTrigger=null;}});
 function updateImportTarget(field){
  field.nextElementSibling.firstElementChild.textContent=field.selectedOptions[0]?.textContent??'';
 }
@@ -1248,11 +1272,20 @@ $('backup-file').onchange=async e=>{
  backupFileOpener=null;
  e.target.value='';
  if(!file)return;
+ if(file.size>C.BACKUP_LIMIT){
+  showBackupFailure('Yedek 32 MB’den büyük olamaz.',opener,'restore');
+  return;
+ }
  try{
-  if(file.size>C.BACKUP_LIMIT)throw Error('Yedek 32 MB’den büyük olamaz.');
-  const next=C.readBackup(await file.text());
+  const raw=await file.text();
+  let next;
+  try{next=C.readBackup(raw);}
+  catch(error){
+   showBackupFailure(restoreReadFailureMessage(error),opener,'restore');
+   return;
+  }
   restoreExternal(next,opener);
- }catch(error){showBackupFailure(error.message,opener);}
+ }catch{showBackupFailure(unreadableRestoreFile,opener,'restore');}
 };
 $('csv-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{
  if(file.size>5*1024*1024)throw Error('CSV en fazla 5 MB olabilir.');
