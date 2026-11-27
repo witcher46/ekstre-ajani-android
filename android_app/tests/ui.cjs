@@ -12,7 +12,7 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  await page.screenshot({path:path.join(out,'overview.png'),fullPage:true});
  await page.reload();await page.getByText('Market alışverişi',{exact:true}).waitFor();
  await openRoute(page,'transactions');await page.locator('[data-edit]').first().click();await page.locator('[name=note]').fill('Mobil deneme');await page.getByRole('button',{name:'Kaydet',exact:true}).click();
- await openRoute(page,'plan');await page.getByRole('button',{name:'+ Bütçe',exact:true}).click();await page.locator('[name=amount]').fill('5000');await page.getByRole('button',{name:'Kaydet',exact:true}).click();assert(await page.getByText('Toplam',{exact:true}).count());
+ await openRoute(page,'plan');await page.getByRole('button',{name:'Bütçe ekle',exact:true}).click();await page.locator('[name=amount]').fill('5000');await page.getByRole('button',{name:'Kaydet',exact:true}).click();assert(await page.getByText('Toplam',{exact:true}).count());
  for(const name of ['wallet','transactions','plan','import']){await openRoute(page,name);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'horizontal overflow: '+name);}
  await page.locator('nav [data-page="home"]').click();await page.getByRole('button',{name:'Raporlar ↗'}).click();await page.getByRole('heading',{name:'Kategori dağılımı'}).waitFor();
  await page.setViewportSize({width:320,height:640});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(out,'reports-small.png'),fullPage:true});
