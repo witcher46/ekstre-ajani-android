@@ -106,8 +106,9 @@ public class WalletJourneyTest {
    try{
     waitJs(a,"document.querySelector('#toast').textContent.includes('iptal edildi')");
     for(int i=0;i<2;i++){
-     click(a,"[data-action=pdf]");waitPicker();selectDownload("ekstre-synthetic.pdf");
-     waitJs(a,"!!document.querySelector('#import-account')");
+     click(a,i==0?"[data-action=retryImport]":"[data-action=pdf]");waitPicker();selectDownload("ekstre-synthetic.pdf");
+     waitJs(a,"!!document.querySelector('#import-account') && document.activeElement.id==='statement-preview-title'");
+     waitJs(a,"!!document.querySelector('.statement-movement-group h4')");
      String card=js(a,"JSON.parse(Android.load()).accounts[3].id");
      js(a,"document.getElementById('import-account').value="+card);
      click(a,"#acknowledge-import");click(a,"[data-action=confirmImport]");
@@ -121,13 +122,13 @@ public class WalletJourneyTest {
     click(a,"[data-action=pdf]");waitPicker();
     assertEquals("true",js(a,"!document.querySelector('[data-action=confirmImport]')"));
     selectDownload("ekstre-synthetic-broken.pdf");
-    waitJs(a,"document.querySelector('#error-announcement').textContent.includes('PDF okunamadı')");
+    waitJs(a,"document.querySelector('#error-announcement').textContent.includes('PDF okunamadı') && document.activeElement.matches('[data-action=retryImport]')");
     assertEquals("true",js(a,"!document.querySelector('[data-action=confirmImport]')"));
     assertEquals(original,js(a,"Android.load()"));
     assertEquals(recovery,js(a,"Android.recovery()"));
    }finally{context.getContentResolver().delete(uri,null,null);context.getContentResolver().delete(broken,null,null);}
    // CSV still passes through its actual file-input change handler, using a synthetic File.
-   js(a,"(()=>{const input=document.getElementById('csv-file'),dt=new DataTransfer();dt.items.add(new File(['bank,kart,period,date,desc,amount_cents,category,tur\\nQNB,Kart,2026-10,2026-10-05,SENTETIK CSV,8000,Market,harcama'],'synthetic.csv',{type:'text/csv'}));input.files=dt.files;input.dispatchEvent(new Event('change'));})()");waitJs(a,"!!document.querySelector('[name=card-0]')");submit(a);assertEquals("10",js(a,"JSON.parse(Android.load()).transactions.length"));
+   js(a,"(()=>{const input=document.getElementById('csv-file'),dt=new DataTransfer();dt.items.add(new File(['bank,kart,period,date,desc,amount_cents,category,tur\\nQNB,Kart,2026-10,2026-10-05,SENTETIK CSV,8000,Market,harcama'],'synthetic.csv',{type:'text/csv'}));input.files=dt.files;input.dispatchEvent(new Event('change'));})()");waitJs(a,"!!document.querySelector('#modal[data-variant=statement-csv][open] .csv-source-card [name=card-0]')");submit(a);assertEquals("10",js(a,"JSON.parse(Android.load()).transactions.length"));
    // Native restore is atomic and retains the previous JSON; UI restore is separately tested in Chrome.
    AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();a.onActivity(activity->bridge.set(activity.new Bridge()));String backup=bridge.get().load();JSONObject changed=new JSONObject(backup);changed.put("syntheticExtra","keep recovery");assertTrue(SnapshotAtomicityTest.saveFixture(bridge.get(),changed.toString()));assertTrue(RecoverySafetyTest.restoreFixture(bridge.get(),backup));assertTrue(new JSONObject(bridge.get().recovery()).has("syntheticExtra"));assertEquals(10,new JSONObject(bridge.get().load()).getJSONArray("transactions").length());
    a.recreate();waitJs(a,"!!document.querySelector('[data-action=addTransaction]')");assertEquals("10",js(a,"JSON.parse(Android.load()).transactions.length"));

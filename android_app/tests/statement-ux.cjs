@@ -45,6 +45,14 @@ async function capture(page,locator,name){
   }
 }
 
+async function scaleText(locator,scale){
+  await locator.evaluate((root,factor)=>{
+    const elements=[root,...root.querySelectorAll('*')];
+    const sizes=elements.map(el=>parseFloat(getComputedStyle(el).fontSize));
+    elements.forEach((el,i)=>el.style.fontSize=factor===1?'':(sizes[i]*factor)+'px');
+  },scale);
+}
+
 async function checkLayout(page,selector){
   let count=0;
   for(const width of [320,360,390,412]){
@@ -55,11 +63,11 @@ async function checkLayout(page,selector){
         const original=elements.map(e=>[e,e.style.fontSize,parseFloat(getComputedStyle(e).fontSize)]);
         for(const [e,,size] of original)e.style.fontSize=(size*scale)+'px';
         const failures=[];
-        for(const el of root.querySelectorAll('button,select,article,dt,dd,.money')){
+        for(const el of root.querySelectorAll('button,select,summary,article,dt,dd,.money,.import-category-choice,.acknowledge')){
           const r=el.getBoundingClientRect();
           if(!r.width||!r.height)continue;
           if(r.left<0||r.right>innerWidth+1||el.scrollWidth>el.clientWidth+1)failures.push(el.textContent.trim().slice(0,75));
-          if(el.matches('button,select')&&(r.height<44||r.width<44))failures.push('touch target '+el.textContent.trim());
+          if(el.matches('button,select,summary,.import-category-choice,.acknowledge')&&(r.height<(root.matches('.expense-breakdown')?44:48)||r.width<44))failures.push('touch target '+el.textContent.trim());
         }
         for(const group of root.querySelectorAll('.preview-card-controls,.preview-actions,.statement-totals,.expense-category-values')){
           const children=[...group.children].map(e=>e.getBoundingClientRect());
@@ -120,6 +128,12 @@ async function run() {
     await page.evaluate(text=>window.onPdfText(text),statement);
     const preview=page.getByRole('region',{name:'Aktarım önizlemesi'});
     await preview.waitFor();
+    await preview.getByText('PDF ekstresi', {exact:true}).waitFor();
+    assert.equal(await page.evaluate(()=>document.activeElement.id),'statement-preview-title');
+    const incoming = preview.getByRole('region', {name:'Okunan hareketler'});
+    for (const group of ['Harcamalar', 'Ödemeler', 'İadeler ve indirimler']) {
+      await incoming.getByRole('heading', {name:new RegExp('^'+group)}).waitFor();
+    }
     const cardPicker=preview.getByRole('combobox',{name:'Hedef kredi kartı'});
     await cardPicker.focus();
     assert.equal(await page.evaluate(()=>document.activeElement.id),'import-account');
@@ -131,16 +145,13 @@ async function run() {
     await preview.getByText('Toplamlar doğrulandı').click();
     await page.setViewportSize({width:320,height:844});
     const controls=preview.locator('.preview-card-controls');
-    await controls.evaluate(root=>{
-      const elements=[root,...root.querySelectorAll('*')];
-      const sizes=elements.map(el=>parseFloat(getComputedStyle(el).fontSize));
-      elements.forEach((el,i)=>el.style.fontSize=(sizes[i]*2)+'px');
-    });
+    await scaleText(preview,2);
     const chosenName=controls.locator('#import-account-display');
     assert.equal(await chosenName.innerText(),'Günlük kredi kartı');
     assert.ok(await chosenName.evaluate(el=>el.clientHeight>parseFloat(getComputedStyle(el).lineHeight)));
     await capture(page,controls,'04-320px-buyuk-yazi.png');
-    await controls.evaluate(root=>[root,...root.querySelectorAll('*')].forEach(el=>el.style.fontSize=''));
+    await capture(page,preview,'05-pdf-320px-200.png');
+    await scaleText(preview,1);
     await page.setViewportSize({width:390,height:844});
     await preview.getByRole('button',{name:'+ Kart ekle'}).click();
     assert.equal(await page.locator('#f-type').inputValue(),'card');
@@ -154,7 +165,24 @@ async function run() {
     await page.getByRole('region',{name:'Aktarılan ekstreler'}).getByRole('button',{name:/Detayı aç/}).click();
     await page.evaluate(()=>window.handleBack());
     assert.equal(await page.locator('#import-account option:checked').innerText(),'Yedek kredi kartı');
-    await preview.getByRole('button',{name:'Onayla ve kaydet'}).click();
+    const beforeRejectedSave=await page.evaluate(()=>{
+      const original=Storage.prototype.setItem;
+      window.restoreStatementStorage=()=>{Storage.prototype.setItem=original;};
+      Storage.prototype.setItem=function(key,...args){
+        if(key==='ekstre-android-v1')throw Error('Sentetik kayıt hatası');
+        return original.call(this,key,...args);
+      };
+      return localStorage.getItem('ekstre-android-v1');
+    });
+    const confirmImport=preview.getByRole('button',{name:'Onayla ve kaydet'});
+    await confirmImport.click();
+    await preview.getByText('Sentetik kayıt hatası',{exact:true}).waitFor();
+    assert.equal(await page.locator('#status-announcement').textContent(),'PDF okundu. Kartı seçip önizlemeyi onayla.');
+    assert.equal(await page.evaluate(()=>localStorage.getItem('ekstre-android-v1')),beforeRejectedSave);
+    assert.equal(await cardPicker.inputValue(),newCard);
+    await page.evaluate(()=>window.restoreStatementStorage());
+    await confirmImport.click();
+    assert.equal(await page.locator('#status-announcement').textContent(),'Ekstre kaydedildi.');
 
     const history=page.getByRole('region',{name:'Aktarılan ekstreler'});
     const saved=history.getByRole('article').filter({hasText:'2026-11'});
@@ -177,6 +205,17 @@ async function run() {
     await saved.getByRole('button',{name:'Detayı aç'}).click();
     await page.getByRole('heading',{name:'QNB · 2026-11'}).waitFor();
     assert.equal(await page.locator('button[data-edit]').count(),4);
+    const source=page.locator('#statement-transactions .saved-statement-row').filter({has:page.getByRole('button',{name:/SENTETIK KAHVE/})});
+    await source.getByText('Orijinal banka açıklaması',{exact:true}).click();
+    await source.getByText('SENTETIK KAHVE',{exact:true}).last().waitFor();
+    await capture(page,page.locator('.statement-surface'),'06-ekstre-detay.png');
+    checks+=await checkLayout(page,'.statement-surface');
+    await page.setViewportSize({width:320,height:844});
+    const historicalDetail=page.locator('.statement-surface');
+    await scaleText(historicalDetail,2);
+    await capture(page,historicalDetail,'11-ekstre-detay-320px-200.png');
+    await scaleText(historicalDetail,1);
+    await page.setViewportSize({width:390,height:844});
     await page.evaluate(()=>window.handleBack());
     assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Detayı aç');
     await page.reload();
@@ -200,6 +239,8 @@ async function run() {
     await page.evaluate(text=>window.onPdfText(text),unverified);
     const acknowledgement=preview.locator('#acknowledge-import');
     const suggestion=preview.locator('[data-category-suggestion]').first();
+    await preview.getByText(/Bu tutarlar okunan satırlara aittir/).waitFor();
+    assert.equal(await confirmImport.isDisabled(),true);
     await acknowledgement.check();
     await suggestion.check();
     await history.getByRole('article').filter({hasText:'2026-10'}).getByRole('button',{name:'Detayı aç'}).click();
@@ -270,6 +311,10 @@ async function run() {
     const canceled=await token();
     assert.equal(await save.count(),0,'Choosing a file immediately discards the older preview');
     await nativeError('PDF seçimi iptal edildi.',canceled);
+    const retryPdf=page.getByRole('button',{name:'PDF’yi yeniden seç'});
+    assert.equal(await retryPdf.evaluate(button=>document.activeElement===button),true);
+    await retryPdf.click();
+    assert.notEqual(await token(),canceled);
     await complete(statement,canceled);
     assert.equal(await save.count(),0);
     await choose();
@@ -385,7 +430,7 @@ async function run() {
     }
     await page.evaluate(()=>{window.Android={pickPdf:id=>window.pdfRequests.push(id)};});
     await choose();
-    const yapiCommentary=yapiWithFooter('Ekstre bilgilerine bu bölümde yer verilmiştir.');
+    const yapiCommentary=yapiWithFooter('Ekstre açıklaması: USD ve döviz işlemleri hakkında genel bilgi.');
     await complete(yapiCommentary,await token());
     assert.equal(await preview.count(),1,await page.locator('#error-announcement').textContent());
     await preview.getByText('Toplamlar doğrulandı',{exact:true}).waitFor();
@@ -401,6 +446,56 @@ async function run() {
     assert.equal(yapiStatement.debt,25500);
     assert.equal(yapiStatement.reconciliationStatus,'verified');
 
+    const csvInput=page.locator('#csv-file');
+    const beforeCsv=await snapshot();
+    const csvFile=content=>({name:'sentetik-ekstre.csv',mimeType:'text/csv',buffer:Buffer.from(content)});
+    await csvInput.setInputFiles(csvFile('uyumsuz CSV'));
+    const retryCsv=page.getByRole('button',{name:'CSV’yi yeniden seç'});
+    await retryCsv.waitFor();
+    assert.equal(await retryCsv.evaluate(button=>document.activeElement===button),true);
+    const nextCsv=page.waitForEvent('filechooser');
+    await retryCsv.click();
+    await (await nextCsv).setFiles(csvFile([
+      'bank,kart,period,date,desc,amount_cents,category,tur,transaction_id',
+      'QNB,Sentetik kaynak A,2027-03,2027-03-02,SENTETIK CSV HARCAMA,32000,Diğer,harcama,csv-a-1',
+      'QNB,Sentetik kaynak A,2027-03,2027-03-03,SENTETIK CSV IADE,-12000,Diğer,indirim,csv-a-2',
+      'Yapı Kredi,Sentetik kaynak B,2027-04,2027-04-02,SENTETIK CSV ODEME,4000,Diğer,odeme,csv-b-1',
+    ].join('\n')));
+    const csv=page.getByRole('dialog',{name:'CSV aktarımı'});
+    await csv.waitFor();
+    const csvGroups=csv.locator('.csv-source-card');
+    const csvGroup=csvGroups.first();
+    assert.match(await csvGroup.innerText(),/2027-03[\s\S]*QNB · Sentetik kaynak A[\s\S]*Brüt harcama[\s\S]*320,00[\s\S]*İade \/ indirim[\s\S]*120,00/);
+    await csvGroup.getByText('Okunan hareketler · 2',{exact:true}).click();
+    await csvGroup.getByText('SENTETIK CSV IADE',{exact:true}).waitFor();
+    const csvSecond=csv.getByRole('combobox',{name:'Yapı Kredi · Sentetik kaynak B'});
+    await csvSecond.selectOption(newCard);
+    assert.equal(await csvGroups.nth(1).locator('.preview-select-value > span').first().textContent(),'Yedek kredi kartı');
+    checks+=await checkLayout(page,'.csv-import-preview');
+    await page.setViewportSize({width:390,height:844});
+    await capture(page,csv,'07-csv-onizleme.png');
+    await page.setViewportSize({width:320,height:844});
+    await scaleText(csv,2);
+    await csvGroup.locator('.preview-select').scrollIntoViewIfNeeded();
+    await capture(page,csv,'08-csv-320px-200.png');
+    await scaleText(csv,1);
+    await page.setViewportSize({width:390,height:844});
+    await csv.getByRole('button',{name:'Vazgeç'}).click();
+    assert.equal(await page.evaluate(()=>document.activeElement.id),'statement-csv');
+    assert.deepEqual(await snapshot(),beforeCsv);
+
+    await page.getByRole('button',{name:'İnceleme kutusu'}).click();
+    const review=page.locator('.review-center');
+    await review.getByRole('heading',{name:'İnceleme Merkezi'}).waitFor();
+    checks+=await checkLayout(page,'.review-center');
+    await page.setViewportSize({width:390,height:844});
+    await capture(page,review,'09-inceleme.png');
+    await page.setViewportSize({width:320,height:844});
+    await scaleText(review,2);
+    await capture(page,review,'10-inceleme-320px-200.png');
+    await scaleText(review,1);
+    await page.evaluate(()=>window.handleBack());
+    assert.equal(await page.evaluate(()=>document.activeElement.dataset.page),'review');
     assert.deepEqual(errors,[]);
     console.log('Statement and expense chart journeys passed; '+checks+' responsive checks');
   } finally {

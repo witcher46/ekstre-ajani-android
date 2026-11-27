@@ -55,7 +55,7 @@ function renderPending(state,row,index,byId,backTitle) {
 
   let html='<article class="panel review-item" aria-labelledby="'+id+'">';
   html+='<div class="review-item-head"><div><span class="review-reason">'+esc(reason)+'</span>'+
-    '<h2 id="'+id+'">'+esc(row.desc)+'</h2></div><strong>'+money(row.amount)+'</strong></div>';
+    '<h3 id="'+id+'">'+esc(row.desc)+'</h3></div><strong>'+money(row.amount)+'</strong></div>';
   html+='<div class="review-meta">'+esc(row.date)+' · '+esc(accountName(state,row.account))+
     ' · '+esc(sourceLabel(row))+'</div>';
   html+='<p class="review-impact">'+esc(impact)+'</p>';
@@ -73,7 +73,7 @@ function renderPending(state,row,index,byId,backTitle) {
     html+='<p class="notice">Eşleştirilebilecek uygun kayıt bulunamadı. Kaydı ayrı kabul edebilir veya incelemeyi erteleyebilirsin.</p>';
   }
 
-  html+='<div class="review-decisions">';
+  html+='<div class="review-decisions" role="group" aria-label="'+esc('İnceleme kararı · '+row.desc)+'">';
   if(candidates.length)html+='<button type="button" class="primary" data-link="'+esc(row.id)+'">Aynı işlem</button>';
   html+='<button type="button" data-distinct="'+esc(row.id)+'">Ayrı gerçek işlem</button>';
   html+='<button type="button" data-action="back">Sonra incele · '+esc(backTitle)+'</button>';
