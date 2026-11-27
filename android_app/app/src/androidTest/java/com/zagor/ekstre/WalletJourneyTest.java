@@ -52,6 +52,18 @@ public class WalletJourneyTest {
  private void submit(ActivityScenario<MainActivity> a)throws Exception{js(a,"document.getElementById('form').requestSubmit()");waitJs(a,"!document.querySelector('dialog[open]')");}
  private void account(ActivityScenario<MainActivity> a,String name,String type)throws Exception{account(a,name,type,"10000");}
  private void account(ActivityScenario<MainActivity> a,String name,String type,String opening)throws Exception{click(a,"[data-action=addAccount]");value(a,"name",name);value(a,"type",type);value(a,"opening",opening);submit(a);}
+ private void setCalendarMonth(ActivityScenario<MainActivity> a,String month)throws Exception{
+  String selected=JSONObject.quote(month);
+  assertEquals("true",js(a,"(()=>{const input=document.getElementById('period');input.value="+selected+
+   ";input.dispatchEvent(new Event('change',{bubbles:true}));return document.getElementById('period').value==="+selected+"})()"));
+ }
+ private void selectSummaryMonth(ActivityScenario<MainActivity> a,String month)throws Exception{
+  openRoute(a,"reports");
+  waitJs(a,"!!document.querySelector('nav [data-page=reports][aria-current=page]') && !!document.getElementById('period')");
+  setCalendarMonth(a,month);
+  openRoute(a,"home");
+  waitJs(a,"document.querySelector('main time.dashboard-period')?.dateTime==="+JSONObject.quote(month));
+ }
  private void openSummaryAction(ActivityScenario<MainActivity> a,String action)throws Exception{
   click(a,"main [data-action=quickAdd]");
   click(a,"#quick-add-options [data-action="+action+"]");
@@ -290,7 +302,7 @@ public class WalletJourneyTest {
    click(a,"nav [data-page=wallet]");click(a,"[data-card-view]");click(a,"[data-pay-card]");
    String bank=new JSONArray("["+js(a,"JSON.parse(Android.load()).accounts[0].id")+"]").getString(0);
    value(a,"account",bank);value(a,"amount","2000");value(a,"date","2026-10-04");submit(a);
-   click(a,"nav [data-page=home]");js(a,"document.getElementById('period').value='2026-10';document.getElementById('period').dispatchEvent(new Event('change'))");
+   selectSummaryMonth(a,"2026-10");
    assertEquals("Salary is income; opening cash is not","true",js(a,"document.querySelector('[data-stat=income]').textContent.includes('30.000,00')"));
    assertEquals("Repayment is not another expense","true",js(a,"document.querySelector('[data-stat=netExpense]').textContent.includes('2.000,00')"));
    assertEquals("Cash left after repayment","true",js(a,"document.querySelector('[data-stat=cash]').textContent.includes('48.000,00')"));
@@ -486,7 +498,7 @@ public class WalletJourneyTest {
    restoreDownload(a,name,baselineNativeConfirmation);
    waitJs(a,"JSON.parse(Android.load())?.accounts?.some(a=>a.id==='synthetic-card') === true");
    a.recreate();
-   assertMigratedWallet(a,expected);
+   assertMigratedWallet(a,expected,baselineNativeConfirmation);
   }finally{context.getContentResolver().delete(file,null,null);}
  }
 
@@ -496,9 +508,9 @@ public class WalletJourneyTest {
    path!=null&&Boolean.parseBoolean(InstrumentationRegistry.getArguments().getString("preserveWallet")));
   JSONObject expected=new JSONObject(device.executeShellCommand("cat "+path));
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
-   assertMigratedWallet(a,expected);
+   assertMigratedWallet(a,expected,false);
    a.recreate();
-   assertMigratedWallet(a,expected);
+   assertMigratedWallet(a,expected,false);
   }
  }
  @Test public void oldWalletRejectsObservationBackupAndCanStillSave()throws Exception{
@@ -1023,7 +1035,7 @@ public class WalletJourneyTest {
   }
  }
 
- private void assertMigratedWallet(ActivityScenario<MainActivity> a,JSONObject expected)throws Exception{
+ private void assertMigratedWallet(ActivityScenario<MainActivity> a,JSONObject expected,boolean legacyBaseline)throws Exception{
   waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
   AtomicReference<MainActivity.Bridge> bridge=new AtomicReference<>();
   a.onActivity(activity->bridge.set(activity.new Bridge()));
@@ -1031,7 +1043,9 @@ public class WalletJourneyTest {
   for(String key:new String[]{"accounts","transactions","statements","budgets","categories","merchantCategoryRules","incomePlans"}){
    assertEquals("Preserved "+key,expected.get(key).toString(),restored.get(key).toString());
   }
-  js(a,"document.getElementById('period').value='2026-10';document.getElementById('period').dispatchEvent(new Event('change'))");
+  // The released baseline still has its calendar field on Özet.
+  if(legacyBaseline)setCalendarMonth(a,"2026-10");
+  else selectSummaryMonth(a,"2026-10");
   assertEquals("true",js(a,"document.querySelector('[data-stat=netExpense]').textContent.includes('100,00')"));
   assertEquals("true",js(a,"document.querySelector('[data-stat=cardDebt]').textContent.includes('80,00')"));
  }
