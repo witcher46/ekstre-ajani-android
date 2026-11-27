@@ -60,6 +60,78 @@ async function checkMoreNavigation(browser){
     assert.equal(await more.getAttribute('aria-haspopup'),'dialog');
     assert.equal(await current.getAttribute('data-page'),'home');
     assert.equal(await main.getByRole('button',{name:/^Raporlar/}).count(),1);
+    const amount=main.locator('[data-stat=netExpense]');
+    const beforeMotion=await snapshot();
+    const motionEvidence={};
+    for(const [preference,width,scale] of [['no-preference',390,100],['reduce',320,200]]){
+      const reduced=preference==='reduce';
+      await page.emulateMedia({reducedMotion:preference});
+      await page.setViewportSize({width,height:680});
+      await page.evaluate(scale=>{document.documentElement.style.fontSize=scale+'%';},scale);
+      assert.equal(await amount.innerText(),'₺3.125,00');
+      const button=await more.boundingBox();
+      assert(button.width>=48&&button.height>=48);
+      await page.mouse.move(button.x+button.width/2,button.y+button.height/2);
+      await page.mouse.down();
+      assert.deepEqual(await more.boundingBox(),button,'press feedback must preserve the whole touch target');
+      const press=await more.locator('.nav-icon').evaluate(icon=>{
+        const style=getComputedStyle(icon);
+        return {shadow:style.boxShadow,property:style.transitionProperty,duration:style.transitionDuration,transform:style.transform};
+      });
+      assert.notEqual(press.shadow,'none','a held press must remain visible without motion');
+      assert.equal(press.duration,reduced?'0s':'0.09s');
+      if(reduced)assert.equal(press.transform,'none');
+      else assert.equal(press.property,'transform');
+      await page.mouse.up();
+      const sheet=await menu.evaluate(node=>{
+        const backdrop=getComputedStyle(node,'::backdrop');
+        const row=getComputedStyle(node.querySelector('.menu-row .row-icon'));
+        return {
+          animation:backdrop.animationName,duration:backdrop.animationDuration,
+          panel:getComputedStyle(node).animationName,row:row.transitionDuration,
+          fits:node.scrollWidth<=node.clientWidth+1&&document.documentElement.scrollWidth<=innerWidth+1,
+        };
+      });
+      assert.deepEqual(sheet,{
+        animation:reduced?'none':'navigation-backdrop-in',duration:reduced?'0s':'0.12s',
+        panel:'none',row:reduced?'0s':'0.09s',fits:true,
+      });
+      assert(await focused(menu.getByRole('heading',{name:'Diğer'})));
+      assert.equal(await amount.innerText(),'₺3.125,00');
+      assert.deepEqual(await amount.evaluate(node=>{
+        const styles=getComputedStyle(node);
+        return [styles.animationName,styles.transitionDuration];
+      }),['none','0s']);
+      assert.equal(await nativeBack(),true);
+      assert(await focused(more));
+      const immediate=await more.evaluate(button=>{
+        button.click();
+        const dialog=document.querySelector('#modal');
+        const opened=dialog.open&&document.activeElement.id==='dialog-title';
+        return {opened,back:window.handleBack(),closed:!dialog.open,focused:document.activeElement===button};
+      });
+      assert.deepEqual(immediate,{opened:true,back:true,closed:true,focused:true},'Back can close and restore focus in the opening turn');
+
+      await more.tap();
+      const plan=menu.getByRole('button',{name:/^Plan/});
+      await plan.scrollIntoViewIfNeeded();
+      const action=await plan.boundingBox();
+      for(let i=0;i<2;i++)await page.touchscreen.tap(action.x+action.width/2,action.y+action.height/2);
+      assert.equal(await heading.textContent(),'Planlama');
+      assert(await focused(heading));
+      assert.equal(await nativeBack(),true);
+      assert.equal(await heading.textContent(),'Özet','two rapid touch taps create one history entry');
+      assert(await focused(more));
+      assert.equal(await nativeBack(),false,'the repeated tap must not create another history entry');
+      assert.equal(await amount.innerText(),'₺3.125,00');
+      assert.deepEqual(await snapshot(),beforeMotion);
+      motionEvidence[preference]={press:press.duration,backdrop:sheet.duration,width,scale};
+    }
+    console.log('Diğer motion and immediate route/Back/focus checks',JSON.stringify(motionEvidence));
+    await page.emulateMedia({reducedMotion:'no-preference'});
+    await page.setViewportSize({width:390,height:680});
+    await page.evaluate(()=>document.documentElement.style.fontSize='');
+
     await main.getByRole('button',{name:'İşlem ekle',exact:true}).click();
     await page.getByRole('dialog',{name:'Hızlı Ekle'}).waitFor();
     assert.equal(await nativeBack(),true);

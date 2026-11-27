@@ -122,6 +122,29 @@ html.navigation-sheet-open {overflow-y:hidden}
   color:var(--accent);
 }
 
+#nav button:not(:disabled):active .nav-icon,
+#modal.navigation-sheet .menu-row:not(:disabled):active .row-icon {
+  box-shadow:inset 0 0 0 2px currentColor;
+}
+
+@media (prefers-reduced-motion:no-preference) {
+  #nav .nav-icon,
+  #modal.navigation-sheet .menu-row .row-icon {
+    transition:transform 90ms ease-out;
+  }
+  #nav button:not(:disabled):active .nav-icon,
+  #modal.navigation-sheet .menu-row:not(:disabled):active .row-icon {
+    transform:translateY(1px) scale(.97);
+  }
+  #modal.navigation-sheet[open]::backdrop {
+    animation:navigation-backdrop-in 120ms ease-out;
+  }
+  @keyframes navigation-backdrop-in {
+    from {opacity:.65}
+    to {opacity:1}
+  }
+}
+
 body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"],[data-surface="import"],[data-surface="statement"],[data-surface="review"]) {
   --bg:var(--shell-bg);
   --panel:var(--shell-panel);
