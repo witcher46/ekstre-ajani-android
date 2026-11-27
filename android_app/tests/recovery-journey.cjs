@@ -226,6 +226,11 @@ module.exports=async function recoveryJourney(browser,url){
  };
  const details=()=>page.evaluate(()=>window.io);
  const upload=async(raw=good)=>page.locator('#backup-file').setInputFiles({name:'sentetik.json',mimeType:'application/json',buffer:Buffer.from(raw)});
+ const motionStyles=dialog=>dialog.evaluate(node=>({
+  panel:getComputedStyle(node).animationName,
+  backdrop:getComputedStyle(node,'::backdrop').animationName,
+  submit:getComputedStyle(node.querySelector('#submit')).transitionDuration,
+ }));
  const recoveryPreview=page.getByRole('dialog',{name:'Kurtarma kopyasını incele'});
  const restorePreview=page.getByRole('dialog',{name:'JSON yedeğini incele'});
  const acceptReplacement=preview=>preview.getByRole('button',{name:'Cüzdanı değiştir',exact:true}).click();
@@ -314,6 +319,7 @@ module.exports=async function recoveryJourney(browser,url){
   await page.evaluate(()=>{window.io.fail=true;});
   await acceptReplacement(restorePreview);
   assert.match(await restorePreview.getByRole('alert').innerText(),/Geri yükleme kaydedilemedi/);
+  assert.deepEqual(await motionStyles(restorePreview),{panel:'none',backdrop:'none',submit:'0s'});
   assert.equal(await page.locator('#status-announcement').textContent(),'');
   assert.deepEqual((await details()).slots,{1:broken,3:'{}',2:good});
   await page.evaluate(()=>{window.io.fail=false;});
@@ -334,6 +340,8 @@ module.exports=async function recoveryJourney(browser,url){
   assert.deepEqual(JSON.parse((await details()).exports[0]).accounts,[]);
 
   await configure({1:good});
+  await page.locator('#more').click();
+  assert.equal(await page.evaluate(()=>window.handleBack()),true);
   await page.locator('[data-action=incomeCategory]').click();
   await page.locator('#fields [name=name]').fill('Sentetik eski düzenleme');
   const newer=await page.evaluate(async()=>{
@@ -349,6 +357,8 @@ module.exports=async function recoveryJourney(browser,url){
   assert.equal((await details()).slots[1],newer,'A normal save must preserve the newer budget and reject the stale edit');
   assert.equal((await details()).saves,0);
   assert.equal(await page.locator('#fields [name=name]').inputValue(),'Sentetik eski düzenleme');
+  assert.deepEqual(await motionStyles(page.getByRole('dialog')),{panel:'none',backdrop:'none',submit:'0s'});
+  assert.equal(await page.locator('#status-announcement').textContent(),'');
   assert.equal(await page.locator('#form-error').evaluate(node=>node===document.activeElement),true);
   assert.match(await page.locator('#form-error').innerText(),/cüzdan .*değişti/i);
   assert.match((await details()).confirmations.at(-1),/güncel cüzdanı aç/i);
