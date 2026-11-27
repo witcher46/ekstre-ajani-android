@@ -106,7 +106,32 @@ async function settingsLayoutJourney(browser,url,width,scale){
   await settings.click();
   const heading=main.getByRole('heading',{level:1});
   assert.equal(await focused(heading),true);
-  assert.equal(await main.getByRole('region',{name:'Gizlilik'}).isVisible(),true);
+  assert.deepEqual(await main.locator('.settings-surface > section > h2').allTextContents(),
+   ['Veriler ve yedek','Düzen ve bildirimler','Uygulama'],'Settings uses the approved section order');
+  const data=main.getByRole('region',{name:'Veriler ve yedek'});
+  assert.deepEqual(await data.getByRole('button').evaluateAll(rows=>rows.map(row=>row.dataset.action)),
+   ['backup','restore','recover']);
+  if(scale===100){
+   const backupRows=await data.getByRole('button').evaluateAll(rows=>rows.map(row=>{
+    const rect=row.getBoundingClientRect(),nav=document.querySelector('body > nav');
+    return rect.top>=0&&rect.bottom<=Math.min(innerHeight,nav.getBoundingClientRect().top);
+   }));
+   assert(backupRows.every(Boolean),'all three backup actions fit above the bottom navigation at 390px');
+  }
+  const organization=main.getByRole('region',{name:'Düzen ve bildirimler'});
+  const organizationRows=[
+   organization.getByRole('button',{name:'Hatırlatmalar',exact:true}),
+   organization.locator('summary').and(organization.getByText('Gider kategorileri',{exact:true})),
+   organization.getByRole('heading',{name:'Gelir kategorileri',exact:true}),
+   organization.getByRole('heading',{name:'Satıcı kategori kuralları',exact:true}),
+  ];
+  const rowTops=await Promise.all(organizationRows.map(async row=>(await row.boundingBox()).y));
+  assert(rowTops.every((top,index)=>index===0||top>rowTops[index-1]),'reminders, expense, income, then merchant rules');
+  const application=main.getByRole('region',{name:'Uygulama'});
+  assert.equal(await application.getByRole('button',{name:'İnceleme ve kaynak bağlantıları',exact:true}).count(),1);
+  assert.equal(await application.getByRole('button',{name:'Örnek cüzdan oluştur',exact:true}).count(),1);
+  assert.equal(await application.locator('.settings-intro > p').innerText(),'Tarayıcı önizlemesi');
+  assert.equal(await application.getByRole('region',{name:'Gizlilik'}).isVisible(),true);
   assert.equal(await main.getByRole('region',{name:'Yedek dışa aktarma'}).getByRole('button',{name:'Yedek dışa aktar'}).count(),1);
   const replace=main.getByRole('region',{name:'Cüzdanı geri yükleme'});
   const restore=replace.getByRole('button',{name:'Yedek yükle',exact:true});
@@ -118,7 +143,12 @@ async function settingsLayoutJourney(browser,url,width,scale){
   assert.deepEqual(nestedSurface,bankSurface,'wallet detail keeps the wallet card surface');
   assert.equal(bankSize,cardSize,'bank and credit card amounts use the same size');
   assert.deepEqual(incomeSurface,planSurface,'Plan and Income Plans use the same introductory surface');
-  assert.deepEqual(await surface(main.locator('.settings-intro')),planSurface,'Settings uses the same introductory surface');
+  assert.deepEqual(await surface(main.locator('.settings-home > .settings-intro')),planSurface,'Settings uses the same introductory surface');
+  const reminders=organizationRows[0];
+  await reminders.click();
+  assert.equal(await heading.textContent(),'Hatırlatmalar');
+  assert.equal(await back(),true);
+  assert.equal(await focused(reminders),true);
   const expenseDisclosure=main.locator('#settings-expense-disclosure');
   const summary=expenseDisclosure.locator('summary');
   assert.equal((await summary.innerText()).trim(),'Gider kategorileri');
