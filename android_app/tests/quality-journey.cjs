@@ -138,6 +138,7 @@ async function categorySuggestionsJourney(browser) {
     await page.touchscreen.tap(x+width/2,y+height/2);
     expected.transactions[1].category='Giyim';
     assert.deepEqual(JSON.parse(await saved()),expected);
+    assert.equal(await page.locator('dialog[open]').count(),0,'repeated taps must not open another transaction');
     await page.locator('nav [data-page=home]').click();
     assert.deepEqual(await stats(),totals);
     await page.locator('#settings').click();
@@ -237,6 +238,8 @@ async function quickAddJourney(page) {
   const add = page.locator('#quick-add');
   const menu = page.getByRole('dialog',{name:'Hızlı Ekle'});
   const option = name => menu.getByRole('button',{name,exact:true});
+  const cardPayment = option('Kart Borcu Ödemesi');
+  const cardPaymentFocused = () => cardPayment.evaluate(button => button === document.activeElement);
   const active = () => page.evaluate(() => document.activeElement.id);
   const wallet = () => page.evaluate(() => JSON.parse(localStorage.getItem('ekstre-android-v1')));
   const open = async name => { await add.click(); await option(name).click(); };
@@ -260,7 +263,7 @@ async function quickAddJourney(page) {
       });
   }),true);
   await page.keyboard.press('Shift+Tab');
-  assert.equal(await page.evaluate(() => document.activeElement.textContent),'Kart Borcu Ödemesi');
+  assert(await cardPaymentFocused());
   await page.keyboard.press('Tab');
   assert.equal(await active(),'close');
   await page.keyboard.press('Escape');
@@ -270,8 +273,8 @@ async function quickAddJourney(page) {
   assert.match(await menu.getByRole('alert').innerText(),/bir kredi kartı ve kaynak/);
   assert.equal(await active(),'form-error');
   await page.keyboard.press('Shift+Tab');
-  assert.equal(await page.evaluate(() => document.activeElement.textContent),'Kart Borcu Ödemesi');
-  await option('Kart Borcu Ödemesi').press('Enter');
+  assert(await cardPaymentFocused());
+  await cardPayment.press('Enter');
   await page.keyboard.press('Tab');
   assert.equal(await active(),'close');
   assert.equal(await wallet(),null);
@@ -337,7 +340,7 @@ async function quickAddJourney(page) {
 
   await openRoute(page,'transactions');
   await open('Transfer');
-  await page.getByRole('dialog',{name:'Transfer yap'}).waitFor();
+  await page.getByRole('dialog',{name:'Transfer kaydet'}).waitFor();
   assert.equal(await page.locator('#f-kind').inputValue(),'transfer');
   await page.locator('#f-account').selectOption('quick-bank');
   await page.locator('#f-target').selectOption('quick-cash');

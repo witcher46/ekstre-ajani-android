@@ -184,7 +184,14 @@ public class WalletJourneyTest {
     click(a,"#settings");
     assertEquals(JSONObject.quote("Android sürümü "+version),js(a,"document.querySelector('main .lead').textContent"));
     openRoute(a,"transactions");
-    waitJs(a,"innerWidth===320 && Android.textZoom()===200 && document.querySelectorAll('nav button').length===4 && !!document.querySelector('"+apply+"')");
+    try{
+     waitJs(a,"innerWidth===320 && Android.textZoom()===200 && document.querySelectorAll('nav button').length===4 && !!document.querySelector('"+apply+"')");
+    }catch(AssertionError failure){
+     String layout=js(a,"({innerWidth,clientWidth:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth,"+
+      "textZoom:Android.textZoom(),navButtons:document.querySelectorAll('nav button').length,hasSuggestion:!!document.querySelector('"+apply+"'),"+
+      "period:document.querySelector('#period')?.value,fixturePeriod:JSON.parse(Android.load()).transactions[0].period})");
+     throw new AssertionError("Category suggestion layout: "+layout,failure);
+    }
     assertEquals("Actions fit at large text and have accessible context","true",js(a,"[...document.querySelectorAll('.transaction-category-suggestion button')].every(b=>{const r=b.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.width>=48&&r.height>=48&&!!b.getAttribute('aria-label')&&!!document.getElementById(b.getAttribute('aria-describedby'));})"));
     assertEquals("true",js(a,"document.querySelector('.transaction-category-suggestion').textContent.includes('Önerilen kategori: Giyim')"));
     js(a,"document.querySelector('.transaction-with-suggestion').scrollIntoView({block:'center'})");drawn(a);evidence("category-suggestion-320-200");

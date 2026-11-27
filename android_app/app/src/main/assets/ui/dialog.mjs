@@ -11,13 +11,16 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
   let save;
   let saving = false;
 
-  function open(heading, html, onSubmit, label = 'Kaydet', target = captureOpener()) {
+  function open(heading, html, onSubmit, label = 'Kaydet', target = captureOpener(), {variant = '', dismissLabel} = {}) {
     const replacing = dialog.open;
     if (!replacing) opener = target;
     save = onSubmit;
     title.textContent = heading;
     fields.innerHTML = html;
     error.textContent = '';
+    dialog.dataset.variant = variant;
+    dismiss.textContent = dismissLabel ?? '×';
+    dismiss.setAttribute('aria-label', dismissLabel ?? 'Kapat');
     submit.textContent = label;
     submit.hidden = !onSubmit;
     if (!replacing) dialog.showModal();

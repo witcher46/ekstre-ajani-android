@@ -8,7 +8,7 @@ import {parseStatementCsv} from './csv.mjs';
 import {createDialog} from './ui/dialog.mjs';
 import {escapeHtml as esc,options,field,select} from './ui/form-controls.mjs';
 import {expenseAllocationFields,attachExpenseAllocationFields} from './ui/expense-allocations.mjs';
-import {renderBottomNavigation,renderMoreNavigation} from './ui/navigation.mjs';
+import {renderBottomNavigation,renderMoreNavigation,uiIcon} from './ui/navigation.mjs';
 import {renderReviewCenter} from './ui/review-center.mjs';
 import {compareBalanceObservation} from './balance-reconciliation.mjs';
 import {prepareBalanceApproval,readBalanceApprovalSnapshot,saveBalanceApproval} from './balance-approval-flow.mjs';
@@ -206,6 +206,10 @@ const {open:modal,openSheet,close:closeModal,showError:showDialogError}=createDi
  captureOpener:()=>focusTarget(actionTrigger||document.activeElement),
  restoreFocus,
 });
+const transactionDialog=(title,fields,save,label)=>modal(title,fields,save,label,undefined,{
+ variant:'transaction',
+ dismissLabel:save?'Vazgeç':undefined,
+});
 window.handleBack=()=>{
  if(closeModal())return true;
  const previous=history.pop();
@@ -295,13 +299,19 @@ function categorySuggestionRow(row,edit,index,lookup){
   </div>
  </div></div>`;
 }
+let touchPress;
+document.addEventListener('pointerdown',event=>{
+ touchPress=event.pointerType==='touch'?{x:event.clientX,y:event.clientY}:null;
+},{capture:true,passive:true});
 function guardRepeatedActivation(event,includeNearby=true){
  if(!event.detail)return;
- const {clientX,clientY}=event;
+ const fromTouch=event.pointerType==='touch';
+ const origin=fromTouch&&touchPress||{x:event.clientX,y:event.clientY};
  let lastPress=event.timeStamp;
  const ignoreRepeat=repeat=>{
-  // A touch series can reset the click count after a control changes or closes the view.
-  const near=Math.hypot(repeat.clientX-clientX,repeat.clientY-clientY)<=6;
+  // Chrome can adjust synthesized click coordinates to the new target after a rerender.
+  const point=fromTouch&&touchPress||{x:repeat.clientX,y:repeat.clientY};
+  const near=Math.hypot(point.x-origin.x,point.y-origin.y)<=6;
   const repeats=repeat.detail>1||(includeNearby&&repeat.detail===1&&near&&repeat.timeStamp-lastPress<450);
   if(!repeats){
    document.removeEventListener('mousedown',ignoreRepeat,true);
@@ -331,6 +341,48 @@ function transactionList(rows,{suggestCategories=false,limit=listLimit}={}){
   return lookup?categorySuggestionRow(t,edit,index,lookup):edit;
  }).join(''):empty('Henüz işlem yok. Hesap ekleyebilir veya bir ekstre aktarabilirsin.');
 }
+function transactionResults(rows,filteredExpenses){
+ const searchTerm=query.toLocaleLowerCase('tr');
+ const scoped=filteredExpenses?
+  rows.filter(t=>t.kind==='expense'&&t.amount>0).map(t=>C.expenseCategoryRow(state,t,expenseCategory)).filter(Boolean):
+  rows.filter(t=>(!kindFilter||t.kind===kindFilter)&&(!accountFilter||t.account===accountFilter||t.target===accountFilter));
+ const list=scoped.filter(t=>{
+  const categories=t.allocationView?[t.category]:C.expenseCategoryAmounts(state,t).map(part=>part.category);
+  return [t.desc,t.category,t.note,...categories].join(' ').toLocaleLowerCase('tr').includes(searchTerm);
+ }).sort((a,b)=>b.date.localeCompare(a.date));
+ const results=list.length||!state.transactions.length?transactionList(list,{suggestCategories:true}):rows.length?
+  empty('Aramayı veya filtreleri değiştirerek tekrar dene.','Eşleşen işlem bulunamadı'):
+  empty('Başka bir dönem veya kapsam seç.','Bu kapsamda işlem yok');
+ return {results,count:list.length,visible:Math.min(listLimit,list.length)};
+}
+const transactionCount=({count,visible})=>count===visible?`${count} işlem`:`${count} işlem · ${visible} gösteriliyor`;
+const transactionMore='<button id="transaction-show-more" type="button" data-action="more" aria-controls="transactions-list">Daha fazla göster</button>';
+function transactionsView(rows,filteredExpenses,periodControl,modeControl){
+ const result=transactionResults(rows,filteredExpenses);
+ const periodField='<div><label for="period">Dönem</label>'+periodControl+'</div>';
+ return `<div class="transactions-surface">
+  <h1>İşlemler</h1>
+  <div class="transaction-actions">
+   <button class="primary" type="button" data-action="addTransaction">${uiIcon('plus')} İşlem ekle</button>
+   <button type="button" data-page="review">İnceleme Merkezi ${uiIcon('next')}</button>
+  </div>
+  <section class="transaction-filters" aria-label="İşlem filtreleri">
+   <label for="search">İşlemlerde ara</label>
+   <input id="search" class="search" type="search" placeholder="Açıklama, kategori veya not" value="${esc(query)}">
+   <div class="transaction-filter-grid">
+    ${periodField}
+    ${filteredExpenses?`<div class="transaction-category-filter"><strong>Gider kategorisi · ${esc(expenseCategory||'Kategorisiz')}</strong>
+     <button type="button" data-action="clearExpenseCategory">Filtreyi temizle</button></div>`:`
+     <div>${modeControl}</div>
+     <div>${select('kind-filter','İşlem türü',options([['','Tüm türler'],...Object.entries(kinds)],kindFilter))}</div>
+     <div>${select('account-filter','Hesap / kart',options([['','Tüm hesaplar'],...state.accounts.map(a=>[a.id,a.name])],accountFilter))}</div>`}
+   </div>
+  </section>
+  <p id="transaction-count" role="status">${transactionCount(result)}</p>
+  <div class="panel" id="transactions-list">${result.results}</div>
+  ${result.count>result.visible?transactionMore:''}
+ </div>`;
+}
 function importCategoryOption(merchant,current,index,selectedCategory,category=C.suggestCategory(state,merchant)){
  return category&&category!==current?`<label><input type="checkbox" data-category-suggestion="${index}" value="${esc(category)}" ${category===selectedCategory?'checked':''}> ${esc(merchant)} · Öneriyi seç: ${esc(category)}</label>`:'';
 }
@@ -350,7 +402,7 @@ function render(){
  const mode=!filteredExpenses&&['transactions','reports'].includes(page)?periodMode:'calendar';
  const periodLabel=isReportPage(page)?'Seçili ay':'Takvim ayı / ekstre dönemi';
  const s=C.summary(state,period,mode),rows=C.rowsForPeriod(state,period,mode),periodControl=`<input class="period" id="period" aria-label="${periodLabel}" type="month" max="9999-12" value="${period}">`;
- const modeControl=select('view-mode','Rapor kapsamı',options([['calendar','Takvim ayı · işlem tarihine göre'],['statement','Ekstre dönemi · yalnız kartlar']],periodMode));
+ const modeControl=select('view-mode','Kapsam',options([['calendar','Takvim ayı · işlem tarihine göre'],['statement','Ekstre dönemi · yalnız kartlar']],periodMode));
  let html='';
  const backTitle=backDestinationTitle();
  const ctx={state,period,periodMode,fmt,esc,transactionList,periodControl,dateStatus,importCategoryOption,listLimit,importDraft,reportFilters,accountHistoryLimit,backTitle};
@@ -367,23 +419,7 @@ function render(){
   html=renderReminders({items:dueItems(state,asOf),snoozes:readSnoozes(reminderSnoozes()),
    today:asOf,status:reminderSettings(),syncFailed:reminderSyncFailed,esc,fmt,dateStatus});
  }else if(page==='transactions'){
- const searchTerm=query.toLocaleLowerCase('tr');
- const scoped=filteredExpenses?
-  rows.filter(t=>t.kind==='expense'&&t.amount>0).map(t=>C.expenseCategoryRow(state,t,expenseCategory)).filter(Boolean):
-  rows.filter(t=>(!kindFilter||t.kind===kindFilter)&&(!accountFilter||t.account===accountFilter||t.target===accountFilter));
- const list=scoped.filter(t=>{
-  const categories=t.allocationView?[t.category]:C.expenseCategoryAmounts(state,t).map(part=>part.category);
-  return [t.desc,t.category,t.note,...categories].join(' ').toLocaleLowerCase('tr').includes(searchTerm);
- }).sort((a,b)=>b.date.localeCompare(a.date));
- let results;
- if(list.length||!state.transactions.length){
-  results=transactionList(list,{suggestCategories:true});
- }else if(rows.length){
-  results=empty('Aramayı veya filtreleri değiştirerek tekrar dene.','Eşleşen işlem bulunamadı');
- }else{
-  results=empty('Başka bir dönem veya kapsam seç.','Bu kapsamda işlem yok');
- }
- html=`<h1>İşlemler</h1><p class="lead">Bir işleme dokunarak düzenle veya incele.</p>${filteredExpenses?`<div class="toolbar"><strong>Gider kategorisi · ${esc(expenseCategory||'Kategorisiz')}</strong><button data-action="clearExpenseCategory">Filtreyi temizle</button></div>`:modeControl}<div class="toolbar">${periodControl}<button type="button" data-page="review">İnceleme Merkezi</button><button class="primary" data-action="addTransaction">+ İşlem</button></div>${filteredExpenses?'':select('kind-filter','İşlem türü',options([['','Tüm türler'],...Object.entries(kinds)],kindFilter))+select('account-filter','Hesap / kart',options([['','Tüm hesaplar'],...state.accounts.map(a=>[a.id,a.name])],accountFilter))}<input id="search" class="search" type="search" placeholder="Açıklama, kategori veya not ara" value="${esc(query)}"><small>${list.length} işlem · ${Math.min(listLimit,list.length)} gösteriliyor</small><div class="panel" id="transactions-list">${results}</div>${list.length>listLimit?'<button type="button" data-action="more" aria-controls="transactions-list">Daha fazla göster</button>':''}`;
+  html=transactionsView(rows,filteredExpenses,periodControl,modeControl);
  }else if(page==='plan'){
  const budgets=Object.entries(state.budgets).filter(([k])=>k.startsWith(period+'|'));
  html=`<h1>Planlama</h1><p class="lead">Bütçeni ve yaklaşan ödemelerini takip et.</p><div class="actions"><button type="button" data-page="reminders">Hatırlatmalar</button><button type="button" data-page="savingsGoals">Birikim hedefleri</button></div>${V.incomePlansView(ctx,{embedded:true})}<div class="toolbar">${periodControl}<button data-action="budget">+ Bütçe</button></div><div class="panel"><h2>Aylık bütçe</h2>${budgets.map(([k,v])=>{const cat=k.slice(8),used=cat==='Toplam'?s.net:s.categories.find(([c])=>c===cat)?.[1]||0;return `<div class="row"><div><strong>${esc(cat)}</strong><small>${fmt(used)} / ${fmt(v)}</small>${used>v?'<small class="danger">Bütçe aşıldı</small>':''}</div><button data-budget="${esc(k)}" aria-label="Bütçeyi kaldır">×</button></div><progress class="bar" aria-label="${esc(cat)} bütçe kullanımı" aria-valuetext="${esc(`${plainMoney(used)} / ${plainMoney(v)}${used>v?' · Bütçe aşıldı':''}`)}" max="${Math.max(v,1)}" value="${C.positiveCents(used)}"></progress>`;}).join('')||'<p>Bu dönem için bütçe ekle.</p>'}</div><div class="panel"><div class="row"><h2>Abonelikler</h2><button data-action="subscription">+ Ekle</button></div>${state.subscriptions.map(r=>`<div class="row"><div><strong>${esc(r.name)}</strong><small>${dateStatus(r.next)} · ${fmt(r.amount)}<br>${esc(accountName(r.account))}</small></div><div><button data-pay="${esc(r.id)}" data-due="${esc(r.next)}">Ödendi</button><button data-subdelete="${esc(r.id)}" aria-label="Aboneliği sil">×</button></div></div>`).join('')||'<p>Aylık ödemelerini planla. Ödendi düğmesi gerçek ödeme tarihini sorar; bir vade bir kez kaydedilir.</p>'}</div><div class="panel"><h2>Ekstre ödeme takvimi</h2>${C.upcomingPayments(state).filter(st=>st.type==='statement').map(st=>`<div class="row"><div><strong>${esc(st.name)}</strong><small>${dateStatus(st.date)} · kaydedilen ödemelere göre kalan tahmin</small></div><strong>${st.amount===null?'Okunamadı':fmt(st.amount)}</strong></div>`).join('')||'<p>Son ödeme tarihi bulunan bir ekstre aktar.</p>'}<p class="notice">Ödeme takvimi bankadaki ödeme durumunu doğrulamaz.</p></div><div class="panel"><h2>Taksitli hareketler</h2>${transactionList(rows.filter(t=>t.installment))}<p class="notice">Taksit ayrıntıları ve kalan taksit tahmini kartın ayrıntısında gösterilir. Tahmin gelecekteki harcamaları bugünün giderine eklemez.</p></div>`;
@@ -415,7 +451,16 @@ function render(){
   }
   period=e.target.value;render();$('period')?.focus({preventScroll:true});
  });
- $('search')?.addEventListener('input',e=>{const pos=e.target.selectionStart;query=e.target.value;render();$('search').focus();$('search').setSelectionRange(pos,pos);});
+ $('search')?.addEventListener('input',e=>{
+  query=e.target.value;
+  const result=transactionResults(rows,filteredExpenses);
+  const count=$('transaction-count'),label=transactionCount(result);
+  if(count.textContent!==label)count.textContent=label;
+  const list=$('transactions-list'),more=$('transaction-show-more');
+  list.innerHTML=result.results;
+  if(result.count===result.visible)more?.remove();
+  else if(!more)list.insertAdjacentHTML('afterend',transactionMore);
+ });
 }
 function accountForm(existing,{fromImport=false}={}){modal(existing?'Hesabı düzenle':fromImport?'Kredi kartı ekle':'Hesap / kart ekle',field('name','Hesap adı',existing?.name||'','text','required maxlength="80"')+select('type','Hesap türü',options(fromImport?[['card','Kredi kartı']]:[['bank','Banka'],['cash','Nakit'],['card','Kredi kartı']],fromImport?'card':existing?.type||'bank'))+field('opening','Başlangıç bakiyesi / kart borcu (TL)',(existing?.opening||0)/100,'text','inputmode="decimal" required')+'<p class="notice">Ekstre aktaracaksan başlangıç borcuna aynı işlemleri ikinci kez ekleme.</p>',f=>{const next=copy(),a={id:existing?.id||C.id(),name:f.get('name').trim(),type:f.get('type'),opening:C.money(f.get('opening'))};if(existing){if(existing.type!==a.type&&state.transactions.some(t=>t.account===a.id||t.target===a.id))throw Error('Hareketi olan hesabın türü değiştirilemez.');Object.assign(next.accounts.find(x=>x.id===a.id),a);}else next.accounts.push(a);
  commit(next);
@@ -491,7 +536,11 @@ function confirmTransactionRemoval(id){
  const message=rows[0].installmentPlan
   ?`Bu kayda bağlı taksit planının tamamı silinecek. ${rows.length} taksit, toplam ${plainMoney(rows.reduce((sum,row)=>C.addCents(sum,row.amount),0))}. Planı silmek istiyor musun?`
   :'İşlemi silmek istiyor musun?';
- if(confirm(message)){commit(C.removeTransaction(state,id));closeModal();}
+ if(!confirm(message))return;
+ try{
+  commit(C.removeTransaction(state,id));
+  closeModal();
+ }catch(error){showDialogError(error.message);}
 }
 function merchantRuleForm(rule){
  modal(rule?'Satıcı kuralını düzenle':'Satıcı kuralı ekle',
@@ -503,6 +552,17 @@ function merchantRuleForm(rule){
 function rejectFutureCardPaymentDate(date){
  if(date>C.today())throw Error('Gerçek kart ödeme tarihi gelecekte olamaz. Bugünün veya daha önceki bir tarihi seç.');
 }
+const transactionSection=(title,fields)=>`<section class="transaction-section"><h3>${title}</h3>${fields}</section>`;
+function transactionSummary(row){
+ const account=esc(accountName(row.account));
+ const destination=row.target?` → ${esc(accountName(row.target))}`:'';
+ return `<div class="transaction-summary">
+  <small>${esc(kinds[row.kind])} · <time datetime="${esc(row.date)}">${esc(row.date)}</time></small>
+  <strong>${esc(row.desc)}</strong>
+  <b>${fmt(row.amount)}</b>
+  <small>${account}${destination}${row.installment?' · Taksit '+esc(row.installment):''}</small>
+ </div>`;
+}
 function transactionForm(existing,preset='expense'){
  if(!state.accounts.length){notice('Önce hesap veya kart ekle.');accountForm();return;}
  if(existing?.linkedTo){const canonical=state.transactions.find(t=>t.id===existing.linkedTo);if(canonical)return transactionForm(canonical);}
@@ -511,7 +571,36 @@ function transactionForm(existing,preset='expense'){
  const canAllocate=existing?C.canAllocateExpense(state,existing):true;
  let allocationFields;
  const merchant=desc=>existing?.merchantName??existing?.sourceDesc??desc;
- modal(isEdit?'İşlem ayrıntısı':preset==='income'?'Gelir ekle':preset==='transfer'?'Transfer yap':'Gider ekle',select('kind','İşlem türü',options(Object.entries(kinds).filter(([k])=>k!=='cardPayment'||existing?.kind===k),existing?.kind||preset))+select('account','Hesap',accountOptions(()=>true,existing?.account||(page==='account'?detailId:undefined)))+`<div id="target-fields"></div>`+field('desc','Açıklama',existing?.desc||'','text','required maxlength="500"')+field('amount','Tutar (TL)',existing?C.decimalMoney(existing.amount):'','text','inputmode="decimal" required')+field('date','Gerçek işlem tarihi',existing?.date||C.today(),'date','required')+(existing?.installmentPlan?'<p class="notice">Taksit planına bağlı. Açıklama, kategori ve not düzenlenebilir.</p>':locked?`<p class="notice">Kaynak: ${esc(C.sourceOf(existing))} · Ekstre dönemi: ${esc(existing.period)}<br>Orijinal açıklama: ${esc(existing.sourceDesc??existing.desc)}</p>`:'')+select('category','Kategori',categoryOptions(existing?.kind||preset,existing?.category))+`<div id="category-suggestion"><p id="category-advice" role="status"></p><button id="choose-category" type="button" hidden>Önerilen kategoriyi seç</button><label><input name="remember-category" type="checkbox"> Bu satıcı için kategori önerisini hatırla</label></div><div id="installment-fields"></div>`+(canAllocate?expenseAllocationFields(state.version<4):'')+field('note','Not',existing?.note||'','text','maxlength="2000"')+`<label class="transaction-reviewed"><input name="reviewed" type="checkbox" ${existing?.reviewed?'checked':''}><span>İncelendi</span></label>`+(existing?`<button type="button" class="danger" data-delete="${esc(existing.id)}">${existing.installmentPlan?'Taksit planını sil':'İşlemi sil'}</button>`:''),f=>{
+ const sourceInfo=existing?.installmentPlan?
+  '<p class="transaction-help">Taksit planına bağlı. Açıklama, kategori ve not düzenlenebilir.</p>':
+  locked?`<p class="transaction-help">Kaynak: ${esc(C.sourceOf(existing))} · Ekstre dönemi: ${esc(existing.period)}<br>Orijinal açıklama: ${esc(existing.sourceDesc??existing.desc)}</p>`:'';
+ const entry=transactionSection('Kayıt bilgileri',
+  field('desc','Açıklama',existing?.desc||'','text','required maxlength="500"')+
+  `<div class="transaction-filter-grid">
+   <div>${field('amount','Tutar (TL)',existing?C.decimalMoney(existing.amount):'','text','inputmode="decimal" required')}</div>
+   <div>${field('date','Gerçek işlem tarihi',existing?.date||C.today(),'date','required')}</div>
+  </div>`);
+ const accounts=transactionSection('Tür ve hesap',
+  select('kind','İşlem türü',options(Object.entries(kinds).filter(([k])=>k!=='cardPayment'||existing?.kind===k),existing?.kind||preset))+
+  select('account','Hesap',accountOptions(()=>true,existing?.account||(page==='account'?detailId:undefined)))+
+  '<div id="target-fields"></div>');
+ const classification=`<section class="transaction-section" id="transaction-classification">
+  <h3>Kategori ve dağılım</h3>
+  ${select('category','Kategori',categoryOptions(existing?.kind||preset,existing?.category))}
+  <div id="category-suggestion">
+   <p id="category-advice" role="status"></p>
+   <button id="choose-category" type="button" hidden>Önerilen kategoriyi seç</button>
+   <label class="transaction-reviewed"><input name="remember-category" type="checkbox"><span>Bu satıcı için kategori önerisini hatırla</span></label>
+  </div>
+  <div id="installment-fields"></div>
+  ${canAllocate?expenseAllocationFields(state.version<4):''}
+ </section>`;
+ const notes=transactionSection('Not ve inceleme',
+  field('note','Not',existing?.note||'','text','maxlength="2000"')+
+  `<label class="transaction-reviewed"><input name="reviewed" type="checkbox" ${existing?.reviewed?'checked':''}><span>İncelendi</span></label>`);
+ const remove=existing?`<button type="button" class="danger" data-delete="${esc(existing.id)}">${existing.installmentPlan?'Taksit planını sil':'İşlemi sil'}</button>`:'';
+ transactionDialog(isEdit?'İşlem ayrıntısı':preset==='income'?'Gelir ekle':preset==='transfer'?'Transfer kaydet':'Gider ekle',
+  (existing?transactionSummary(existing):'')+sourceInfo+accounts+entry+classification+notes+remove,f=>{
   const kind=fixed?existing.kind:f.get('kind'),t={...existing,id:existing?.id||C.id(),account:fixed?existing.account:f.get('account'),kind,desc:f.get('desc').trim(),amount:existing&&f.get('amount')===C.decimalMoney(existing.amount)?existing.amount:C.money(f.get('amount')),date:f.get('date'),period:existing&&(locked||existing.date===f.get('date'))?existing.period:f.get('date').slice(0,7),category:['payment','transfer','cardPayment'].includes(kind)?kinds[kind]:f.get('category'),note:f.get('note'),reviewed:f.get('reviewed')==='on'};
   if(kind==='payment'&&C.sourceOf(t)==='manual')rejectFutureCardPaymentDate(t.date);
   if(['payment','transfer'].includes(kind))t.target=f.get('target');else delete t.target;
@@ -530,10 +619,12 @@ function transactionForm(existing,preset='expense'){
  function updateFields(){
   const kind=$('f-kind').value,current=$('f-account').value,filter=a=>kind==='income'||['payment','transfer'].includes(kind)?a.type!=='card':kind==='cardPayment'?a.type==='card':true;
   $('f-account').innerHTML=accountOptions(filter,current);const account=$('f-account').value;
-  $('target-fields').innerHTML=['payment','transfer'].includes(kind)?select('target',kind==='payment'?'Ödenecek kredi kartı':'Hedef banka / nakit hesabı',accountOptions(a=>a.id!==account&&(kind==='payment'?a.type==='card':a.type!=='card'),existing?.target)):'';
+  $('target-fields').innerHTML=['payment','transfer'].includes(kind)?
+   select('target',kind==='payment'?'Ödenecek kredi kartı':'Hedef banka / nakit hesabı',accountOptions(a=>a.id!==account&&(kind==='payment'?a.type==='card':a.type!=='card'),existing?.target))+
+   `<p class="transaction-help">${kind==='payment'?'Daha önce yaptığın ödemeyi cüzdana kaydet.':'Hesaplar arasındaki para hareketini kaydet.'}</p>`:'';
   const hide=['payment','transfer','cardPayment'].includes(kind),old=$('f-category').value;
   $('f-category').innerHTML=categoryOptions(kind,old&&((kind==='income'?state.incomeCategories:state.categories).includes(old))?old:existing?.kind===kind?existing.category:undefined);
-  document.querySelector('label[for=f-category]').hidden=hide;$('f-category').hidden=hide;
+  $('transaction-classification').hidden=hide;
   const cardExpense=kind==='expense'&&state.accounts.find(a=>a.id===account)?.type==='card',previous=$('f-installment')?.value;
   const count=$('f-installmentCount')?.value;
   $('installment-fields').innerHTML=cardExpense?
@@ -579,7 +670,12 @@ function payCardForm(cardId,{sourceId=''}={}){
  if(!cards.length||!sources.length)throw Error('Kart ödemesi için bir kredi kartı ve kaynak banka / nakit hesabı ekle.');
  const card=cards.find(a=>a.id===cardId)||cards[0],status=W.cardDetail(state,card.id),suggested=status.statementRemaining>0?status.statementRemaining:status.debt;
  const source=sources.find(account=>account.id===sourceId);
- modal('Kart ödemesi kaydet',select('target','Ödenecek kredi kartı',options(cards.map(a=>[a.id,a.name]),card.id))+select('account','Paranın çıktığı banka / nakit hesabı',options([['','Kaynak hesabı seç'],...sources.map(a=>[a.id,a.name])],source?.id??''))+field('amount','Ödenen tutar (TL)',suggested?C.decimalMoney(suggested):'','text','inputmode="decimal" required')+field('date','Gerçek ödeme tarihi',C.today(),'date','required')+'<p class="notice">Banka / nakit bakiyesi azalır, kart borcu kapanır. Bu ödeme yeni bir gider değildir. Ekstrede aynı ödeme varsa incelemede eşleştir.</p>',f=>{
+ transactionDialog('Kart ödemesi kaydet',
+  '<p class="transaction-help">Daha önce yaptığın ödemeyi cüzdana kaydet. Ekstrede aynı ödeme varsa İnceleme Merkezi’nde eşleştir.</p>'+
+  transactionSection('Hesaplar',select('target','Ödenecek kredi kartı',options(cards.map(a=>[a.id,a.name]),card.id))+
+   select('account','Paranın çıktığı banka / nakit hesabı',options([['','Kaynak hesabı seç'],...sources.map(a=>[a.id,a.name])],source?.id??'')))+
+  transactionSection('Ödeme bilgileri',field('amount','Ödenen tutar (TL)',suggested?C.decimalMoney(suggested):'','text','inputmode="decimal" required')+
+   field('date','Gerçek ödeme tarihi',C.today(),'date','required')),f=>{
   const date=f.get('date');
   rejectFutureCardPaymentDate(date);
   if(!f.get('account'))throw Error('Kaynak hesabı seç.');
@@ -588,7 +684,10 @@ function payCardForm(cardId,{sourceId=''}={}){
  $('f-target').onchange=()=>{const d=W.cardDetail(state,$('f-target').value);$('f-amount').value=C.decimalMoney(d.statementRemaining>0?d.statementRemaining:d.debt);};
 }
 function attachPaymentForm(tid){const t=state.transactions.find(t=>t.id===tid);if(!t)return;
- modal('Ekstre ödemesine kaynak bağla',`<p>${esc(t.desc)} · ${fmt(t.amount)}</p><p>Yalnız paranın hangi hesaptan çıktığını biliyorsan bağla. Kaynağı bilinmeyen ekstre ödemesi gelir sayılmaz. Zaten kaydettiğin banka ödemesi varsa inceleme kutusunda eşleştir.</p>`+select('account','Kaynak banka / nakit',options([['','Kaynak hesabı seç'],...state.accounts.filter(a=>a.type!=='card').map(a=>[a.id,a.name])],''))+field('paidOn','Bankadan paranın çıktığı tarih',t.date,'date','required'),f=>{
+ transactionDialog('Ekstre ödemesine kaynak bağla',transactionSummary(t)+
+  '<p class="transaction-help">Yalnız paranın hangi hesaptan çıktığını biliyorsan bağla. Zaten kaydettiğin banka ödemesi varsa İnceleme Merkezi’nde eşleştir.</p>'+
+  transactionSection('Ödeme kaynağı',select('account','Kaynak banka / nakit',options([['','Kaynak hesabı seç'],...state.accounts.filter(a=>a.type!=='card').map(a=>[a.id,a.name])],''))+
+   field('paidOn','Bankadan paranın çıktığı tarih',t.date,'date','required')),f=>{
   const paidOn=f.get('paidOn');
   rejectFutureCardPaymentDate(paidOn);
   commit(W.attachPaymentSource(state,tid,f.get('account'),{paidOn}));
@@ -672,16 +771,25 @@ function selectMorePage(event){
 $('close').addEventListener('click',event=>{
  if($('modal').open&&$('more-options'))guardRepeatedActivation(event,event.pointerType==='touch');
 },{capture:true});
+$('modal').addEventListener('click',event=>{
+ if(event.pointerType!=='touch'||$('modal').dataset.variant!=='transaction')return;
+ if(event.target.closest('#submit,#close,#quick-add-options button,[data-delete]'))guardRepeatedActivation(event);
+},{capture:true});
 
 function openQuickAdd(){
  if($('modal').open)return;
- modal('Hızlı Ekle',`
-  <div id="quick-add-options">
-   <button type="button" data-action="addTransaction">Gider</button>
-   <button type="button" data-action="addIncome">Gelir</button>
-   <button type="button" data-action="transfer">Transfer</button>
-   <button type="button" data-action="quickPayCard">Kart Borcu Ödemesi</button>
-  </div>`,null);
+ const choices=[
+  ['addTransaction','wallet','Gider'],
+  ['addIncome','cash','Gelir'],
+  ['transfer','transactions','Transfer'],
+  ['quickPayCard','bank','Kart Borcu Ödemesi','Yapılmış bir ödemeyi kaydet'],
+ ];
+ transactionDialog('Hızlı Ekle',`<div id="quick-add-options">${choices.map(([action,icon,label,description])=>
+  `<button class="menu-row" type="button" data-action="${action}"${description?` aria-label="${label}" aria-describedby="quick-payment-help"`:''}>
+   <span class="row-icon">${uiIcon(icon)}</span>
+   <span><strong>${label}</strong>${description?`<small id="quick-payment-help">${description}</small>`:''}</span>
+   ${uiIcon('next')}
+  </button>`).join('')}</div>`,null);
 }
 
 function hasBalanceStorage(){
