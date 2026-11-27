@@ -59,8 +59,11 @@ async function checkMoreNavigation(browser){
       ['Özet','Cüzdan','Raporlar','Diğer'],'four fixed controls in the approved order');
     assert.equal(await more.getAttribute('aria-haspopup'),'dialog');
     assert.equal(await current.getAttribute('data-page'),'home');
-    assert.equal(await main.getByRole('button',{name:/^Raporlar/}).count(),1);
+    assert.equal(await main.getByRole('button',{name:/^Raporlar/}).count(),0,'Raporlar is available only in the fixed navigation');
     const amount=main.locator('[data-stat=netExpense]');
+    const headerAdd=page.getByRole('button',{name:'Hızlı Ekle',exact:true});
+    const bodyAdd=main.getByRole('button',{name:'İşlem ekle',exact:true});
+    const quickAdd=page.getByRole('dialog',{name:'Hızlı Ekle',exact:true});
     const beforeMotion=await snapshot();
     const motionEvidence={};
     for(const [preference,width,scale] of [['no-preference',390,100],['reduce',320,200]]){
@@ -88,13 +91,14 @@ async function checkMoreNavigation(browser){
         const row=getComputedStyle(node.querySelector('.menu-row .row-icon'));
         return {
           animation:backdrop.animationName,duration:backdrop.animationDuration,
-          panel:getComputedStyle(node).animationName,row:row.transitionDuration,
+          panel:getComputedStyle(node).animationName,panelDuration:getComputedStyle(node).animationDuration,row:row.transitionDuration,
           fits:node.scrollWidth<=node.clientWidth+1&&document.documentElement.scrollWidth<=innerWidth+1,
         };
       });
       assert.deepEqual(sheet,{
         animation:reduced?'none':'navigation-backdrop-in',duration:reduced?'0s':'0.12s',
-        panel:'none',row:reduced?'0s':'0.09s',fits:true,
+        panel:reduced?'none':'menu-sheet-in',panelDuration:reduced?'0s':'0.14s',
+        row:reduced?'0s':'0.09s',fits:true,
       });
       assert(await focused(menu.getByRole('heading',{name:'Diğer'})));
       assert.equal(await amount.innerText(),'₺3.125,00');
@@ -125,7 +129,64 @@ async function checkMoreNavigation(browser){
       assert.equal(await nativeBack(),false,'the repeated tap must not create another history entry');
       assert.equal(await amount.innerText(),'₺3.125,00');
       assert.deepEqual(await snapshot(),beforeMotion);
-      motionEvidence[preference]={press:press.duration,backdrop:sheet.duration,width,scale};
+      const quickOpening=await bodyAdd.evaluate(button=>{
+        button.click();
+        const dialog=document.querySelector('#modal');
+        const style=getComputedStyle(dialog);
+        const animation=dialog.getAnimations().find(item=>item.animationName==='menu-sheet-in');
+        const frames=animation?.effect.getKeyframes().map(frame=>({
+          opacity:Number(frame.opacity),y:new DOMMatrixReadOnly(frame.transform).m42,
+        }))??[];
+        const opened=dialog.open&&document.activeElement.id==='dialog-title';
+        const result={name:style.animationName,duration:style.animationDuration,frames,opened};
+        return {...result,back:window.handleBack(),closed:!dialog.open,focused:document.activeElement===button};
+      });
+      assert.deepEqual(quickOpening,{
+        name:sheet.panel,duration:sheet.panelDuration,frames:reduced?[]:[{opacity:.86,y:6},{opacity:1,y:0}],
+        opened:true,back:true,closed:true,focused:true,
+      },'Quick Add opens from Özet and can close in the same turn');
+      await bodyAdd.click();
+      assert(await focused(quickAdd.getByRole('heading',{name:'Hızlı Ekle'})));
+      await page.keyboard.press('Escape');
+      assert.equal(await quickAdd.count(),0);
+      assert(await focused(bodyAdd));
+
+      await headerAdd.click();
+      assert.equal(await quickAdd.evaluate(node=>getComputedStyle(node).animationName),sheet.panel);
+      await quickAdd.evaluate(node=>Promise.all(node.getAnimations().map(animation=>animation.finished)));
+      const payment=quickAdd.getByRole('button',{name:'Kart Borcu Ödemesi',exact:true});
+      const bounds=await payment.boundingBox();
+      await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
+      await page.mouse.down();
+      const quickPress=await payment.locator('.row-icon').evaluate(node=>{
+        const style=getComputedStyle(node);
+        return {duration:style.transitionDuration,visible:style.boxShadow!=='none'};
+      });
+      assert.deepEqual(quickPress,{duration:reduced?'0s':'0.09s',visible:!reduced});
+      assert.deepEqual(await payment.boundingBox(),bounds,'press feedback leaves the action target in place');
+      await page.mouse.up();
+      const paymentForm=page.getByRole('dialog',{name:'Kart ödemesi kaydet',exact:true});
+      assert.equal(await paymentForm.evaluate(node=>getComputedStyle(node).animationName),'none');
+      assert(await focused(paymentForm.getByRole('heading',{name:'Kart ödemesi kaydet'})));
+      assert.equal(await nativeBack(),true);
+      assert(await focused(headerAdd));
+
+      await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
+      const expense=main.locator('#settings-expense-disclosure');
+      const summary=expense.locator('summary');
+      const chevron=await summary.locator('.ui-icon').evaluate(node=>{
+        const style=getComputedStyle(node);
+        return {property:style.transitionProperty,duration:style.transitionDuration};
+      });
+      assert.equal(chevron.duration,reduced?'0s':'0.14s');
+      if(!reduced)assert.equal(chevron.property,'rotate');
+      assert.equal(await summary.evaluate(node=>getComputedStyle(node).transitionDuration),'0s');
+      await summary.press('Enter');
+      assert.equal(await expense.evaluate(node=>node.open),true);
+      assert(await focused(summary));
+      assert.equal(await nativeBack(),true);
+      assert.deepEqual(await snapshot(),beforeMotion);
+      motionEvidence[preference]={press:press.duration,backdrop:sheet.duration,sheet:sheet.panelDuration,chevron:chevron.duration,width,scale};
     }
     console.log('Diğer motion and immediate route/Back/focus checks',JSON.stringify(motionEvidence));
     await page.emulateMedia({reducedMotion:'no-preference'});
@@ -222,7 +283,7 @@ async function checkDashboardLayouts(browser){
   const shots=process.env.EA06_SCREENSHOTS;
   if(shots)fs.mkdirSync(shots,{recursive:true});
   const row=(id,account,date,kind,amount,category,desc,extra={})=>
-    ({id,account,date,period:'2026-11',kind,amount,category,desc,...extra});
+    ({id,account,date,period:date.slice(0,7),kind,amount,category,desc,...extra});
   for(const width of [390,320]){
     const narrow=width===320;
     const page=await browser.newPage({viewport:{width,height:844},isMobile:true,hasTouch:true,locale:'tr-TR'});
@@ -238,7 +299,12 @@ async function checkDashboardLayouts(browser){
           {id:'synthetic-card',name:narrow?'Sentetik Çok Uzun Kredi Kartı '.repeat(2).trim():'Sentetik günlük kart',type:'card',opening:0},
         ],
         statements:[{...fixture.statements[0],id:'synthetic-card|2026-11',period:'2026-11',cut:'2026-11-01',due:'2026-11-28',debt:570000}],
+        subscriptions:[{id:'late-subscription',name:'Sentetik geciken abonelik',account:'synthetic-bank',amount:5900,next:'2026-11-25',category:'Abonelik'}],
+        incomePlans:narrow?[{id:'test-income',name:'Sentetik gelir planı',account:'synthetic-bank',amount:120000,next:'2026-11-27',category:'Maaş'}]:[],
         transactions:[
+          row('october-income','synthetic-bank','2026-10-03','income',24680,'Maaş','Sentetik ekim geliri'),
+          row('october-expense','synthetic-bank','2026-10-08','expense',24680,'Eğitim','Sentetik ekim gideri'),
+          row('pending','synthetic-card','2026-11-04','expense',318000,'Giyim','Sentetik inceleme',{source:'pdf',matchStatus:'pending',matchCandidates:['card-expense']}),
           row('payment','synthetic-bank','2026-11-03','payment',246000,'Kart ödemesi','Sentetik kart ödemesi',{target:'synthetic-card'}),
           row('card-expense','synthetic-card','2026-11-04','expense',318000,'Giyim','Sentetik kart alışverişi'),
           row('coffee','synthetic-cash','2026-11-25','expense',14500,'Dışarıda yeme','Sentetik kahve'),
@@ -272,9 +338,91 @@ async function checkDashboardLayouts(browser){
         assert.match(await main.locator('[data-stat=cash]').textContent(),/34\.850,00/);
         assert.match(await main.locator('[data-stat=netWorth]').textContent(),/28\.430,00/);
       }
-      await checkFit('#nav button, main .panel, main .dashboard-actions button');
-      await screenshot('ozet');
+      const summary=main.getByRole('region',{name:'Aylık özet',exact:true});
+      const categorySummary=main.getByRole('region',{name:'Kategori bazlı gider dağılımı'});
+      const upcoming=main.getByRole('region',{name:'Yaklaşan / geciken ödemeler'});
+      const paymentPlan=upcoming.getByRole('button',{name:'Ödeme planı',exact:true});
+      const reports=nav.getByRole('button',{name:'Raporlar',exact:true});
+      const home=nav.getByRole('button',{name:'Özet',exact:true});
+      const reportMonth=main.getByLabel('Seçili ay',{exact:true});
+      const walletBytes=()=>page.evaluate(()=>localStorage.getItem('ekstre-android-v1'));
+      const initialBytes=await walletBytes();
+      const nativeBack=()=>page.evaluate(()=>window.handleBack());
+      const assertMonth=async(month,label,values,category)=>{
+        assert.equal(await summary.locator('time').getAttribute('datetime'),month);
+        assert.equal(await summary.locator('time').textContent(),label);
+        assert.deepEqual(await summary.locator('[data-stat]').allTextContents(),values);
+        assert.equal(await categorySummary.getByRole('button',{name:category}).count(),1);
+      };
+      if(narrow)await page.evaluate(()=>{document.documentElement.style.fontSize='200%';});
+      await checkFit('#nav button, main .panel, main .dashboard-actions button, main .section-link, main .expense-category');
+      await screenshot(narrow?'ozet-200':'ozet');
+      const bodyAdd=main.getByRole('button',{name:'İşlem ekle',exact:true});
+      assert.equal(await main.locator('[data-action=addIncome],[data-action=addTransaction],[data-action=transfer],[data-action=payCard]').count(),0,
+        'Özet has one body transaction entry instead of duplicate direct buttons');
+      assert.equal(await page.getByRole('button',{name:'Hızlı Ekle',exact:true}).isVisible(),true);
+      await bodyAdd.click();
+      const quickAdd=page.getByRole('dialog',{name:'Hızlı Ekle',exact:true});
+      const choices=quickAdd.locator('#quick-add-options');
+      assert.deepEqual(await choices.getByRole('button').evaluateAll(buttons=>buttons.map(button=>button.dataset.action)),
+        ['addTransaction','addIncome','transfer','quickPayCard']);
+      await checkFit('#quick-add-options button');
+      assert.equal(await nativeBack(),true);
+      assert.equal(await bodyAdd.evaluate(button=>button===document.activeElement),true);
+      const incomePlans=main.getByRole('button',{name:'Gelir planları',exact:true});
+      assert.equal(await incomePlans.count(),1,'one income plans entry with or without planned income');
+      if(narrow)assert.match(await main.locator('.planned-income').innerText(),/1.200,00/);
+      await incomePlans.click();
+      assert.equal(await main.getByRole('heading',{level:1,name:'Gelir planları'}).isVisible(),true);
+      assert.equal(await nativeBack(),true);
+      assert.equal(await incomePlans.evaluate(button=>button===document.activeElement),true);
+      assert.equal(await main.getByText('Kayıtlarına göre',{exact:true}).count(),0,'Özet drops the generic qualifier');
+      assert.equal(await upcoming.getByText('Takvim bankadaki ödeme durumunu doğrulamaz.',{exact:true}).count(),0);
+      assert.equal(await summary.locator('input,button').count(),0,'month context is not a control or duplicate shortcut');
+      assert.equal(await main.getByRole('button',{name:/^Raporlar/}).count(),0);
+      await assertMonth('2026-11','Kasım 2026',['₺0,00','₺4.145,50','-₺4.145,50'],/Giyim/);
+      assert.match(await upcoming.innerText(),/2026-11-28 · Yaklaşıyor · Kalan dönem borcu tahmini/);
+      assert.match(await upcoming.innerText(),/2026-11-25 · Vadesi geçti/);
+      assert.equal(await main.getByText('1 kayıt inceleme bekliyor',{exact:true}).count(),1);
+      await paymentPlan.click();
+      const calendar=main.getByRole('region',{name:'Ekstre ödeme takvimi'});
+      assert.match(await calendar.innerText(),/Ödeme durumunu bankandan kontrol et\./);
+      assert.match(await calendar.innerText(),/2026-11-28 · Yaklaşıyor/);
+      assert.equal(await main.getByRole('region',{name:'Abonelikler'}).getByRole('heading',{name:'Sentetik geciken abonelik'}).isVisible(),true);
+      assert.equal(await nativeBack(),true);
+      assert.equal(await paymentPlan.evaluate(button=>button===document.activeElement),true);
+
+      await reports.click();
+      assert.equal(await reportMonth.inputValue(),'2026-11');
+      await reportMonth.fill('2026-10');
+      assert.equal(await main.getByRole('heading',{name:'Gelir ve gider · Ekim 2026',exact:true}).count(),1);
+      assert.equal(await main.locator('[data-stat=netExpense]').innerText(),'₺246,80');
+      assert.equal(await nativeBack(),true);
+      assert.equal(await reports.evaluate(button=>button===document.activeElement),true);
+      await assertMonth('2026-10','Ekim 2026',['₺246,80','₺246,80','₺0,00'],/Eğitim/);
+      assert.equal(await walletBytes(),initialBytes,'navigating and selecting a month writes no wallet data');
+      await screenshot(narrow?'ozet-ekim-200':'ozet-ekim');
+      await reports.click();
+      await reportMonth.fill('2026-11');
+      await home.click();
+      if(narrow)await page.evaluate(()=>{document.documentElement.style.fontSize='';});
+
       await nav.getByRole('button',{name:'Cüzdan',exact:true}).click();
+      const walletActions=main.locator('h1 + .dashboard-actions');
+      assert.deepEqual(await walletActions.getByRole('button').evaluateAll(buttons=>buttons.map(button=>button.textContent.trim())),
+        ['Hesap ekle','Ekstre yükle'],'wallet actions sit directly below the title');
+      const cards=main.getByRole('region',{name:'Kredi kartları'});
+      const liquid=main.getByRole('region',{name:'Banka ve nakit bakiyesi'});
+      assert.equal(await cards.getByRole('heading',{level:2,name:'Kredi kartları'}).isVisible(),true);
+      assert.equal(await cards.locator('[data-card-view]').count(),1);
+      assert.equal(await liquid.locator('[data-account-view]').count(),2);
+      await walletActions.getByRole('button',{name:'Hesap ekle'}).click();
+      assert.equal(await page.getByRole('dialog',{name:'Hesap / kart ekle'}).isVisible(),true);
+      assert.equal(await nativeBack(),true);
+      await walletActions.getByRole('button',{name:'Ekstre yükle'}).click();
+      assert.equal(await main.getByRole('heading',{level:1,name:'Ekstreler'}).isVisible(),true);
+      assert.equal(await nativeBack(),true);
+      assert.equal(await walletBytes(),initialBytes);
       assert.match(await main.getByRole('button',{name:/Güncel kart borcu tahmini/}).textContent(),/6\.420,00/);
       assert.match(await main.locator('.dashboard-row',{hasText:'Dönem borcu'}).first().textContent(),/5\.700,00/);
       assert.match(await main.locator('.dashboard-row',{hasText:'Kalan dönem borcu'}).textContent(),/3\.240,00/);
@@ -451,7 +599,7 @@ async function checkShowMore(browser){
       ['report movements','#report-movements',[other.id,...rowIds],'Space'],
     ]){
       await goHome();
-      await page.locator('main [data-page=reports]').click();
+      await openRoute(page,'reports');
       if(scope==='#report-category-transactions')await page.locator('[data-report-category]').filter({hasText:category}).click();
       else await page.locator('#report-movements-toggle').click();
       await expand(name,page.locator(scope),key,ids,150);
@@ -937,6 +1085,14 @@ async function checkDialog(page,opener,expectedTitle,{checkAccountLabel=false}={
     async function checkSlice1(){
       await checkMoreNavigation(browser);
       await checkDashboardLayouts(browser);
+    }
+    if(process.argv.includes('--ux-motion')){
+      await checkMoreNavigation(browser);
+      return;
+    }
+    if(process.argv.includes('--ux-layout')){
+      await checkDashboardLayouts(browser);
+      return;
     }
     if(process.argv.includes('--slice1')){
       await checkSlice1();

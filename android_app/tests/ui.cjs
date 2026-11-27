@@ -14,7 +14,7 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  await openRoute(page,'transactions');await page.locator('[data-edit]').first().click();await page.locator('[name=note]').fill('Mobil deneme');await page.getByRole('button',{name:'Kaydet',exact:true}).click();
  await openRoute(page,'plan');await page.getByRole('button',{name:'Bütçe ekle',exact:true}).click();await page.locator('[name=amount]').fill('5000');await page.getByRole('button',{name:'Kaydet',exact:true}).click();assert(await page.getByText('Toplam',{exact:true}).count());
  for(const name of ['wallet','transactions','plan','import']){await openRoute(page,name);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'horizontal overflow: '+name);}
- await page.locator('nav [data-page="home"]').click();await page.getByRole('button',{name:'Raporlar ↗'}).click();await page.getByRole('heading',{name:'Kategori dağılımı'}).waitFor();
+ await openRoute(page,'reports');await page.getByRole('heading',{name:'Kategori dağılımı'}).waitFor();
  await page.setViewportSize({width:320,height:640});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(out,'reports-small.png'),fullPage:true});
  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'ui-result.json'),JSON.stringify({passed:true,checks:['first launch','demo','reload persistence','edit note','budget','navigation','390px layout','320px layout','no JS exceptions']},null,2));console.log('UI checks passed');
  }finally{await browser.close();server.close();}})().catch(e=>{console.error(e);server.close();process.exitCode=1;});

@@ -19,9 +19,6 @@
 .wallet-v2 .month-summary .notice{margin-bottom:0}
 .wallet-v2 .optional-detail>summary{min-height:48px;padding:8px 0;font-weight:650;cursor:pointer;line-height:1.5}
 .wallet-v2 .optional-detail>summary::marker{color:var(--mint)}
-.wallet-v2 .quick-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:20px 0}
-.wallet-v2 .quick-actions button{display:flex;gap:9px;align-items:center;justify-content:center;min-height:64px;padding:14px 10px;font-size:1rem;line-height:1.4;min-width:0}
-.wallet-v2 .quick-actions .action-symbol{font-size:1.3rem;font-weight:500;flex:none}
 .wallet-v2 .section-heading,.wallet-v2 .detail-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .wallet-v2 .section-heading{margin-bottom:12px}
 .wallet-v2 .section-heading>h2,.wallet-v2 .income-plans .section-heading>h3,.wallet-v2 .section-heading>div{flex:1 1 12rem;margin:6px 0 0;min-width:0}
@@ -110,8 +107,8 @@
 .wallet-v2 .warning{margin:16px 0}
 .wallet-v2 .warning>strong{display:block;line-height:1.5}
 .wallet-v2 .warning>button{margin-top:4px;max-width:100%}
-@media(min-width:700px){.wallet-v2 .quick-actions{grid-template-columns:repeat(4,minmax(0,1fr))}.wallet-v2 .quick-actions button{flex-direction:column;gap:5px}.wallet-v2 .card-details>div{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start;gap:20px}.wallet-v2 .card-details dd{text-align:right}}
-@media(max-width:600px){.wallet-v2 .summary-grid,.wallet-v2 .comparison-values{grid-template-columns:minmax(0,1fr)}.wallet-v2 .quick-actions button{flex-direction:column;gap:5px;min-height:80px}.wallet-v2 .section-heading>button{flex-basis:100%}.wallet-v2 .detail-heading>button{flex-basis:100%;margin-bottom:12px}.wallet-v2 .planned-income>button{flex-basis:100%}.wallet-v2 .account-open>b{font-size:1.4rem}}
+@media(min-width:700px){.wallet-v2 .card-details>div{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start;gap:20px}.wallet-v2 .card-details dd{text-align:right}}
+@media(max-width:600px){.wallet-v2 .summary-grid,.wallet-v2 .comparison-values{grid-template-columns:minmax(0,1fr)}.wallet-v2 .section-heading>button{flex-basis:100%}.wallet-v2 .detail-heading>button{flex-basis:100%;margin-bottom:12px}.wallet-v2 .planned-income>button{flex-basis:100%}.wallet-v2 .account-open>b{font-size:1.4rem}}
 .wallet-v2 .expense-breakdown{margin-block:16px 20px}
 .wallet-v2 .expense-total{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 14px;margin:0 0 10px}
 .wallet-v2 .expense-total strong{color:var(--text);font-variant-numeric:tabular-nums}
@@ -163,7 +160,7 @@
  .wallet-v2 .statement-totals{grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))}
 }
 @media(max-width:480px){.wallet-v2 .expense-category-name{flex-basis:100%}}
-@media(max-width:350px){.wallet-v2 .quick-actions{gap:8px}.wallet-v2 .quick-actions button{padding:12px 7px}.wallet-v2 .metric{padding:14px}.wallet-v2 .reconciliation{padding:12px}}
+@media(max-width:350px){.wallet-v2 .metric{padding:14px}.wallet-v2 .reconciliation{padding:12px}}
 
 .wallet-v2 .expense-category-setting{align-items:center}
 .wallet-v2 .expense-category-setting>.left{flex-basis:8rem}

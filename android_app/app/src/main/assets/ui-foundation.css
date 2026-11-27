@@ -113,15 +113,30 @@ html.navigation-sheet-open {overflow-y:hidden}
 
 @media (prefers-reduced-motion:no-preference) {
   #nav .nav-icon,
-  #modal.navigation-sheet .menu-row .row-icon {
+  #modal.navigation-sheet .menu-row .row-icon,
+  #quick-add-options .menu-row .row-icon {
     transition:transform 90ms ease-out;
   }
   #nav button:not(:disabled):active .nav-icon,
-  #modal.navigation-sheet .menu-row:not(:disabled):active .row-icon {
+  #modal.navigation-sheet .menu-row:not(:disabled):active .row-icon,
+  #quick-add-options .menu-row:not(:disabled):active .row-icon {
     transform:translateY(1px) scale(.97);
+  }
+  #quick-add-options .menu-row:not(:disabled):active .row-icon {
+    box-shadow:inset 0 0 0 2px currentColor;
+  }
+  #modal[open]:is(.navigation-sheet,[data-variant="transaction"]:has(#quick-add-options)) {
+    animation:menu-sheet-in 140ms ease-out;
   }
   #modal.navigation-sheet[open]::backdrop {
     animation:navigation-backdrop-in 120ms ease-out;
+  }
+  .settings-disclosure > summary .ui-icon {
+    transition:rotate 140ms ease-out;
+  }
+  @keyframes menu-sheet-in {
+    from {opacity:.86;transform:translateY(6px)}
+    to {opacity:1;transform:translateY(0)}
   }
   @keyframes navigation-backdrop-in {
     from {opacity:.65}
@@ -291,7 +306,7 @@ body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[
   flex-wrap:wrap;
 }
 .dashboard-hero-caption small:first-child {color:var(--shell-text)}
-.dashboard-hero-caption small:last-child {
+.dashboard-hero-caption small + small {
   border:1px solid var(--shell-line-strong);
   padding:3px 8px;
   border-radius:999px;
@@ -340,14 +355,9 @@ body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[
   font-size:.8rem;
 }
 .dashboard-surface .section-heading > .dashboard-period {
-  display:flex;
-  flex:0 1 auto;
-  align-items:center;
-  flex-wrap:wrap;
-  gap:4px;
-  margin:0;
+  color:var(--muted);
+  font-size:.875rem;
 }
-.dashboard-period .period {width:auto}
 .dashboard-surface .month-summary {margin:0}
 .dashboard-surface .month-summary .dashboard-totals {
   grid-template-columns:repeat(auto-fit,minmax(min(100%,5rem),1fr));

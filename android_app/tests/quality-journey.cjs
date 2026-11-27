@@ -1,4 +1,5 @@
 const openRoute=require('./journey-navigation.cjs');
+const {selectSummaryMonth}=openRoute;
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -517,7 +518,7 @@ async function advancedReportsJourney(page) {
   });
   const original = await saved();
   await page.reload();
-  await page.getByRole('button',{name:'Raporlar ↗'}).click();
+  await openRoute(page,'reports');
   await page.getByLabel('Seçili ay',{exact:true}).fill('2026-11');
   await page.getByLabel('Seçili ay',{exact:true}).evaluate(input => {
     input.value='10000-01';
@@ -629,12 +630,12 @@ async function reportsSliceJourney(browser) {
       else await page.screenshot({path:path.join(dir,name)});
     };
 
-    await month().fill('2026-10');
+    await selectSummaryMonth(page,'2026-10');
     const preview=main.getByRole('region',{name:'Kategori bazlı gider dağılımı'});
     assert.deepEqual(await preview.getByRole('button').evaluateAll(items=>items.map(node=>node.dataset.expenseCategory)),
       ['Market','Ulaşım','Eğitim'],'Özet shows only the three largest gross categories');
     await capture('01-ozet-harcama-onizleme.png',preview);
-    await main.getByRole('button',{name:'Raporlar ↗'}).click();
+    await openRoute(page,'reports');
     assert.equal(await heading.innerText(),'Raporlar');
     assert(await active(heading));
     await account.selectOption('a');
@@ -1031,9 +1032,9 @@ async function reportsSliceJourney(browser) {
       return {current,previous};
     },card.id);
     await page.reload();
-    await page.locator('#period').fill(periods.current);
+    await selectSummaryMonth(page,periods.current);
     assert.equal(await page.locator('[data-stat=netExpense]').innerText(),'₺99.999.999.999.900,01');
-    await page.locator('main [data-page=reports]').click();
+    await openRoute(page,'reports');
     await page.getByRole('heading',{name:'Kategori dağılımı'}).waitFor();
     const checkExactTrend=async()=>{
       const trend=page.getByRole('region',{name:'Aylık değişim'});

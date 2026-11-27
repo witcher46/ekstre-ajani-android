@@ -1,4 +1,5 @@
 const openRoute=require('./journey-navigation.cjs');
+const {openSummaryAction,selectSummaryMonth}=openRoute;
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'playwright');
 const fs=require('fs'),path=require('path'),assert=require('assert');
 const {createHash}=require('node:crypto');
@@ -37,7 +38,7 @@ async function expenseAllocationAvailabilityJourney(browser){
     const read=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')));
     const dialog=page.locator('dialog[open]');
     const start=async desc=>{
-      await page.locator('[data-action=addTransaction]').click();
+      await openSummaryAction(page,'addTransaction');
       await field('account').selectOption('card');
       await field('desc').fill(desc);
       await field('amount').fill('1000');
@@ -213,7 +214,7 @@ async function futureManualPaymentJourney(browser){
     for(const [metric,value] of [['cash',cash],['cardDebt',debt],['netExpense','0,00']]){
       await assertMetric(metric,value);
     }
-    await page.locator('main [data-page=reports]').click();
+    await openRoute(page,'reports');
     await assertMetric('cardCashPayments',paid);
     await assertMetric('cardPayments',paid);
     await openCard();
@@ -315,7 +316,7 @@ async function ambiguousStatementPaymentJourney(browser,{bankFirst=false}={}){
     assert.match(await page.locator('.statement-totals dt').getByText('Kart ödemesi',{exact:true}).locator('..').innerText(),/80,00/);
     await page.getByText('Bu ekstreyle ilişkili olası eşleşmeler inceleme kutusunda.').waitFor();
     await page.locator('nav [data-page=home]').click();
-    await page.locator('main [data-page=reports]').click();
+    await openRoute(page,'reports');
     assert.equal(await metric('cardPayments'),'80,00');
     assert.equal(await metric('cardCashPayments'),'40,00');
     assert.equal(await metric('cashOut'),'40,00');
@@ -344,7 +345,7 @@ async function ambiguousStatementPaymentJourney(browser,{bankFirst=false}={}){
     await openCard();
     assert.equal(await metric('cardStatementRemaining'),'70,00');
     await page.locator('nav [data-page=home]').click();
-    await page.locator('main [data-page=reports]').click();
+    await openRoute(page,'reports');
     await page.locator('#f-report-account').selectOption('');
     assert.equal(await metric('cardPayments'),'80,00');
     assert.equal(await metric('cardCashPayments'),'40,00');
@@ -647,8 +648,7 @@ async function reconciliationJourney(browser){
       await page.waitForFunction(version=>window.fixture.snapshot().version===version,state.version);
     }
     async function assertFinancialOverview(){
-      await button('Özet').click();
-      await page.locator('#period').fill('2026-10');
+      await selectSummaryMonth(page,'2026-10');
       for(const [metric,value] of [['cash','290,00'],['cardDebt','21,00'],['income','50,00'],['netExpense','31,00'],['margin','19,00']]){
         assert((await page.locator(`[data-stat="${metric}"]`).innerText()).includes(value));
       }
@@ -895,8 +895,8 @@ async function reconciliationJourney(browser){
  await page.goto('https://wallet.test/');const read=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')));
  async function account(name,type,opening){await page.locator('[data-action=addAccount]').first().click();await page.locator('[name=name]').fill(name);await page.locator('[name=type]').selectOption(type);await page.locator('[name=opening]').fill(opening);await page.locator('#submit').click();}
  await account('Sentetik banka','bank','20000');await page.locator('nav [data-page=wallet]').click();await account('Sentetik nakit','cash','0');await account('Sentetik kart','card','0');let s=await read();const bank=s.accounts[0].id,cash=s.accounts[1].id,card=s.accounts[2].id;
- await page.locator('nav [data-page=home]').click();await page.locator('[data-action=addIncome]').click();await page.locator('[name=account]').selectOption(bank);await page.locator('[name=amount]').fill('30000');await page.locator('[name=desc]').fill('Sentetik maaş');await page.locator('[name=category]').selectOption('Maaş');await page.locator('[name=date]').fill('2026-10-03');await page.locator('#submit').click();await page.locator('#period').fill('2026-10');assert((await page.locator('[data-stat=income]').innerText()).includes('30.000,00'));
- await page.locator('[data-action=addTransaction]').click();await page.locator('[name=account]').selectOption(card);await page.locator('[name=desc]').fill('SENTETIK MARKET');await page.locator('[name=amount]').fill('2000');await page.locator('[name=date]').fill('2026-10-03');await page.locator('#submit').click();assert((await page.locator('[data-stat=netExpense]').innerText()).includes('2.000,00'));
+ await page.locator('nav [data-page=home]').click();await openSummaryAction(page,'addIncome');await page.locator('[name=account]').selectOption(bank);await page.locator('[name=amount]').fill('30000');await page.locator('[name=desc]').fill('Sentetik maaş');await page.locator('[name=category]').selectOption('Maaş');await page.locator('[name=date]').fill('2026-10-03');await page.locator('#submit').click();await selectSummaryMonth(page,'2026-10');assert((await page.locator('[data-stat=income]').innerText()).includes('30.000,00'));
+ await openSummaryAction(page,'addTransaction');await page.locator('[name=account]').selectOption(card);await page.locator('[name=desc]').fill('SENTETIK MARKET');await page.locator('[name=amount]').fill('2000');await page.locator('[name=date]').fill('2026-10-03');await page.locator('#submit').click();assert((await page.locator('[data-stat=netExpense]').innerText()).includes('2.000,00'));
  await page.locator('nav [data-page=wallet]').click();await page.locator(`[data-card-view="${card}"]`).click();await page.locator('[data-pay-card]').click();await page.locator('[name=account]').selectOption(bank);await page.locator('[name=amount]').fill('2000');await page.locator('[name=date]').fill('2026-10-03');await page.locator('#submit').click();
  await page.locator('nav [data-page=home]').click();assert((await page.locator('[data-stat=cash]').innerText()).includes('48.000,00'));assert((await page.locator('[data-stat=cardDebt]').innerText()).includes('0,00'));assert((await page.locator('[data-stat=margin]').innerText()).includes('28.000,00'));
  const pdf='QNB\nHesap Kesim Tarihi: 05/10/2026\nOnceki Donem Hesap Ozeti Borcu: 0.00\nDonem Borcu: 0.00\n03/10/2026 SENTETIK MARKET 2000.00\n03/10/2026 ODEME TESEKKUR 2000.00';await page.evaluate(t=>window.onPdfText(t),pdf);await page.locator('#import-account').selectOption(card);await page.locator('[data-action=confirmImport]').click();s=await read();assert.equal(s.transactions.filter(t=>t.matchStatus==='pending').length,2);
@@ -921,6 +921,6 @@ async function reconciliationJourney(browser){
  await page.locator('nav [data-page=wallet]').click();await page.locator(`[data-card-view="${card2}"]`).click();await page.locator('[data-bind-payment]').click();await page.locator('[name=account]').selectOption(bank);await page.locator('[name=paidOn]').fill('2099-01-01');await page.locator('#submit').click();assert.match(await page.locator('#form-error').textContent(),/Gerçek kart ödeme tarihi gelecekte olamaz/);assert.deepEqual(await read(),s);await page.locator('[name=paidOn]').fill('2026-10-07');await page.locator('#submit').click();assert.equal(await page.locator('[data-bind-payment]').count(),0);assert.equal(await page.evaluate(async id=>{const C=await import('./core.mjs'),s=JSON.parse(localStorage.getItem('ekstre-android-v1'));return C.balance(s,s.accounts.find(a=>a.id===id));},bank),bankBefore-60000);assert((await page.locator('[data-stat=cardDebt]').innerText()).includes('400,00'));
  const attached=await read();await page.evaluate(t=>window.onPdfText(t),sourcePdf);await page.locator('#import-account').selectOption(card2);await page.locator('[data-action=confirmImport]').click();assert.equal((await read()).transactions.length,attached.transactions.length);
  const mismatch=sourcePdf.replace('400.00','500.00');await page.evaluate(t=>window.onPdfText(t),mismatch);assert(await page.locator('[data-action=confirmImport]').isDisabled());assert.equal((await read()).transactions.length,attached.transactions.length);await page.locator('[data-action=cancelImport]').click();
- assert.deepEqual(errors,[]);await page.locator('nav [data-page=home]').click();await page.locator('#period').fill('2026-10');await page.screenshot({path:path.join(out,'overview.png'),fullPage:true});fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['salary income','card spending','card detail payment','no duplicate expense','PDF match and repeat','planned income excluded','received income actual date and account','unverified import consent','discount type','import edit and reimport preserves source category note','v1 restore identifiers balances unknown fields','reload','legacy linked period note edit','unknown payment bank attachment actual date','source attachment survives reimport','mismatch preview blocked'],errors},null,2));console.log('16 wallet v2 user flows passed');
+ assert.deepEqual(errors,[]);await selectSummaryMonth(page,'2026-10');await page.screenshot({path:path.join(out,'overview.png'),fullPage:true});fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,checks:['salary income','card spending','card detail payment','no duplicate expense','PDF match and repeat','planned income excluded','received income actual date and account','unverified import consent','discount type','import edit and reimport preserves source category note','v1 restore identifiers balances unknown fields','reload','legacy linked period note edit','unknown payment bank attachment actual date','source attachment survives reimport','mismatch preview blocked'],errors},null,2));console.log('16 wallet v2 user flows passed');
  await reconciliationJourney(browser);
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

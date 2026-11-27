@@ -17,14 +17,6 @@ const detail = (ctx,label,value,money=false) => `<div><dt>${ctx.esc(label)}</dt>
 const compactStat = (ctx,key,label,value) => `<div><dt>${ctx.esc(label)}</dt><dd data-stat="${ctx.esc(key)}">${amount(ctx,value)}</dd></div>`;
 const noRows = message => `<p class="empty-note">${message}</p>`;
 
-function quickActions() {
-  return `<div class="quick-actions" aria-label="Para işlemleri">
-    <button class="primary" data-action="addIncome"><span class="action-symbol" aria-hidden="true">＋</span>Gelir ekle</button>
-    <button data-action="addTransaction"><span class="action-symbol" aria-hidden="true">−</span>Gider ekle</button>
-    <button data-action="transfer"><span class="action-symbol" aria-hidden="true">⇄</span>Transfer</button>
-    <button data-action="payCard"><span class="action-symbol" aria-hidden="true">✓</span>Kart borcu öde</button>
-  </div>`;
-}
 
 function reviewWarning(ctx,transactions=ctx.state.transactions) {
   const pending = transactions.filter(t => t.matchStatus === 'pending');
@@ -47,7 +39,6 @@ function upcoming(ctx) {
     <div class="section-heading"><h2 id="upcoming-heading">Yaklaşan / geciken ödemeler</h2><button class="section-link" data-page="plan">Ödeme planı ${uiIcon('next')}</button></div>
     <div class="panel dashboard-list">${rows.map(r => `<div class="dashboard-row">${dashboardRow(r.estimated?'wallet':'plan',ctx.esc(r.estimated?accountName(ctx.state,r.account):r.name),
       ctx.dateStatus(r.date)+(r.estimated?' · Kalan dönem borcu tahmini':''),amount(ctx,r.amount))}</div>`).join('')}</div>
-    <p class="notice">Takvim bankadaki ödeme durumunu doğrulamaz.</p>
   </section>`;
 }
 
@@ -81,14 +72,14 @@ function expenseBreakdown(ctx,{spent,categoryBreakdown}) {
 const statementShortcut = '<button data-page="import">'+uiIcon('import')+' Ekstre yükle</button>';
 
 export function homeView(ctx) {
-  const {state,periodControl,transactionList} = ctx;
+  const {state,period,transactionList} = ctx;
   const overview = W.overview(state,ctx.period);
   const monthRows = C.rowsForPeriod(state,ctx.period);
   const recent = newest(monthRows).slice(0,5);
   return shell(`<div class="dashboard-surface">
     <h1>Özet</h1>
     <section class="panel dashboard-hero" aria-label="Cüzdan özeti">
-      <div class="dashboard-hero-caption"><small>Banka ve nakit bakiyesi</small><small>Kayıtlarına göre</small></div>
+      <div class="dashboard-hero-caption"><small>Banka ve nakit bakiyesi</small></div>
       <div class="dashboard-amount" data-stat="cash">${amount(ctx,overview.cash)}</div>
       <dl class="dashboard-totals">${compactStat(ctx,'cardDebt','Kart borcu tahmini',overview.cardDebt)}${compactStat(ctx,'netWorth','Net varlık',overview.netWorth)}${overview.cardCredit > 0 ? compactStat(ctx,'cardCredit','Kart artı bakiyesi',overview.cardCredit) : ''}</dl>
     </section>
@@ -96,17 +87,14 @@ export function homeView(ctx) {
     ${!state.accounts.length ? `<section class="panel empty"><b>Cüzdanını oluştur</b><p>Önce banka hesabı, nakit hesabı veya kart ekle. Açılış bakiyesi gelir veya gider sayılmaz.</p><div class="actions"><button class="primary" data-action="addAccount">Hesap ekle</button><button data-action="demo">Örnek cüzdan</button></div></section>` : ''}
     ${upcoming(ctx)}
     <section class="dashboard-section" aria-labelledby="month-heading">
-      <div class="section-heading"><h2 id="month-heading">Aylık özet</h2><div class="dashboard-period">
-        ${periodControl}<button class="section-link" data-page="reports">Raporlar ↗</button>
-      </div></div>
+      <div class="section-heading"><h2 id="month-heading">Aylık özet</h2><time class="dashboard-period" datetime="${esc(period)}">${esc(reportMonthLabel(period))}</time></div>
       <div class="panel month-summary"><dl class="dashboard-totals">${compactStat(ctx,'income','Gelir',overview.income)}${compactStat(ctx,'netExpense','Net gider',overview.netExpense)}${compactStat(ctx,'margin','Gelir − gider',overview.margin)}</dl><p class="notice">İadeler giderden düşer. Kart ödemeleri ve transferler gider sayılmaz.</p></div>
     </section>
     ${expenseBreakdown(ctx,overview)}
     ${reviewWarning(ctx)}${sourceWarning(ctx)}
     <section class="dashboard-section" aria-labelledby="recent-heading"><div class="section-heading"><h2 id="recent-heading">Son hareketler</h2><button class="section-link" data-page="transactions">Tüm işlemler ${uiIcon('next')}</button></div><div class="panel dashboard-list dashboard-recent">${transactionList(recent)}</div></section>
-    ${overview.plannedIncome ? `<div class="panel planned-income"><div><strong>Bu ay planlanan gelir</strong><p class="notice">Alındı olarak onaylanana kadar bakiyeye ve gelire eklenmez.</p><b>${amount(ctx,overview.plannedIncome)}</b></div><button data-page="incomePlans">Gelir planları</button></div>` : ''}
-    ${quickActions()}
-    <div class="actions"><button data-page="incomePlans">Gelir planları</button></div>
+    ${overview.plannedIncome ? `<div class="panel planned-income"><div><strong>Bu ay planlanan gelir</strong><p class="notice">Alındı olarak onaylanana kadar bakiyeye ve gelire eklenmez.</p><b>${amount(ctx,overview.plannedIncome)}</b></div><button data-page="incomePlans">Gelir planları</button></div>` :
+      '<div class="actions"><button data-page="incomePlans">Gelir planları</button></div>'}
   </div>`);
 }
 
@@ -151,8 +139,11 @@ export function walletView(ctx) {
   const accounts = state.accounts.filter(a => a.type !== 'card');
   return shell(`<div class="dashboard-surface">
     <h1>Cüzdan</h1>
-    ${cards.length ? `<section class="wallet-cards" aria-label="Kredi kartları">${cards.map(a => walletCard(ctx,a)).join('')}</section>` : ''}
     <div class="dashboard-actions"><button class="primary" data-action="addAccount">${uiIcon('plus')} Hesap ekle</button>${statementShortcut}</div>
+    ${cards.length ? `<section class="dashboard-section" aria-labelledby="wallet-credit-cards">
+      <div class="section-heading"><h2 id="wallet-credit-cards">Kredi kartları</h2></div>
+      <div class="wallet-cards">${cards.map(a => walletCard(ctx,a)).join('')}</div>
+    </section>` : ''}
     ${!state.accounts.length ? `<section class="panel empty"><b>Henüz hesap yok</b><p>Banka veya nakit bakiyeni ve kartlarını ekleyerek başla.</p><button data-action="demo">Örnek cüzdan</button></section>` : ''}
     <section class="dashboard-section" aria-labelledby="available-cash">
       <div class="section-heading"><h2 id="available-cash">Banka ve nakit bakiyesi</h2><b data-stat="cash">${amount(ctx,overview.cash)}</b></div>

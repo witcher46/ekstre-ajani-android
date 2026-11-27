@@ -1,4 +1,5 @@
 const openRoute=require('./journey-navigation.cjs');
+const {selectSummaryMonth}=openRoute;
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -104,7 +105,7 @@ async function run() {
       if(!localStorage.getItem('ekstre-android-v1'))localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet));
     },makeWallet());
     await page.goto('https://wallet.test/');
-    await page.locator('#period').fill('2026-10');
+    await selectSummaryMonth(page,'2026-10');
 
     const chart=page.getByRole('region',{name:'Kategori bazlı gider dağılımı'});
     await chart.waitFor();
@@ -122,7 +123,7 @@ async function run() {
     assert.deepEqual(await page.locator('button[data-edit]').evaluateAll(list=>list.map(e=>e.dataset.edit)),['market']);
     await page.evaluate(()=>window.handleBack());
     assert.equal(await page.evaluate(()=>document.activeElement.dataset.expenseCategory),'Market / Gıda');
-    await page.locator('#period').fill('2026-08');
+    await selectSummaryMonth(page,'2026-08');
     await chart.getByText('Seçili ayda gider kaydı yok.').waitFor();
 
     await page.evaluate(text=>window.onPdfText(text),statement);
