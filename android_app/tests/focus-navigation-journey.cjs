@@ -247,7 +247,11 @@ async function checkTabMotion(browser){
       })));
 
       if(!reduced){
-        await page.evaluate(()=>document.querySelector('#nav [data-page=home]').click());
+        const started=await page.evaluate(()=>{
+          document.querySelector('#nav [data-page=home]').click();
+          return document.querySelector('#main > :first-child').getAnimations().length;
+        });
+        assert.equal(started,1,'the first preference flip exercises an existing animation');
         await page.emulateMedia({reducedMotion:'reduce'});
         await settle(page);
         assert.equal(await currentAnimations(),0,'a preference change interrupts an active entry');
@@ -255,6 +259,26 @@ async function checkTabMotion(browser){
         await settle(page);
         assert.equal(await currentAnimations(),0,'restoring the preference does not replay the old entry');
         assert.equal(await nav.locator('.tab-entry').count(),0);
+
+        // Hide both targets to exercise the case where the markers exist before any CSS animation is created.
+        const unpainted=await page.evaluate(()=>{
+          document.querySelectorAll('#main,#nav').forEach(node=>{node.style.display='none';});
+          document.querySelector('#nav [data-page=wallet]').click();
+          const markers=[...document.querySelectorAll('.tab-entry')];
+          const animations=markers.flatMap(node=>node.getAnimations());
+          return {markers:markers.length,animations:animations.length};
+        });
+        assert.deepEqual(unpainted,{markers:2,animations:0});
+        await page.emulateMedia({reducedMotion:'reduce'});
+        await settle(page);
+        await page.evaluate(()=>document.querySelectorAll('#main,#nav').forEach(node=>node.style.removeProperty('display')));
+        const duringReduce={markers:await page.locator('.tab-entry').count(),animations:await currentAnimations()};
+        assert.equal(duringReduce.animations,0,'the unpainted entry is still while reduced');
+        await page.emulateMedia({reducedMotion:'no-preference'});
+        await settle(page);
+        assert.equal(await currentAnimations(),0,'an unpainted entry must not start when restoring the preference (reduced state: '+JSON.stringify(duringReduce)+')');
+        assert.equal(await nav.locator('.tab-entry').count(),0);
+        assert.equal(duringReduce.markers,0,'reduction clears both markers even without an animationcancel event');
       }
       console.log('Fixed tab motion',JSON.stringify({width,scale,reducedMotion,content:steps.wallet.content,indicator:steps.wallet.indicator,backScroll:steps.back.scroll}));
     }finally{

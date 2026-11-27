@@ -457,6 +457,14 @@ function clearTabEntry({target,animationName}){
 }
 document.addEventListener('animationend',clearTabEntry);
 document.addEventListener('animationcancel',clearTabEntry);
+const tabMotion=matchMedia('(prefers-reduced-motion:no-preference)');
+function clearReducedTabEntry({matches}){
+ if(matches)return;
+ // A marker can precede CSS animation creation, so reduction may emit no animationcancel.
+ document.querySelectorAll('#main > .tab-entry,#nav .nav-icon.tab-entry').forEach(node=>node.classList.remove('tab-entry'));
+}
+if(tabMotion.addEventListener)tabMotion.addEventListener('change',clearReducedTabEntry);
+else tabMotion.addListener?.(clearReducedTabEntry);
 function render({tabEntry=false}={}){
  $('nav').innerHTML=renderBottomNavigation(page);
  document.body.dataset.surface=loadFailed?'recovery':activeBottomPage(page);
@@ -504,7 +512,7 @@ function render({tabEntry=false}={}){
   html=settingsView({backTitle,version:installedVersionLabel(),categorySections:categorySettings({disclosure:true}),backupFailure});
  }
  $('main').innerHTML=html;
- if(tabEntry&&matchMedia('(prefers-reduced-motion:no-preference)').matches){
+ if(tabEntry&&tabMotion.matches){
   $('main').firstElementChild?.classList.add('tab-entry');
   $('nav').querySelector('[aria-current="page"] .nav-icon')?.classList.add('tab-entry');
  }
