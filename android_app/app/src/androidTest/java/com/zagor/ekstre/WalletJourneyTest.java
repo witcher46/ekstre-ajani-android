@@ -443,7 +443,18 @@ public class WalletJourneyTest {
   waitPicker();
  }
  private void restoreDownload(ActivityScenario<MainActivity> a,String name)throws Exception{
+  restoreDownload(a,name,false);
+ }
+ private void restoreDownload(ActivityScenario<MainActivity> a,String name,boolean baselineNativeConfirmation)throws Exception{
   openBackupPicker(a);selectDownload(name);
+  if(baselineNativeConfirmation){
+   UiObject2 confirm=device.wait(Until.findObject(By.res("android:id/button1")
+     .text(java.util.regex.Pattern.compile("(?iu)^onayla$"))),10000);
+   if(confirm==null)evidence("baseline-restore-no-confirm");
+   assertNotNull("Baseline restore asks for native Onayla before replacing wallet",confirm);
+   confirm.click();
+   return;
+  }
   String confirm="#modal[open][data-variant=backup-replace] #submit";
   waitJs(a,"!!document.querySelector('"+confirm+"')");
   assertEquals("\"Cüzdanı değiştir\"",js(a,"document.querySelector('"+confirm+"').textContent"));
@@ -451,6 +462,7 @@ public class WalletJourneyTest {
  }
  @Test public void restorePreviousTrialBackup()throws Exception{
   String path=InstrumentationRegistry.getArguments().getString("previousTrialBackup");
+  boolean baselineNativeConfirmation=Boolean.parseBoolean(InstrumentationRegistry.getArguments().getString("baselineNativeRestoreConfirmation"));
   assumeTrue("Requires the synthetic snapshot from the installed 0.3.0 trial",path!=null);
   String raw=device.executeShellCommand("cat "+path);
   JSONObject expected=new JSONObject(raw);
@@ -459,7 +471,7 @@ public class WalletJourneyTest {
   Uri file=document(name,"application/json",raw.getBytes(StandardCharsets.UTF_8));
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
    waitJs(a,"!!document.querySelector('#settings')");
-   restoreDownload(a,name);
+   restoreDownload(a,name,baselineNativeConfirmation);
    waitJs(a,"JSON.parse(Android.load())?.accounts?.some(a=>a.id==='synthetic-card') === true");
    a.recreate();
    assertMigratedWallet(a,expected);

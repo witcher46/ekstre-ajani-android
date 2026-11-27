@@ -78,7 +78,7 @@ run_case() {
 
 adb install "$work/baseline.apk"
 adb install "$work/instrumentation.apk"
-run_case restorePreviousTrialBackup
+run_case restorePreviousTrialBackup -e baselineNativeRestoreConfirmation true
 adb shell am force-stop "$permanent"
 uid_before=$(adb shell run-as "$permanent" id -u)
 adb exec-out run-as "$permanent" cat databases/wallet.db > "$work/before.db"
