@@ -361,7 +361,11 @@ async function checkShowMore(browser){
     await goHome();
     const original=await stored();
     await openRoute(page,'transactions');
+    const more=transactionView.locator('#transaction-show-more');
+    await page.locator('#search').fill('Eşleşmeyen sentetik arama');
+    assert.equal(await more.count(),0,'no pagination control is rendered without another page');
     await page.locator('#search').fill('Sentetik U05');
+    assert.equal(await more.count(),1,'a matching search restores the pagination control');
     await expand('transactions with search',transactionView,'Enter',rowIds,150,suggestionTab);
     await expand('transactions final page',transactionView,'Space',rowIds,300);
 

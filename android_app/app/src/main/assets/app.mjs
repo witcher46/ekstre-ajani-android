@@ -356,6 +356,7 @@ function transactionResults(rows,filteredExpenses){
  return {results,count:list.length,visible:Math.min(listLimit,list.length)};
 }
 const transactionCount=({count,visible})=>count===visible?`${count} işlem`:`${count} işlem · ${visible} gösteriliyor`;
+const transactionMore='<button id="transaction-show-more" type="button" data-action="more" aria-controls="transactions-list">Daha fazla göster</button>';
 function transactionsView(rows,filteredExpenses,periodControl,modeControl){
  const result=transactionResults(rows,filteredExpenses);
  const periodField='<div><label for="period">Dönem</label>'+periodControl+'</div>';
@@ -379,7 +380,7 @@ function transactionsView(rows,filteredExpenses,periodControl,modeControl){
   </section>
   <p id="transaction-count" role="status">${transactionCount(result)}</p>
   <div class="panel" id="transactions-list">${result.results}</div>
-  <button id="transaction-show-more" type="button" data-action="more" aria-controls="transactions-list"${result.count>result.visible?'':' hidden'}>Daha fazla göster</button>
+  ${result.count>result.visible?transactionMore:''}
  </div>`;
 }
 function importCategoryOption(merchant,current,index,selectedCategory,category=C.suggestCategory(state,merchant)){
@@ -455,8 +456,10 @@ function render(){
   const result=transactionResults(rows,filteredExpenses);
   const count=$('transaction-count'),label=transactionCount(result);
   if(count.textContent!==label)count.textContent=label;
-  $('transactions-list').innerHTML=result.results;
-  $('transaction-show-more').hidden=result.count===result.visible;
+  const list=$('transactions-list'),more=$('transaction-show-more');
+  list.innerHTML=result.results;
+  if(result.count===result.visible)more?.remove();
+  else if(!more)list.insertAdjacentHTML('afterend',transactionMore);
  });
 }
 function accountForm(existing,{fromImport=false}={}){modal(existing?'Hesabı düzenle':fromImport?'Kredi kartı ekle':'Hesap / kart ekle',field('name','Hesap adı',existing?.name||'','text','required maxlength="80"')+select('type','Hesap türü',options(fromImport?[['card','Kredi kartı']]:[['bank','Banka'],['cash','Nakit'],['card','Kredi kartı']],fromImport?'card':existing?.type||'bank'))+field('opening','Başlangıç bakiyesi / kart borcu (TL)',(existing?.opening||0)/100,'text','inputmode="decimal" required')+'<p class="notice">Ekstre aktaracaksan başlangıç borcuna aynı işlemleri ikinci kez ekleme.</p>',f=>{const next=copy(),a={id:existing?.id||C.id(),name:f.get('name').trim(),type:f.get('type'),opening:C.money(f.get('opening'))};if(existing){if(existing.type!==a.type&&state.transactions.some(t=>t.account===a.id||t.target===a.id))throw Error('Hareketi olan hesabın türü değiştirilemez.');Object.assign(next.accounts.find(x=>x.id===a.id),a);}else next.accounts.push(a);

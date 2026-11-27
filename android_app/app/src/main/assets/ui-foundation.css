@@ -154,7 +154,7 @@ body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[
   color:var(--accent-ink);
 }
 
-.transactions-surface {display:grid;gap:var(--surface-gap);overflow-wrap:anywhere}
+.transactions-surface {display:grid;grid-template-columns:minmax(0,1fr);gap:var(--surface-gap);overflow-wrap:anywhere}
 .transactions-surface h1 {margin:0}
 .transaction-actions,.transaction-filter-grid {
   display:grid;
