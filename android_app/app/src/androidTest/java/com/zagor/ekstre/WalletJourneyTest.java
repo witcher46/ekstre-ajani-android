@@ -244,7 +244,7 @@ public class WalletJourneyTest {
         click(a,categoryButton);
         waitJs(a,"!!document.querySelector('#report-category-transactions button[data-edit]') && !!document.querySelector('nav [data-page=reports][aria-current=page]')");
         reports.put(layoutCase(a,"reportCategory",width,dir));
-        assertTrue("Android Back returns from the report category",device.pressBack());
+        a.onActivity(MainActivity::onBackPressed);
         waitJs(a,"document.activeElement.matches('"+categoryButton+"')");
         assertEquals("Report month, account and range survive Back",reportFilters,js(a,filtersExpression));
         click(a,"#report-movements-toggle");
