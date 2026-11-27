@@ -126,7 +126,7 @@ public class RecoverySafetyTest {
    waitFor(scenario,"Android.load()==="+JSONObject.quote(GOOD));
    assertEquals(GOOD,rawSlots(db)[2]);
    scenario.recreate();
-   waitFor(scenario,"!!document.querySelector('[data-action=addTransaction]')");
+   waitFor(scenario,"!!document.querySelector('main [data-action=quickAdd]')");
    assertEquals("74325",js(scenario,"JSON.parse(Android.load()).accounts[0].opening"));
   }
  }

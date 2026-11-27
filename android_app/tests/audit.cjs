@@ -1,4 +1,5 @@
 const openRoute=require('./journey-navigation.cjs');
+const {openSummaryAction,selectSummaryMonth}=openRoute;
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'playwright');
 const fs=require('fs'),path=require('path'),assert=require('assert');
 const root=path.resolve(process.env.AUDIT_ASSETS||path.join(__dirname,'../app/src/main/assets')),before=process.argv.includes('--before'),out=path.resolve(__dirname,'../test-output',before?'before':'after');fs.mkdirSync(out,{recursive:true});
@@ -14,7 +15,7 @@ try{
  await page.locator('nav [data-page=wallet]').click();await addAccount('Nakit cüzdan','cash','500');await addAccount('QNB günlük kredi kartım','card','0');await addAccount('Yapı Kredi ek kartım','card','0');
  const saved=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')));
  const accounts=(await saved()).accounts;
- async function transaction(kind,index,amount,desc,target){await page.locator('nav [data-page=home]').click();await page.locator('[data-action=addTransaction]').first().click();await page.locator('[name=kind]').selectOption(kind);await page.locator('[name=account]').selectOption(accounts[index].id);if(target!==undefined)await page.locator('[name=target]').selectOption(accounts[target].id);await page.locator('[name=desc]').fill(desc);await page.locator('[name=amount]').fill(amount);await page.locator('[name=date]').fill('2026-09-30');await page.locator('#submit').click();}
+ async function transaction(kind,index,amount,desc,target){await page.locator('nav [data-page=home]').click();if(before&&await page.locator('main [data-action=addTransaction]').count())await page.locator('main [data-action=addTransaction]').first().click();else await openSummaryAction(page,'addTransaction');await page.locator('[name=kind]').selectOption(kind);await page.locator('[name=account]').selectOption(accounts[index].id);if(target!==undefined)await page.locator('[name=target]').selectOption(accounts[target].id);await page.locator('[name=desc]').fill(desc);await page.locator('[name=amount]').fill(amount);await page.locator('[name=date]').fill('2026-09-30');await page.locator('#submit').click();}
  await transaction('income',0,'30000','Maaş');await transaction('expense',0,'1000','Market');await transaction('expense',1,'100','Nakit ulaşım');await transaction('expense',2,'2000','Kart alışverişi');await transaction('refund',2,'500','Kart iadesi');await transaction('payment',0,'1500','Kart borcu ödemesi',2);await transaction('transfer',0,'300','Nakit çekim',1);
  const flowState=await saved();assert.equal(flowState.transactions.length,7);await page.reload();assert.equal((await saved()).transactions.length,7);fs.writeFileSync(path.join(out,'journey-state.json'),JSON.stringify(flowState,null,2));
  const seed=structuredClone(flowState);seed.accounts[0].opening=999999999999;seed.accounts[2].opening=999999999999;seed.transactions.push({id:'long',account:seed.accounts[2].id,date:'2026-09-30',period:'2026-09',desc:'Çok uzun mağaza açıklaması '.repeat(12),category:'Özel çok uzun kategori adı '.repeat(4),amount:999999999999,kind:'expense',note:''});seed.categories.push(seed.transactions.at(-1).category);seed.budgets['2026-09|Toplam']=999999999999;seed.subscriptions.push({id:'sub',name:'Uzun isimli aylık internet ve dijital içerik aboneliği',account:seed.accounts[0].id,amount:999999999999,next:'2026-09-25'});
@@ -26,8 +27,12 @@ try{
    if(['bankDetail','cardDetail'].includes(name)){await page.locator('nav [data-page=wallet]').click();await page.locator(name==='cardDetail'?'[data-card-view]':'[data-account-view]').first().click();}
    else if(name==='incomePlans'){await page.locator('nav [data-page=home]').click();await page.locator('[data-page=incomePlans]').first().click();}
    else if(name==='importPreview'){await page.evaluate(()=>window.onPdfText('QNB\nHesap Kesim Tarihi: 05/10/2026\n04/10/2026 SENTETIK UZUN MAGAZA PEN 4.ndirim 9999999999.99'));}
-   else if(['transactionModal','paymentModal'].includes(name)){await page.locator('nav [data-page=home]').click();await page.locator(name==='paymentModal'?'[data-action=payCard]':'[data-action=addTransaction]').first().click();}
-   else if(name==='settings')await page.locator('#settings').click();else if(name==='reports'){await page.locator('nav [data-page=home]').click();await page.locator('main [data-page=reports]').click();}else await openPage(name);
+   else if(['transactionModal','paymentModal'].includes(name)){await page.locator('nav [data-page=home]').click();await openSummaryAction(page,name==='paymentModal'?'quickPayCard':'addTransaction');}
+   else if(name==='settings')await page.locator('#settings').click();
+   else if(name==='reports'&&before&&!await page.locator('nav [data-page=reports]').count()){
+    await page.locator('nav [data-page=home]').click();await page.locator('main [data-page=reports]').click();
+   }else await openPage(name);
+   if(name==='home'&&!await page.locator('#period').count())await selectSummaryMonth(page,'2026-09');
    if(!await page.locator('dialog[open]').count()&&await page.locator('#period').count())await page.locator('#period').fill('2026-09');
    await page.evaluate(scale=>{window.auditTextScale=scale;if(scale===1)return;const all=[...document.querySelectorAll('main *,nav *,header *,dialog *')].map(e=>{const size=Number(e.dataset.auditBaseFont)||parseFloat(getComputedStyle(e).fontSize);e.dataset.auditBaseFont=size;return [e,size];});for(const [e,n]of all)e.style.fontSize=(n*scale)+'px';},scale);
    await page.waitForTimeout(30);
