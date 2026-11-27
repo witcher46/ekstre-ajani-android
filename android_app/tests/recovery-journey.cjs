@@ -65,7 +65,7 @@ async function startupJourney(browser,url){
     assert.equal(await guidance.isVisible(),false,name);
     assert.deepEqual((await page.evaluate(()=>window.startupIO)).reads,[1,3,2],name);
    }else{
-    await page.getByRole('heading',{name:'Özet'}).waitFor({timeout:4000});
+    await page.getByRole('main').getByRole('heading',{level:1,name:'Özet',exact:true}).waitFor({timeout:4000});
     assert.equal(await guidance.isVisible(),false,name);
     await page.locator('nav [data-page=wallet]').click({timeout:4000});
     assert.equal(await page.getByRole('button',{name:/^Sentetik hesap Banka hesabı/}).isVisible(),true,name);

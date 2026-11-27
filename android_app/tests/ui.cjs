@@ -7,7 +7,7 @@ const server=http.createServer((req,res)=>{const file=path.join(root,req.url==='
  await require('./recovery-journey.cjs')(browser,'http://127.0.0.1:'+server.address().port);
  const page=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1});let errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
  await page.route('https://wallet.test/**',route=>{const rel=new URL(route.request().url()).pathname;const file=path.join(root,rel==='/'?'index.html':rel);if(!file.startsWith(root+path.sep)||!fs.existsSync(file))return route.abort();return route.fulfill({body:fs.readFileSync(file),contentType:file.endsWith('.mjs')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});});
- await page.goto('https://wallet.test/');await page.getByRole('heading',{name:'Özet'}).waitFor();
+ await page.goto('https://wallet.test/');await page.getByRole('main').getByRole('heading',{level:1,name:'Özet',exact:true}).waitFor();
  await page.getByRole('button',{name:'Örnek cüzdan',exact:true}).click();await page.getByText('Market alışverişi',{exact:true}).waitFor();
  await page.screenshot({path:path.join(out,'overview.png'),fullPage:true});
  await page.reload();await page.getByText('Market alışverişi',{exact:true}).waitFor();
