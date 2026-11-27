@@ -22,6 +22,271 @@ async function serveWallet(page,appSuffix=''){
   });
 }
 
+async function checkTouchFeedback(browser){
+  const wallet=require('./fixtures/android-0.2.0.json');
+  for(const [width,scale,reducedMotion] of [[390,100,'no-preference'],[320,200,'reduce']]){
+    const page=await browser.newPage({viewport:{width,height:844},isMobile:true,hasTouch:true,reducedMotion});
+    try{
+      page.setDefaultTimeout(5000);
+      await serveWallet(page);
+      await page.addInitScript(wallet=>localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet)),wallet);
+      await page.goto('https://wallet.test/');
+      await page.evaluate(scale=>{document.documentElement.style.fontSize=scale+'%';},scale);
+      assert.equal(await page.evaluate(()=>matchMedia('(any-pointer:coarse)').matches),true);
+      const main=page.getByRole('main');
+      const nav=page.getByRole('navigation',{name:'Ana menü'});
+      const walletTab=nav.getByRole('button',{name:'Cüzdan',exact:true});
+      const quickHeader=page.getByRole('button',{name:'Hızlı Ekle',exact:true});
+      const touch=await page.context().newCDPSession(page);
+      const walletBytes=()=>page.evaluate(()=>localStorage.getItem('ekstre-android-v1'));
+      const before=await walletBytes();
+      const sample=control=>control.evaluate(node=>{
+        const css=getComputedStyle(node);
+        return {
+          tapHighlight:css.webkitTapHighlightColor,backgroundImage:css.backgroundImage,
+          focusVisible:node.matches(':focus-visible'),outlineStyle:css.outlineStyle,outlineWidth:css.outlineWidth,
+        };
+      });
+      const defaultHighlight=await page.locator('body').evaluate(node=>getComputedStyle(node).webkitTapHighlightColor);
+      const evidence={};
+      async function touchPress(name,control){
+        await control.evaluate(node=>node.scrollIntoView({block:'center'}));
+        await settle(page);
+        const bounds=await control.boundingBox();
+        const resting=await sample(control);
+        const x=bounds.x+bounds.width/2,y=bounds.y+bounds.height/2;
+        assert.equal(await control.evaluate((node,point)=>node.contains(document.elementFromPoint(point.x,point.y)),{x,y}),true,
+          name+' is reachable by touch');
+        const target=await control.elementHandle();
+        await touch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
+        try{
+          const contact=await sample(control);
+          evidence[name]={tapHighlight:contact.tapHighlight,outline:contact.outlineStyle,focusVisible:contact.focusVisible};
+          assert.equal(contact.tapHighlight,'rgba(0, 0, 0, 0)',name+' uses no Blink tap overlay');
+          await page.waitForFunction(node=>node.hasAttribute('data-touch-pressed'),target);
+          const pressed=await sample(control);
+          evidence[name]={tapHighlight:pressed.tapHighlight,outline:pressed.outlineStyle,focusVisible:pressed.focusVisible,
+            pressFill:pressed.backgroundImage!==resting.backgroundImage};
+
+          assert.equal(pressed.focusVisible,false,name+' tap does not request a keyboard indicator');
+          assert.equal(pressed.outlineStyle,resting.outlineStyle,name+' press adds no outline');
+          assert.notEqual(pressed.backgroundImage,resting.backgroundImage,name+' press has a visible fill');
+          assert.deepEqual(await control.boundingBox(),bounds,name+' press preserves the touch target');
+          assert(bounds.width>=48&&bounds.height>=48,name+' keeps a 48px target');
+        }catch(error){
+          console.log('Synthetic touch evidence',JSON.stringify({width,scale,reducedMotion,defaultHighlight,evidence}));
+          throw error;
+        }finally{
+          await touch.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
+          await target.dispose();
+        }
+        assert.equal((await sample(control)).backgroundImage,resting.backgroundImage,name+' fill clears on cancel');
+      }
+      async function keyboardFocus(control){
+        await page.keyboard.press('Tab');
+        await control.focus();
+        const state=await sample(control);
+        assert.equal(state.focusVisible,true);
+        assert.equal(state.outlineStyle,'solid');
+        assert(Number.parseFloat(state.outlineWidth)>=2);
+      }
+
+      await walletTab.tap();
+      assert.equal(await walletTab.getAttribute('aria-current'),'page');
+      assert.equal(await page.evaluate(()=>document.activeElement.matches('main h1')),true);
+      const account=main.locator('[data-account-view=synthetic-bank]');
+      await touchPress('wallet account',account);
+      await touchPress('selected nav tab',walletTab);
+      assert.equal(await walletTab.getAttribute('aria-current'),'page');
+      await keyboardFocus(account);
+      await keyboardFocus(walletTab);
+
+      await quickHeader.tap();
+      const dialog=page.getByRole('dialog',{name:'Hızlı Ekle',exact:true});
+      assert.equal(await page.evaluate(()=>document.activeElement.id),'dialog-title');
+      const choice=dialog.getByRole('button',{name:'Gider',exact:true});
+      await dialog.evaluate(node=>Promise.all(node.getAnimations().map(animation=>animation.finished)));
+      await touchPress('dialog row',choice);
+      await keyboardFocus(choice);
+      await page.keyboard.press('Escape');
+      assert.equal(await quickHeader.evaluate(node=>node===document.activeElement),true);
+
+      await quickHeader.tap();
+      await choice.tap();
+      const form=page.getByRole('dialog',{name:'Gider ekle'});
+      const input=form.getByLabel('Açıklama',{exact:true});
+      await touchPress('dialog submit',form.getByRole('button',{name:'Kaydet',exact:true}));
+      assert.equal((await sample(input)).tapHighlight,defaultHighlight,'form input keeps the native highlight');
+      await keyboardFocus(input);
+      assert.equal(await page.evaluate(()=>window.handleBack()),true);
+
+      await page.getByRole('button',{name:'Ayarlar',exact:true}).tap();
+      const expense=main.locator('#settings-expense-disclosure');
+      const summary=expense.locator('summary');
+      assert.equal(await expense.evaluate(node=>node.open),false);
+      await touchPress('disclosure summary',summary);
+      assert.equal(await expense.evaluate(node=>node.open),false);
+      await summary.tap();
+      assert.equal(await expense.evaluate(node=>node.open),true);
+      assert.equal((await sample(summary)).backgroundImage,'none','disclosure fill clears on touch release');
+      await keyboardFocus(summary);
+      await page.keyboard.press('Enter');
+      assert.equal(await expense.evaluate(node=>node.open),false);
+      assert.equal(await walletBytes(),before,'touch and focus checks write no wallet data');
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
+
+      await page.emulateMedia({forcedColors:'active'});
+      assert.equal((await sample(summary)).tapHighlight,defaultHighlight,'forced colors keep the UA tap feedback');
+      assert.equal((await sample(summary)).focusVisible,true);
+      console.log('Synthetic touch evidence',JSON.stringify({width,scale,reducedMotion,defaultHighlight,evidence}));
+    }finally{
+      await page.close();
+    }
+  }
+}
+
+async function checkTabMotion(browser){
+  const wallet=require('./fixtures/android-0.2.0.json');
+  for(const [width,scale,reducedMotion] of [[390,100,'no-preference'],[320,200,'reduce']]){
+    const page=await browser.newPage({viewport:{width,height:844},isMobile:true,hasTouch:true,reducedMotion});
+    try{
+      page.setDefaultTimeout(5000);
+      await serveWallet(page);
+      await page.addInitScript(wallet=>localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet)),wallet);
+      await page.goto('https://wallet.test/');
+      await page.evaluate(scale=>{document.documentElement.style.fontSize=scale+'%';},scale);
+      await page.getByRole('heading',{level:1,name:'Özet'}).waitFor();
+      const steps=await page.evaluate(()=>{
+        const main=document.querySelector('#main');
+        const nav=document.querySelector('#nav');
+        const sample=()=>{
+          const content=main.firstElementChild;
+          const selected=nav.querySelector('[aria-current="page"]');
+          const style=node=>{
+            const css=getComputedStyle(node);
+            return [css.animationName,css.animationDuration,css.transform];
+          };
+          return {
+            selected:selected?.dataset.page,heading:main.querySelector('h1').textContent,
+            focus:document.activeElement===main.querySelector('h1')?'heading':document.activeElement.dataset.page||document.activeElement.id,
+            content:style(content),indicator:style(selected.querySelector('.nav-icon')),
+            scroll:scrollY,net:main.querySelector('[data-stat=netExpense]')?.textContent,
+          };
+        };
+        const click=tab=>{
+          const outgoing=main.firstElementChild;
+          nav.querySelector('[data-page='+tab+']').click();
+          return {...sample(),outgoingDetached:!outgoing.isConnected,outgoingAnimations:outgoing.getAnimations().length};
+        };
+        const before=localStorage.getItem('ekstre-android-v1');
+        const startup=sample();
+        const wallet=click('wallet');
+        const reports=click('reports');
+        const period=document.querySelector('#period');
+        period.value='2026-10';
+        period.dispatchEvent(new Event('change',{bubbles:true}));
+        const filter=sample();
+        const same=click('reports');
+        window.scrollTo(0,180);
+        const savedScroll=scrollY;
+        const home=click('home');
+        const handled=window.handleBack();
+        const back=sample();
+        return {startup,wallet,reports,filter,same,home,back,handled,savedScroll,unchanged:before===localStorage.getItem('ekstre-android-v1')};
+      });
+      const still=['none','0s','none'];
+      const reduced=reducedMotion==='reduce';
+      const entered=reduced?still:['tab-content-in','0.17s','none'];
+      const indicator=reduced?still:['tab-indicator-in','0.17s','none'];
+      assert.deepEqual(steps.startup.content,still);
+      assert.deepEqual(steps.startup.indicator,still);
+      for(const [step,tab,heading,focus] of [
+        ['wallet','wallet','Cüzdan','heading'],['reports','reports','Raporlar','heading'],
+        ['home','home','Özet','heading'],['back','reports','Raporlar','home'],
+      ]){
+        const snapshot=steps[step];
+        assert.equal(snapshot.selected,tab);
+        assert.equal(snapshot.heading,heading);
+        assert.equal(snapshot.focus,focus);
+        assert.deepEqual(snapshot.content,entered,step+' content entry');
+        assert.deepEqual(snapshot.indicator,indicator,step+' selected pill entry');
+      }
+      for(const step of ['wallet','reports','home','same']){
+        assert.equal(steps[step].outgoingDetached,true);
+        assert.equal(steps[step].outgoingAnimations,0);
+      }
+      for(const step of ['filter','same']){
+        assert.deepEqual(steps[step].content,still,step+' must not animate content');
+        assert.deepEqual(steps[step].indicator,still,step+' must not animate selection');
+        assert.equal(steps[step].net,'₺100,00');
+      }
+      assert.equal(steps.filter.focus,'period');
+      assert.equal(steps.home.scroll,0);
+      assert.equal(steps.handled,true);
+      assert(steps.savedScroll>0);
+      assert.equal(steps.back.scroll,steps.savedScroll);
+      assert.equal(steps.back.net,'₺100,00');
+      assert.equal(steps.unchanged,true);
+
+      const nav=page.getByRole('navigation',{name:'Ana menü'});
+      await nav.getByRole('button',{name:'Cüzdan',exact:true}).press('Enter');
+      assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Cüzdan');
+      const account=page.locator('main [data-account-view=synthetic-bank]');
+      await account.tap();
+      const main=page.getByRole('main');
+      const content=main.locator(':scope > :first-child');
+      const currentAnimations=()=>content.evaluate(node=>node.getAnimations().length);
+      assert.equal(await main.getByRole('heading',{level:1,name:'Sentetik banka'}).isVisible(),true);
+      assert.equal(await currentAnimations(),0,'account entry stays still');
+      assert.equal(await page.evaluate(()=>window.handleBack()),true);
+      assert.equal(await account.evaluate(node=>node===document.activeElement),true);
+      assert.equal(await currentAnimations(),0,'return from account stays still');
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
+      assert(await nav.getByRole('button').evaluateAll(buttons=>buttons.every(button=>{
+        const r=button.getBoundingClientRect();return r.width>=48&&r.height>=48;
+      })));
+
+      if(!reduced){
+        const started=await page.evaluate(()=>{
+          document.querySelector('#nav [data-page=home]').click();
+          return document.querySelector('#main > :first-child').getAnimations().length;
+        });
+        assert.equal(started,1,'the first preference flip exercises an existing animation');
+        await page.emulateMedia({reducedMotion:'reduce'});
+        await settle(page);
+        assert.equal(await currentAnimations(),0,'a preference change interrupts an active entry');
+        await page.emulateMedia({reducedMotion:'no-preference'});
+        await settle(page);
+        assert.equal(await currentAnimations(),0,'restoring the preference does not replay the old entry');
+        assert.equal(await nav.locator('.tab-entry').count(),0);
+
+        // Hide both targets to exercise the case where the markers exist before any CSS animation is created.
+        const unpainted=await page.evaluate(()=>{
+          document.querySelectorAll('#main,#nav').forEach(node=>{node.style.display='none';});
+          document.querySelector('#nav [data-page=wallet]').click();
+          const markers=[...document.querySelectorAll('.tab-entry')];
+          const animations=markers.flatMap(node=>node.getAnimations());
+          return {markers:markers.length,animations:animations.length};
+        });
+        assert.deepEqual(unpainted,{markers:2,animations:0});
+        await page.emulateMedia({reducedMotion:'reduce'});
+        await settle(page);
+        await page.evaluate(()=>document.querySelectorAll('#main,#nav').forEach(node=>node.style.removeProperty('display')));
+        const duringReduce={markers:await page.locator('.tab-entry').count(),animations:await currentAnimations()};
+        assert.equal(duringReduce.animations,0,'the unpainted entry is still while reduced');
+        await page.emulateMedia({reducedMotion:'no-preference'});
+        await settle(page);
+        assert.equal(await currentAnimations(),0,'an unpainted entry must not start when restoring the preference (reduced state: '+JSON.stringify(duringReduce)+')');
+        assert.equal(await nav.locator('.tab-entry').count(),0);
+        assert.equal(duringReduce.markers,0,'reduction clears both markers even without an animationcancel event');
+      }
+      console.log('Fixed tab motion',JSON.stringify({width,scale,reducedMotion,content:steps.wallet.content,indicator:steps.wallet.indicator,backScroll:steps.back.scroll}));
+    }finally{
+      await page.close();
+    }
+  }
+}
+
 async function checkMoreNavigation(browser){
   const fixture=require('./fixtures/android-0.2.0.json');
   const page=await browser.newPage({viewport:{width:390,height:680},isMobile:true,hasTouch:true});
@@ -333,6 +598,14 @@ async function checkDashboardLayouts(browser){
         assert.deepEqual(issues,[],width+'px '+selector);
         assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
       };
+      const moreSheet=page.getByRole('dialog',{name:'Diğer',exact:true});
+      const checkMoreFit=async()=>{
+        // Measure stable bounds after the entrance transform.
+        await moreSheet.evaluate(async sheet=>{
+          await sheet.getAnimations().find(animation=>animation.animationName==='menu-sheet-in')?.finished;
+        });
+        await checkFit('#modal[open] button:not([hidden])');
+      };
       await main.getByRole('heading',{name:'Özet',exact:true}).waitFor();
       if(!narrow){
         assert.match(await main.locator('[data-stat=cash]').textContent(),/34\.850,00/);
@@ -433,16 +706,16 @@ async function checkDashboardLayouts(browser){
       assert.equal(await payment.locator('[name=target]').inputValue(),'synthetic-card');
       await page.keyboard.press('Escape');
       await more.click();
-      await page.getByRole('dialog',{name:'Diğer',exact:true}).waitFor();
+      await moreSheet.waitFor();
       assert.equal(await nav.locator('[aria-current=page]').getAttribute('data-page'),'wallet');
-      await checkFit('#modal[open] button:not([hidden])');
+      await checkMoreFit();
       await screenshot('diger');
       await page.keyboard.press('Escape');
       if(narrow){
         await page.evaluate(()=>{document.documentElement.style.fontSize='200%';});
         await checkFit('#nav button, main .panel, main .dashboard-actions button, main [data-account-view]');
         await more.click();
-        await checkFit('#modal[open] button:not([hidden])');
+        await checkMoreFit();
         await page.keyboard.press('Escape');
       }
       assert.deepEqual(errors,[]);
@@ -1086,6 +1359,14 @@ async function checkDialog(page,opener,expectedTitle,{checkAccountLabel=false}={
       await checkMoreNavigation(browser);
       await checkDashboardLayouts(browser);
     }
+    if(process.argv.includes('--nav-motion')){
+      await checkTabMotion(browser);
+      return;
+    }
+    if(process.argv.includes('--touch-foundation')){
+      await checkTouchFeedback(browser);
+      return;
+    }
     if(process.argv.includes('--ux-motion')){
       await checkMoreNavigation(browser);
       return;
@@ -1114,6 +1395,8 @@ async function checkDialog(page,opener,expectedTitle,{checkAccountLabel=false}={
     await checkIncomePlansHeading(browser);
     if(onlyIncomePlans)return;
     await checkSlice1();
+    await checkTouchFeedback(browser);
+    await checkTabMotion(browser);
     await checkTransactionEmptyStates(browser);
     await checkTransactionForms(browser);
     await checkShowMore(browser);

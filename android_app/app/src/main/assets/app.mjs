@@ -8,7 +8,7 @@ import {parseStatementCsv} from './csv.mjs';
 import {createDialog} from './ui/dialog.mjs';
 import {escapeHtml as esc,options,field,select} from './ui/form-controls.mjs';
 import {expenseAllocationFields,attachExpenseAllocationFields} from './ui/expense-allocations.mjs';
-import {activeBottomPage,renderBottomNavigation,renderMoreNavigation,uiIcon} from './ui/navigation.mjs';
+import {NAV_ITEMS,activeBottomPage,renderBottomNavigation,renderMoreNavigation,uiIcon} from './ui/navigation.mjs';
 import {renderReviewCenter,reviewDecisionRecords} from './ui/review-center.mjs';
 import {compareBalanceObservation} from './balance-reconciliation.mjs';
 import {prepareBalanceApproval,readBalanceApprovalSnapshot,saveBalanceApproval} from './balance-approval-flow.mjs';
@@ -46,6 +46,8 @@ document.addEventListener('visibilitychange',()=>{
 });
 const reportFilters={months:6,accountId:'',reveal:false};
 const isReportPage=route=>route==='reports'||route==='reportCategory';
+const fixedTabs=NAV_ITEMS.map(([id])=>id);
+const changesFixedTab=(from,to)=>from!==to&&fixedTabs.includes(from)&&fixedTabs.includes(to);
 function notice(message,{error=false}={}){
  const live=$(error?'error-announcement':'status-announcement');
  live.textContent=message;
@@ -231,13 +233,14 @@ window.handleBack=()=>{
  if(closeModal())return true;
  const previous=history.pop();
  if(!previous)return false;
+ const tabEntry=changesFixedTab(page,previous.page);
  ({page,detailId,query,expenseCategory}=previous);
  if(previous.reportContext){
   period=previous.reportContext.period;
   Object.assign(reportFilters,previous.reportContext.filters);
  }
  resetBalanceReview(page,detailId);
- render();restoreFocus(previous.opener,{returning:true});window.scrollTo(0,previous.scroll);
+ render({tabEntry});restoreFocus(previous.opener,{returning:true});window.scrollTo(0,previous.scroll);
  return true;
 };
 function showBackupFailure(message,opener=focusTarget(document.activeElement),action='backup'){
@@ -309,6 +312,7 @@ function backDestinationTitle(){
  return previous?.title||backFallback().title;
 }
 function go(next,id=null,category=null,{recordHistory=true}={}){
+ const tabEntry=changesFixedTab(page,next);
  if(next!==page||id!==detailId||category!==expenseCategory){
   if(recordHistory)history.push({
    page,detailId,query,expenseCategory,title:$('main').querySelector('h1')?.textContent.trim(),
@@ -318,7 +322,7 @@ function go(next,id=null,category=null,{recordHistory=true}={}){
   resetBalanceReview(next,id);
  }
  page=next;detailId=id;expenseCategory=category;query='';
- render();window.scrollTo(0,0);focusMain();
+ render({tabEntry});window.scrollTo(0,0);focusMain();
 }
 const empty=(message,title='Buradan başlayalım')=>`<div class="empty"><b>${title}</b><p>${message}</p></div>`;
 function expenseCategorySuggestion(row,lookup=merchant=>C.categorySuggestion(state,merchant)){
@@ -346,10 +350,24 @@ function categorySuggestionRow(row,edit,index,lookup){
   </div>
  </div></div>`;
 }
-let touchPress;
+let touchPress,touchFeedback;
 document.addEventListener('pointerdown',event=>{
  touchPress=event.pointerType==='touch'?{x:event.clientX,y:event.clientY}:null;
+ if(!touchPress||!event.isPrimary)return;
+ const control=event.target.closest('button,a[href],summary');
+ if(!control?.closest('#header-actions,#main,#nav,#modal')||control.matches(':disabled,[aria-disabled="true"]'))return;
+ touchFeedback?.control.removeAttribute('data-touch-pressed');
+ touchFeedback={control,pointerId:event.pointerId};
+ control.setAttribute('data-touch-pressed','');
 },{capture:true,passive:true});
+function releaseTouchFeedback(event){
+ if(touchFeedback?.pointerId!==event.pointerId)return;
+ touchFeedback.control.removeAttribute('data-touch-pressed');
+ touchFeedback=null;
+}
+for(const type of ['pointerup','pointercancel','lostpointercapture']){
+ document.addEventListener(type,releaseTouchFeedback,{capture:true,passive:true});
+}
 function guardRepeatedActivation(event,includeNearby=true){
  if(!event.detail)return;
  const fromTouch=event.pointerType==='touch';
@@ -434,7 +452,20 @@ function transactionsView(rows,filteredExpenses,periodControl,modeControl){
 function importCategoryOption(merchant,current,index,selectedCategory,category=C.suggestCategory(state,merchant)){
  return category&&category!==current?`<label class="import-category-choice"><input type="checkbox" data-category-suggestion="${index}" value="${esc(category)}" ${category===selectedCategory?'checked':''}> <span>${esc(merchant)} · Öneriyi seç: ${esc(category)}</span></label>`:'';
 }
-function render(){
+function clearTabEntry({target,animationName}){
+ if(animationName==='tab-content-in'||animationName==='tab-indicator-in')target.classList.remove('tab-entry');
+}
+document.addEventListener('animationend',clearTabEntry);
+document.addEventListener('animationcancel',clearTabEntry);
+const tabMotion=matchMedia('(prefers-reduced-motion:no-preference)');
+function clearReducedTabEntry({matches}){
+ if(matches)return;
+ // A marker can precede CSS animation creation, so reduction may emit no animationcancel.
+ document.querySelectorAll('#main > .tab-entry,#nav .nav-icon.tab-entry').forEach(node=>node.classList.remove('tab-entry'));
+}
+if(tabMotion.addEventListener)tabMotion.addEventListener('change',clearReducedTabEntry);
+else tabMotion.addListener?.(clearReducedTabEntry);
+function render({tabEntry=false}={}){
  $('nav').innerHTML=renderBottomNavigation(page);
  document.body.dataset.surface=loadFailed?'recovery':activeBottomPage(page);
  if(loadFailed){
@@ -481,6 +512,10 @@ function render(){
   html=settingsView({backTitle,version:installedVersionLabel(),categorySections:categorySettings({disclosure:true}),backupFailure});
  }
  $('main').innerHTML=html;
+ if(tabEntry&&tabMotion.matches){
+  $('main').firstElementChild?.classList.add('tab-entry');
+  $('nav').querySelector('[aria-current="page"] .nav-icon')?.classList.add('tab-entry');
+ }
  $('main').querySelector('h1')?.setAttribute('tabindex','-1');
  for(const [id,key] of [['view-mode','mode'],['kind-filter','kind'],['account-filter','account']])$('f-'+id)?.addEventListener('change',e=>{if(key==='mode')periodMode=e.target.value;else if(key==='kind')kindFilter=e.target.value;else accountFilter=e.target.value;render();$('f-'+id)?.focus({preventScroll:true});});
  for(const [id,update] of [
