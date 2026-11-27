@@ -1,8 +1,136 @@
 const assert=require('node:assert/strict');
 const {createHash}=require('node:crypto');
+const fs=require('node:fs');
+const path=require('node:path');
+const openRoute=require('./journey-navigation.cjs');
 const digest=raw=>raw===null?'':createHash('sha256').update(raw).digest('hex');
 const wallet={format:'ekstre-android',version:1,accounts:[{id:'bank',type:'bank',name:'Sentetik hesap',opening:74325}],transactions:[],statements:[],subscriptions:[],categories:['Diğer'],budgets:{}};
 const good=JSON.stringify(wallet,null,2),broken='okunamayan sentetik kayıt';
+const screenOutput=process.env.SETTINGS_SCREENSHOTS;
+
+async function settingsLayoutJourney(browser,url,width,scale){
+ const page=await browser.newPage({viewport:{width,height:844}});
+ const main=page.getByRole('main');
+ const dialog=page.getByRole('dialog');
+ const focused=locator=>locator.evaluate(node=>node===document.activeElement);
+ const back=()=>page.evaluate(()=>window.handleBack());
+ const stored=()=>page.evaluate(()=>localStorage.getItem('ekstre-android-v1'));
+ const checkGeometry=async scope=>{
+  const result=await scope.evaluate(root=>{
+   const controls=[...root.querySelectorAll('button,input:not([type=radio]),select,.category-rule-choice')].filter(node=>node.getClientRects().length);
+   return {
+    overflow:document.documentElement.scrollWidth>innerWidth+1||root.scrollWidth>root.clientWidth+1,
+    undersized:controls.filter(node=>node.offsetWidth<48||node.offsetHeight<48).map(node=>node.id||node.textContent.trim()),
+   };
+  });
+  assert.deepEqual(result,{overflow:false,undersized:[]},`${width}px / ${scale}%`);
+ };
+ const screenshot=async name=>{
+  if(!screenOutput)return;
+  await page.evaluate(()=>document.querySelector('#toast').classList.remove('visible'));
+  await page.screenshot({path:path.join(screenOutput,`${name}-${width}-${scale}.png`),fullPage:!(await dialog.count())});
+ };
+ const selectFile=async (button,raw)=>{
+  const [chooser]=await Promise.all([page.waitForEvent('filechooser'),button.click()]);
+  await chooser.setFiles({name:'sentetik.json',mimeType:'application/json',buffer:Buffer.from(raw)});
+ };
+ const errors=[];
+ page.on('pageerror',error=>errors.push(error.message));
+ try{
+  page.setDefaultTimeout(4000);
+  await page.goto(url);
+  const settings=page.getByRole('button',{name:'Ayarlar',exact:true});
+  await settings.waitFor();
+  await page.evaluate(({good,wallet})=>{
+   localStorage.setItem('ekstre-android-v1',JSON.stringify({...wallet,categories:['Diğer','Sentetik gider kategorisi']}));
+   localStorage.setItem('ekstre-android-v1-recovery',good);
+  },{good,wallet});
+  await page.reload();
+  await page.evaluate(scale=>{document.documentElement.style.fontSize=scale+'%';},scale);
+  await settings.click();
+  const heading=main.getByRole('heading',{level:1});
+  assert.equal(await focused(heading),true);
+  assert.equal(await main.getByRole('region',{name:'Gizlilik'}).isVisible(),true);
+  assert.equal(await main.getByRole('region',{name:'Yedek dışa aktarma'}).getByRole('button',{name:'Yedek dışa aktar'}).count(),1);
+  const replace=main.getByRole('region',{name:'Cüzdanı geri yükleme'});
+  const restore=replace.getByRole('button',{name:'Yedek yükle',exact:true});
+  await checkGeometry(main);
+  await screenshot('ayarlar');
+  const before=await stored();
+  await selectFile(restore,broken);
+  await main.getByRole('heading',{name:'Yedekleme işlemi tamamlanamadı'}).waitFor();
+  assert.equal(await focused(restore),true);
+  assert.equal(await stored(),before);
+  await checkGeometry(main);
+  await screenshot('yedek-hatasi');
+  await selectFile(restore,good);
+  assert.equal(await focused(dialog.getByRole('heading',{name:'JSON yedeğini incele'})),true);
+  assert.equal(await stored(),before);
+  assert.match(await dialog.innerText(),/1 hesap · 0 işlem/);
+  assert.doesNotMatch(await dialog.innerText(),/Sentetik hesap|sentetik\.json/);
+  await checkGeometry(dialog);
+  await screenshot('yedek-onizleme');
+  assert.equal(await back(),true);
+  assert.equal(await focused(restore),true);
+  assert.equal(await stored(),before);
+
+  await selectFile(restore,good);
+  await dialog.getByRole('heading',{name:'JSON yedeğini incele'}).waitFor();
+  const newer=await page.evaluate(before=>{
+   const next=JSON.stringify({...JSON.parse(before),budgets:{'2026-10|Toplam':12345}});
+   localStorage.setItem('ekstre-android-v1',next);
+   return next;
+  },before);
+  await dialog.getByRole('button',{name:'Cüzdanı değiştir',exact:true}).click();
+  assert.match(await dialog.getByRole('alert').textContent(),/Cüzdan değişti/);
+  assert.equal(await focused(dialog.getByRole('alert')),true);
+  assert.equal(await stored(),newer);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('ekstre-android-v1-recovery')),good);
+  assert.equal(await back(),true);
+  assert.equal(await focused(restore),true);
+
+  await openRoute(page,'categories');
+  assert.equal(await focused(heading),true);
+  const addRule=main.getByRole('button',{name:'+ Satıcı kuralı',exact:true});
+  await addRule.click();
+  await checkGeometry(dialog);
+  await dialog.getByLabel('Satıcı adı').fill('Sentetik uzun satıcı kuralı');
+  await dialog.getByLabel('Önerilecek kategori').selectOption('Sentetik gider kategorisi');
+  await dialog.getByRole('button',{name:'Kaydet',exact:true}).click();
+  assert.equal(await focused(addRule),true);
+  await checkGeometry(main);
+  await screenshot('kategoriler');
+  const edit=main.getByRole('button',{name:'Kuralı düzenle',exact:true});
+  await edit.click();
+  await dialog.getByRole('button',{name:'Kuralı sil',exact:true}).click();
+  assert.equal(await focused(dialog.getByRole('heading',{name:'Bu satıcı kuralı silinsin mi?'})),true);
+  assert.equal(await back(),true);
+  assert.equal(await focused(edit),true);
+  await edit.click();
+  await dialog.getByRole('button',{name:'Kuralı sil',exact:true}).click();
+  await dialog.getByRole('button',{name:'Kuralı sil',exact:true}).click();
+  await main.getByText('Henüz kaydedilmiş satıcı kuralı yok.').waitFor();
+  assert.equal(await focused(heading),true);
+  assert.equal(await back(),true);
+  assert.equal(await heading.textContent(),'Ayarlar');
+
+  await page.evaluate(broken=>localStorage.setItem('ekstre-android-v1',broken),broken);
+  await page.reload();
+  await page.evaluate(scale=>{document.documentElement.style.fontSize=scale+'%';},scale);
+  await main.getByRole('heading',{name:'Cüzdan kurtarma',exact:true}).waitFor();
+  await checkGeometry(main);
+  await screenshot('cuzdan-kurtarma');
+  const recover=main.getByRole('button',{name:/Geri yükleme öncesi kopya/});
+  await recover.click();
+  assert.equal(await focused(dialog.getByRole('heading',{name:'Kurtarma kopyasını incele'})),true);
+  await checkGeometry(dialog);
+  await screenshot('kurtarma-onizleme');
+  assert.equal(await back(),true);
+  assert.equal(await focused(recover),true);
+  assert.equal(await stored(),broken);
+  assert.deepEqual(errors,[]);
+ }finally{await page.close();}
+}
 
 async function startupJourney(browser,url){
  const cases=[
@@ -85,7 +213,12 @@ async function startupJourney(browser,url){
 
 module.exports=async function recoveryJourney(browser,url){
  await startupJourney(browser,url);
+ if(screenOutput)fs.mkdirSync(screenOutput,{recursive:true});
+ await settingsLayoutJourney(browser,url,390,100);
+ await settingsLayoutJourney(browser,url,320,200);
+ console.log('Settings, Categories, and backup previews passed at 390px/100% and 320px/200%');
  const page=await browser.newPage();
+ page.setDefaultTimeout(4000);
  const configure=async (slots,unreadable)=>{
   await page.evaluate(config=>{sessionStorage.setItem('recoveryFixture',JSON.stringify(config));},{slots,unreadable});
   await page.reload();
@@ -93,6 +226,9 @@ module.exports=async function recoveryJourney(browser,url){
  };
  const details=()=>page.evaluate(()=>window.io);
  const upload=async(raw=good)=>page.locator('#backup-file').setInputFiles({name:'sentetik.json',mimeType:'application/json',buffer:Buffer.from(raw)});
+ const recoveryPreview=page.getByRole('dialog',{name:'Kurtarma kopyasını incele'});
+ const restorePreview=page.getByRole('dialog',{name:'JSON yedeğini incele'});
+ const acceptReplacement=preview=>preview.getByRole('button',{name:'Cüzdanı değiştir',exact:true}).click();
  try{
   await page.addInitScript(()=>{
    const {slots={},unreadable}=JSON.parse(sessionStorage.getItem('recoveryFixture')||'{}');
@@ -134,28 +270,35 @@ module.exports=async function recoveryJourney(browser,url){
   await configure({3:good});
   assert.match(await page.locator('main').innerText(),/dışa aktarma kapalı/i);
   await page.locator('[data-action=recover][data-slot="3"]').click();
+  await acceptReplacement(recoveryPreview);
   assert.deepEqual((await details()).recoveries,[[3,digest(good),'']]);
   for(const slot of [3,2]){
    const slots={1:broken,3:'{}',[slot]:good};
    await configure(slots);
    const recover=page.locator('[data-action=recover]').first();
-   await page.evaluate(()=>window.io.accept=false);
    await recover.click();
+   await recoveryPreview.waitFor();
    let io=await details();
-   assert.match(io.confirmations.at(-1),/1 hesap/);
-   assert.match(io.confirmations.at(-1),/743,25/);
-   assert.match(io.confirmations.at(-1),slot===3?/geri yükleme öncesi/i:/son kayıt öncesi/i);
+   assert.match(await recoveryPreview.innerText(),/1 hesap/);
+   assert.match(await recoveryPreview.innerText(),/743,25/);
+   assert.match(await recoveryPreview.innerText(),slot===3?/geri yükleme öncesi/i:/son kayıt öncesi/i);
+   assert.equal(await page.evaluate(()=>window.handleBack()),true);
+   assert.equal(await recover.evaluate(button=>button===document.activeElement),true);
    assert.deepEqual(io.recoveries,[]);
    assert.deepEqual(io.slots,slots);
-   await page.evaluate(()=>{window.io.accept=true;window.io.fail=true;});
+   await page.evaluate(()=>{window.io.fail=true;});
    await recover.click();
+   await acceptReplacement(recoveryPreview);
    assert.deepEqual((await details()).slots,slots);
    assert.match(await page.locator('main').innerText(),/dışa aktarma kapalı/i);
+   assert.match(await recoveryPreview.getByRole('alert').innerText(),/Kurtarma kaydedilemedi/);
+   assert.equal(await page.locator('#status-announcement').textContent(),'');
    await page.evaluate(()=>window.io.fail=false);
-   await recover.click();
+   await acceptReplacement(recoveryPreview);
    io=await details();
    assert.deepEqual(io.recoveries.at(-1),[slot,digest(good),digest(broken)]);
    assert.equal(io.slots[1],good);
+   assert.equal(await page.locator('#status-announcement').textContent(),'Cüzdan kurtarıldı.');
    assert.equal(io.saves,0);
    await page.locator('#settings').click();
    await page.locator('[data-action=backup]').click();
@@ -163,8 +306,20 @@ module.exports=async function recoveryJourney(browser,url){
   }
   await configure({1:broken,3:'{}',2:good});
   await upload();
-  await page.waitForFunction(()=>window.io.restores.length===1);
-  assert.deepEqual((await details()).restores[0].slice(0,3),[digest(broken),2,digest(good)]);
+  await restorePreview.waitFor();
+  assert.deepEqual((await details()).restores,[]);
+  await restorePreview.getByRole('button',{name:'Vazgeç',exact:true}).click();
+  assert.deepEqual((await details()).restores,[]);
+  await upload();
+  await page.evaluate(()=>{window.io.fail=true;});
+  await acceptReplacement(restorePreview);
+  assert.match(await restorePreview.getByRole('alert').innerText(),/Geri yükleme kaydedilemedi/);
+  assert.equal(await page.locator('#status-announcement').textContent(),'');
+  assert.deepEqual((await details()).slots,{1:broken,3:'{}',2:good});
+  await page.evaluate(()=>{window.io.fail=false;});
+  await acceptReplacement(restorePreview);
+  assert.deepEqual((await details()).restores.at(-1).slice(0,3),[digest(broken),2,digest(good)]);
+  assert.equal(await page.locator('#status-announcement').textContent(),'Yedek geri yüklendi.');
   await configure({1:good});
   await page.evaluate(()=>window.io.slots[1]='bozuk');
   await page.locator('[data-action=backup]').click();
@@ -219,6 +374,7 @@ module.exports=async function recoveryJourney(browser,url){
   assert.deepEqual((await details()).slots,backupSlots);
   assert.deepEqual((await details()).restores,[]);
   assert.deepEqual((await details()).confirmations,[]);
+  assert.equal(await restorePreview.count(),0);
 
   const expense={id:'bad-expense',account:'bank',target:'cash',kind:'expense',date:'2026-10-01',
    period:'2026-10',amount:2000,desc:'Sentetik gider',category:'Diğer'};

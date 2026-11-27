@@ -19,6 +19,7 @@ import {renderBalanceApprovalHistory} from './ui/balance-history.mjs';
 import {renderSavingsGoals,savingsGoalFields} from './ui/savings-goals.mjs';
 import {dueItems,notificationPlan,readSnoozes} from './reminders.mjs';
 import {renderReminders} from './ui/reminders.mjs';
+import {settingsView,categoriesView,recoveryView,replacementDetails} from './ui/settings.mjs';
 const $=id=>document.getElementById(id);
 const plainMoney=C.formatMoney;
 const fmt=n=>`<span class="money">${plainMoney(n)}</span>`,key='ekstre-android-v1';
@@ -27,6 +28,7 @@ const history=[];
 let importDraft;
 let pdfRequest=null,importFailure=null;
 let actionTrigger=null,csvOpener=null;
+let backupFileOpener=null,backupFailure='';
 let state=W.normalizeWallet(C.empty()),detailId=null,expenseCategory=null,page='home',period=C.today().slice(0,7),periodMode='calendar',query='',kindFilter='',accountFilter='',listLimit=150,pending=null,toastTimer,loadFailed=false;
 const accountHistoryLimits=new Map();
 const accountHistoryKey=id=>JSON.stringify([detailId,id,id==='account-month-history'?period:null]);
@@ -121,7 +123,7 @@ function commit(next){
 }
 const copyLabel=slot=>slot===3?'Geri yükleme öncesi kopya':'Son kayıt öncesi kopya';
 function finishReplacement(wallet,raw){
- loadFailed=false;setWallet(wallet,tokenOf(raw));
+ loadFailed=false;backupFailure='';setWallet(wallet,tokenOf(raw));
  pending=null;pdfRequest=null;history.length=0;detailId=null;
  balanceDraft={};balanceReviewToken=null;balanceHistoryArchive=null;balanceHistoryView={};
  page='home';render();focusMain();
@@ -130,21 +132,22 @@ function previewRecovery(slot){
  const current=readSlot(1),selected=verifiedCopy(readSlot(slot));
  if(!selected)throw Error('Seçilen kurtarma kopyası doğrulanamadı.');
  const w=selected.wallet;
- const totals=W.overview(w,period);
- const message=copyLabel(slot)+' · '+w.accounts.length+' hesap · '+w.transactions.length+' işlem\nNet varlık: '+plainMoney(totals.netWorth)+'\nBu kopya güncel cüzdan olarak geri getirilsin mi?';
- if(!confirm(message))return;
- const keepCurrent=!!verifiedCopy(current);
- if(window.Android){
-  if(!Android.recoverSnapshot(slot,tokenOf(selected.raw),tokenOf(current),keepCurrent))
-   throw Error('Kurtarma kaydedilemedi. Kopyaları tekrar incele.');
- }else{
-  if(current!==readSlot(1)||selected.raw!==readSlot(slot))throw Error('Cüzdan değişti. Tekrar incele.');
-  if(keepCurrent)localStorage.setItem(slot===3?key+'-previous':key+'-recovery',current);
-  localStorage.setItem(key,selected.raw);
- }
- finishReplacement(w,selected.raw);notice('Cüzdan kurtarıldı.');
+ const details=replacementDetails({label:copyLabel(slot),wallet:w,netWorth:fmt(W.overview(w,period).netWorth)});
+ settingsDialog('Kurtarma kopyasını incele',details,()=>{
+  const keepCurrent=!!verifiedCopy(current);
+  if(window.Android){
+   if(!Android.recoverSnapshot(slot,tokenOf(selected.raw),tokenOf(current),keepCurrent))
+    throw Error('Kurtarma kaydedilemedi. Kopyaları tekrar incele.');
+  }else{
+   if(current!==readSlot(1)||selected.raw!==readSlot(slot))throw Error('Cüzdan değişti. Tekrar incele.');
+   if(keepCurrent)localStorage.setItem(slot===3?key+'-previous':key+'-recovery',current);
+   localStorage.setItem(key,selected.raw);
+  }
+  closeModal();
+  finishReplacement(w,selected.raw);notice('Cüzdan kurtarıldı.');
+ },'Cüzdanı değiştir',{variant:'backup-replace'});
 }
-function restoreExternal(next){
+function restoreExternal(next,opener){
  const wallet=displayedWallet(next),content=C.backupText(wallet);
  const current=readSlot(1);
  let slot=0,source=null;
@@ -152,16 +155,19 @@ function restoreExternal(next){
   const raw=id===1?current:readSlot(id);
   if(verifiedCopy(raw)){slot=id;source=raw;break;}
  }
- if(!confirm('Bu yedek mevcut Android cüzdanının yerini alacak. Devam edilsin mi?'))return;
- if(window.Android){
-  if(!Android.restoreChecked(tokenOf(current),slot,tokenOf(source),content))
-   throw Error('Geri yükleme kaydedilemedi. Mevcut kopyalar korunuyor.');
- }else{
-  if(current!==readSlot(1)||(slot&&source!==readSlot(slot)))throw Error('Cüzdan değişti. Tekrar incele.');
-  if(slot===1||slot===2)localStorage.setItem(key+'-recovery',source);
-  localStorage.setItem(key,content);
- }
- finishReplacement(wallet,content);notice('Yedek geri yüklendi.');
+ const details=replacementDetails({wallet});
+ settingsDialog('JSON yedeğini incele',details,()=>{
+  if(window.Android){
+   if(!Android.restoreChecked(tokenOf(current),slot,tokenOf(source),content))
+    throw Error('Geri yükleme kaydedilemedi. Mevcut kopyalar korunuyor.');
+  }else{
+   if(current!==readSlot(1)||(slot&&source!==readSlot(slot)))throw Error('Cüzdan değişti. Tekrar incele.');
+   if(slot===1||slot===2)localStorage.setItem(key+'-recovery',source);
+   localStorage.setItem(key,content);
+  }
+  closeModal();
+  finishReplacement(wallet,content);notice('Yedek geri yüklendi.');
+ },'Cüzdanı değiştir',{variant:'backup-replace',opener});
 }
 function validatedExport(){
  if(loadFailed)throw Error('Dışa aktarma kapalı. Önce cüzdanı kurtar.');
@@ -214,6 +220,8 @@ const planDialog=(title,fields,save,label,destructive=false)=>modal(title,fields
  variant:destructive?'plan-removal':'plan',
  dismissLabel:'Vazgeç',
 });
+const settingsDialog=(title,fields,save,label,{variant='settings',opener}={})=>
+ modal(title,fields,save,label,opener,{variant,dismissLabel:'Vazgeç'});
 window.handleBack=()=>{
  if(closeModal())return true;
  const previous=history.pop();
@@ -227,7 +235,15 @@ window.handleBack=()=>{
  render();restoreFocus(previous.opener,{returning:true});window.scrollTo(0,previous.scroll);
  return true;
 };
-window.nativeError=errorNotice;window.nativeNotice=message=>notice(message);
+function showBackupFailure(message,opener=focusTarget(document.activeElement)){
+ backupFailure=message;
+ if((loadFailed||page==='settings')&&!$('modal').open){
+  render();
+  restoreFocus(opener,{returning:true});
+ }
+ if(message)errorNotice(message);
+}
+window.nativeError=showBackupFailure;window.nativeNotice=message=>notice(message);
 function invalidatePdfPreview(){
  pdfRequest=null;
  if(pending){pending=null;render();}
@@ -408,14 +424,13 @@ function importCategoryOption(merchant,current,index,selectedCategory,category=C
 }
 function render(){
  $('nav').innerHTML=renderBottomNavigation(page);
- document.body.dataset.surface=loadFailed?'':activeBottomPage(page);
+ document.body.dataset.surface=loadFailed?'recovery':activeBottomPage(page);
  if(loadFailed){
-  const buttons=[];
+  const copies=[];
   for(const slot of [3,2]){
-   try{if(verifiedCopy(readSlot(slot)))buttons.push('<button type="button" data-action="recover" data-slot="'+slot+'">'+copyLabel(slot)+' · incele</button>');}catch{/* Keep other readable slots available. */}
+   try{if(verifiedCopy(readSlot(slot)))copies.push({slot,label:copyLabel(slot)});}catch{/* Keep other readable slots available. */}
   }
-  $('main').innerHTML='<h1>Cüzdan kurtarma</h1><p>Güncel cüzdan okunamadı. Normal kayıt ve dışa aktarma kapalı.</p>'+
-   (buttons.length?buttons.join(''):'<p>Doğrulanabilen dahili kopya bulunamadı.</p>')+'<button data-action="restore">JSON yedeğini yükle</button>';
+  $('main').innerHTML=recoveryView({copies,backupFailure});
   return;
  }
  const filteredExpenses=page==='transactions'&&expenseCategory!==null;
@@ -447,11 +462,11 @@ function render(){
  }else if(page==='import'){html=V.importView(ctx,pending,importFailure);
  }else if(page==='statement'){html=V.statementView(ctx,detailId);
  }else if(page==='categories'){
-  html='<h1>Kategoriler</h1>'+categorySettings();
+  html=categoriesView({backTitle,categorySections:categorySettings()});
  }else if(page==='review'){
  html=renderReviewCenter(state,backTitle);
  }else{
- html=`<h1>Ayarlar</h1><p class="lead">${esc(installedVersionLabel())}</p><div class="actions"><button data-page="reminders">Hatırlatmalar</button><button data-page="review">İnceleme ve kaynak bağlantıları</button></div><div class="panel"><h2>Veriler ve yedek</h2><p>Kayıtların bu cihazda saklanır. Uygulamayı kaldırmadan veya yeni bir deneme APK’sı kurmadan önce yedek al.</p><div class="actions"><button data-action="backup">Yedek dışa aktar</button><button data-action="restore">Yedek yükle</button></div><p class="notice">Bu sürüm Android JSON yedeklerini açar. Masaüstü .db yedeği doğrudan aktarılamaz; kart hareketleri için CSV aktarımını kullan.</p></div><button data-action="recover">Geri yükleme öncesi cüzdanı kurtar</button>${categorySettings()}<div class="panel"><h2>İlk deneme</h2><p>Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Gerçek belgelerini yüklemeden önce temel işlevleri deneyebilirsin.</p><button data-action="demo">Örnek cüzdan oluştur</button></div><div class="panel"><h2>Bu sürümün kapsamı</h2><p>Hesaplar, işlemler, PDF/CSV aktarımı, kategori düzenleme, manuel gider bölme, bütçe, aylık abonelik, rapor ve yedekleme. Çoklu profil, AI yorumu, otomatik eşleştirme ve gelişmiş kurallar henüz yoktur.</p></div>`;
+  html=settingsView({backTitle,version:installedVersionLabel(),categorySections:categorySettings(),backupFailure});
  }
  $('main').innerHTML=html;
  $('main').querySelector('h1')?.setAttribute('tabindex','-1');
@@ -513,20 +528,28 @@ function confirmSavingsGoalRemoval(id){
 
 function categorySettings(){
  return expenseCategoriesPanel()+merchantRulesPanel()+
-  '<section class="panel"><h2>Gelir kategorileri</h2><p>'+state.incomeCategories.map(esc).join(' · ')+'</p>'+
-  '<button data-action="incomeCategory">+ Gelir kategorisi</button></section>';
+  '<section class="panel" aria-labelledby="settings-income-categories"><h2 id="settings-income-categories">Gelir kategorileri</h2>'+
+  '<ul class="settings-tags">'+state.incomeCategories.map(name=>'<li>'+esc(name)+'</li>').join('')+'</ul>'+
+  '<button type="button" data-action="incomeCategory" aria-haspopup="dialog" aria-controls="modal">+ Gelir kategorisi</button></section>';
 }
 function merchantRulesPanel(){
  const rules=state.merchantCategoryRules||[];
- return `<section class="panel"><h2>Satıcı kategori kuralları</h2>${rules.map(rule=>`<div class="row"><span class="left"><strong>${esc(rule.merchant)}</strong><small>${esc(rule.category)}</small></span><button data-merchant-rule="${esc(rule.id)}">Kuralı düzenle</button></div>`).join('')||'<p>Henüz kaydedilmiş satıcı kuralı yok.</p>'}<button data-action="merchantRule">+ Satıcı kuralı</button></section>`;
+ return `<section class="panel" aria-labelledby="settings-rules"><h2 id="settings-rules">Satıcı kategori kuralları</h2>
+  <p>Satıcı eşleştiğinde gider kategorisi önerilir. Öneriyi kaydetmeden önce inceleyebilirsin.</p>
+  <button type="button" data-action="merchantRule" aria-haspopup="dialog" aria-controls="modal">+ Satıcı kuralı</button>
+  ${rules.map(rule=>`<div class="settings-record"><div><strong>${esc(rule.merchant)}</strong><small>Öneri · ${esc(rule.category)}</small></div>
+    <button type="button" data-merchant-rule="${esc(rule.id)}" aria-haspopup="dialog" aria-controls="modal">Kuralı düzenle</button></div>`).join('')||'<p class="empty-note">Henüz kaydedilmiş satıcı kuralı yok.</p>'}
+ </section>`;
 }
 function expenseCategoriesPanel(){
- const rows=state.categories.map(name=>`<div class="row expense-category-setting"><span class="left">${esc(name)}</span><button type="button" data-expense-category-edit="${esc(name)}" aria-label="${esc(name+' kategorisini düzenle')}">Düzenle</button></div>`).join('');
- return `<section class="panel"><h2>Gider kategorileri</h2>${rows}<button data-action="category">+ Kategori ekle</button></section>`;
+ const rows=state.categories.map(name=>`<div class="settings-record expense-category-setting"><span>${esc(name)}</span><button type="button" data-expense-category-edit="${esc(name)}" aria-label="${esc(name+' kategorisini düzenle')}" aria-haspopup="dialog" aria-controls="modal">Düzenle</button></div>`).join('');
+ return `<section class="panel" aria-labelledby="settings-expense-categories"><h2 id="settings-expense-categories">Gider kategorileri</h2>
+  <button type="button" data-action="category" aria-haspopup="dialog" aria-controls="modal">+ Kategori ekle</button>${rows}
+ </section>`;
 }
 function expenseCategoryForm(category){
  const linked=state.merchantCategoryRules?.filter(rule=>rule.category===category).length??0;
- modal('Gider kategorisini düzenle',
+ settingsDialog('Gider kategorisini düzenle',
   field('name','Kategori adı',category,'text','required maxlength="200"')+
   (linked?`<p>Bu kategoriye bağlı ${linked} satıcı kuralı yeni adı kullanır.</p>`:'')+
   `<button type="button" class="danger" data-expense-category-remove="${esc(category)}">Kategoriyi sil</button>`,
@@ -537,17 +560,17 @@ function confirmExpenseCategoryRemoval(category){
  const targets=state.categories.filter(name=>name!==category);
  if(!targets.length)throw Error('En az bir gider kategorisi kalmalı.');
  const rules=linked?`<fieldset class="category-rule-choices"><legend>Bu kategoriye bağlı ${linked} satıcı kuralı var</legend>
-  <label><input type="radio" name="rule-choice" value="move" required> Başka kategoriye taşı</label>
+  <label class="category-rule-choice"><input type="radio" name="rule-choice" value="move" required> Başka kategoriye taşı</label>
   ${select('destination','Hedef gider kategorisi',options([['','Kategori seç'],...targets.map(name=>[name,name])],''))}
-  <label><input type="radio" name="rule-choice" value="remove" required> İlgili kuralları kaldır</label>
+  <label class="category-rule-choice"><input type="radio" name="rule-choice" value="remove" required> İlgili kuralları kaldır</label>
  </fieldset>`:'';
- modal('Kategoriyi sil',`<p><strong>${esc(category)}</strong> gider kategorisi listeden kaldırılacak. Mevcut işlem, bütçe ve abonelik etiketleri korunacak.</p>${rules}<button type="button" data-action="cancelCategoryRemoval">İptal</button>`,f=>{
+ settingsDialog('Kategoriyi sil',`<p class="settings-warning"><strong>${esc(category)}</strong> gider kategorisi listeden kaldırılacak. Mevcut işlem, bütçe ve abonelik etiketleri korunacak.</p>${rules}<button type="button" data-action="cancelCategoryRemoval">İptal</button>`,f=>{
   const ruleChoice=f.get('rule-choice');
   commit(C.removeExpenseCategory(state,category,{
    moveRulesTo:ruleChoice==='move'?f.get('destination'):undefined,
    removeRules:ruleChoice==='remove',
   }));
- },'Kategoriyi sil');
+ },'Kategoriyi sil',{variant:'settings-removal'});
 }
 function confirmTransactionRemoval(id){
  const rows=C.transactionRemovalRows(state,id);
@@ -562,11 +585,18 @@ function confirmTransactionRemoval(id){
  }catch(error){showDialogError(error.message);}
 }
 function merchantRuleForm(rule){
- modal(rule?'Satıcı kuralını düzenle':'Satıcı kuralı ekle',
+ settingsDialog(rule?'Satıcı kuralını düzenle':'Satıcı kuralı ekle',
   field('merchant','Satıcı adı',rule?.merchant??'','text','required maxlength="500"')+
   select('category','Önerilecek kategori',cats(rule?.category))+
   (rule?`<button type="button" class="danger" data-remove-rule="${esc(rule.id)}">Kuralı sil</button>`:''),
   f=>commit(C.saveMerchantRule(state,f.get('merchant'),f.get('category'),rule?.id)));
+}
+function confirmMerchantRuleRemoval(id){
+ const rule=state.merchantCategoryRules.find(row=>row.id===id);
+ if(!rule)return;
+ settingsDialog('Bu satıcı kuralı silinsin mi?',
+  `<p class="settings-warning"><strong>${esc(rule.merchant)}</strong> için kategori önerisi kaldırılacak. Kaydedilmiş hareketler korunur.</p>`,
+  ()=>commit(C.removeMerchantRule(state,id)), 'Kuralı sil',{variant:'settings-removal'});
 }
 function rejectFutureCardPaymentDate(date){
  if(date>C.today())throw Error('Gerçek kart ödeme tarihi gelecekte olamaz. Bugünün veya daha önceki bir tarihi seç.');
@@ -1116,7 +1146,7 @@ const actions={
  removeSavingsGoal:()=>confirmSavingsGoalRemoval(actionTrigger.dataset.goalId),
  addAccount:()=>accountForm(),addTransaction:()=>transactionForm(),addIncome:()=>transactionForm(null,'income'),transfer:()=>transactionForm(null,'transfer'),payCard:()=>payCardForm(),incomePlan:()=>incomePlanForm(),
  incomeCategory:()=>{
-  const open=page==='plan'||page==='incomePlans'?planDialog:modal;
+  const open=page==='plan'||page==='incomePlans'?planDialog:settingsDialog;
   open('Gelir kategorisi ekle',field('name','Kategori adı','','text','required maxlength="80"'),f=>{
    const next=copy();
    next.incomeCategories.push(f.get('name').trim());
@@ -1124,7 +1154,7 @@ const actions={
   });
  },
  demo:()=>{if(readSlot(1)!==null)throw Error('Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Mevcut verilerin korunuyor.');commit(C.demo());notice('Yapay örnek kayıtlar oluşturuldu.');},
- category:()=>modal('Kategori ekle',field('name','Kategori adı','','text','required maxlength="80"'),f=>commit(C.addExpenseCategory(state,f.get('name')))),
+ category:()=>settingsDialog('Kategori ekle',field('name','Kategori adı','','text','required maxlength="80"'),f=>commit(C.addExpenseCategory(state,f.get('name')))),
  budget:()=>planDialog('Aylık bütçe','<p class="plan-dialog-note">Seçtiğin ay ve kategori için harcama sınırı belirle.</p>'+field('period','Dönem',period,'month','required')+select('category','Kategori',options([['Toplam','Toplam'],...state.categories.filter(c=>c!=='Toplam').map(c=>[c,c])],'Toplam'))+field('amount','Bütçe sınırı (TL)','','text','inputmode="decimal" required'),f=>{const next=copy();next.budgets[f.get('period')+'|'+f.get('category')]=C.money(f.get('amount'));commit(next);}),
  subscription:()=>{if(!state.accounts.length)throw Error('Önce hesap ekle.');planDialog('Aylık abonelik','<p class="plan-dialog-note">Sonraki vadeyi planla. Ödeme yapınca gerçek tarihi Ödendi adımından kaydet.</p>'+field('name','Abonelik adı','','text','required maxlength="80"')+field('amount','Tutar (TL)','','text','inputmode="decimal" required')+field('next','Sonraki vade',C.today(),'date','required')+select('account','Ödeme hesabı',accountOptions()),f=>{const next=copy();next.subscriptions.push({id:C.id(),name:f.get('name').trim(),amount:C.money(f.get('amount')),next:f.get('next'),account:f.get('account'),category:C.activeExpenseCategory(state,'Abonelik')});commit(next);});},
  pdf:()=>{
@@ -1144,8 +1174,15 @@ const actions={
   $('csv-file').click();
  },
  retryImport:()=>{if(importFailure)actions[importFailure.format]();},
- restore:()=>$('backup-file').click(),
- backup:()=>{const raw=validatedExport();if(window.Android)Android.exportBackup(raw);else{const u=URL.createObjectURL(new Blob([raw],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='ekstre-ajani-yedek.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}},
+ restore:()=>{
+  backupFileOpener=focusTarget(actionTrigger);
+  if(backupFailure)showBackupFailure('',backupFileOpener);
+  $('backup-file').click();
+ },
+ backup:()=>{
+  if(backupFailure)showBackupFailure('',focusTarget(actionTrigger));
+  const raw=validatedExport();if(window.Android)Android.exportBackup(raw);else{const u=URL.createObjectURL(new Blob([raw],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='ekstre-ajani-yedek.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}
+ },
  confirmImport:()=>{
   if(!pending)return;
   if(pending.reconciliation?.status==='mismatch')throw Error('Ekstre toplamları çelişiyor; kayıt yapılamaz.');
@@ -1164,7 +1201,7 @@ const actions={
  },
  cancelImport:()=>{invalidatePdfPreview();document.querySelector('[data-action="pdf"]')?.focus();}
 };
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if('balanceHistory' in b.dataset){go('balanceApprovalHistory',b.dataset.balanceHistory);}else if(b.dataset.balanceApproval){go('balanceApprovalDetail',b.dataset.balanceApproval);}else if(b.dataset.balanceReapprove){reexamineBalanceApproval(b.dataset.balanceReapprove);}else if(b.dataset.balanceReview){go('balanceReview',b.dataset.balanceReview);}else if('reportCategory' in b.dataset){go('reportCategory',b.dataset.reportCategory);}else if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete)confirmIncomePlanRemoval(b.dataset.incomeDelete);else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action](e);else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule&&confirm('Bu satıcı kuralı silinsin mi?')){commit(C.removeMerchantRule(state,b.dataset.removeRule));closeModal();}else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link){if(confirm('Bu iki kaynak aynı işlemi mi gösteriyor? İkinci kez sayılmayacak.'))commit(C.resolveCandidate(state,b.dataset.link,'link',$('match-'+b.dataset.link).value));}else if(b.dataset.distinct){if(confirm('Bu ayrı bir gerçek işlem mi? Toplama ayrıca eklenecek.'))commit(C.resolveCandidate(state,b.dataset.distinct,'distinct'));}else if(b.dataset.subdelete)confirmSubscriptionRemoval(b.dataset.subdelete);else if(b.dataset.budget)confirmBudgetRemoval(b.dataset.budget);}catch(error){if(b.closest('#quick-add-options'))showDialogError(error.message);else errorNotice(error.message);}finally{actionTrigger=null;}});
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if('balanceHistory' in b.dataset){go('balanceApprovalHistory',b.dataset.balanceHistory);}else if(b.dataset.balanceApproval){go('balanceApprovalDetail',b.dataset.balanceApproval);}else if(b.dataset.balanceReapprove){reexamineBalanceApproval(b.dataset.balanceReapprove);}else if(b.dataset.balanceReview){go('balanceReview',b.dataset.balanceReview);}else if('reportCategory' in b.dataset){go('reportCategory',b.dataset.reportCategory);}else if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete)confirmIncomePlanRemoval(b.dataset.incomeDelete);else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action](e);else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule)confirmMerchantRuleRemoval(b.dataset.removeRule);else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link){if(confirm('Bu iki kaynak aynı işlemi mi gösteriyor? İkinci kez sayılmayacak.'))commit(C.resolveCandidate(state,b.dataset.link,'link',$('match-'+b.dataset.link).value));}else if(b.dataset.distinct){if(confirm('Bu ayrı bir gerçek işlem mi? Toplama ayrıca eklenecek.'))commit(C.resolveCandidate(state,b.dataset.distinct,'distinct'));}else if(b.dataset.subdelete)confirmSubscriptionRemoval(b.dataset.subdelete);else if(b.dataset.budget)confirmBudgetRemoval(b.dataset.budget);}catch(error){if(b.closest('#quick-add-options'))showDialogError(error.message);else if(b.dataset.action==='backup'||b.dataset.action==='recover')showBackupFailure(error.message,focusTarget(b));else errorNotice(error.message);}finally{actionTrigger=null;}});
 function updateImportTarget(field){
  field.nextElementSibling.firstElementChild.textContent=field.selectedOptions[0]?.textContent??'';
 }
@@ -1192,7 +1229,17 @@ $('main').addEventListener('change',event=>{
  }
 });
 $('settings').dataset.page='settings';
-$('backup-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{if(file.size>C.BACKUP_LIMIT)throw Error('Yedek 32 MB’den büyük olamaz.');const next=C.readBackup(await file.text());restoreExternal(next);}catch(error){errorNotice(error.message);}};
+$('backup-file').onchange=async e=>{
+ const file=e.target.files[0],opener=backupFileOpener||focusTarget(document.activeElement);
+ backupFileOpener=null;
+ e.target.value='';
+ if(!file)return;
+ try{
+  if(file.size>C.BACKUP_LIMIT)throw Error('Yedek 32 MB’den büyük olamaz.');
+  const next=C.readBackup(await file.text());
+  restoreExternal(next,opener);
+ }catch(error){showBackupFailure(error.message,opener);}
+};
 $('csv-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{
  if(file.size>5*1024*1024)throw Error('CSV en fazla 5 MB olabilir.');
  const rows=parseStatementCsv(new TextDecoder('utf-8',{fatal:true}).decode(await file.arrayBuffer())),groups=[...new Set(rows.map(r=>JSON.stringify([r.bank,r.card])))];
