@@ -122,7 +122,7 @@ html.navigation-sheet-open {overflow-y:hidden}
   color:var(--accent);
 }
 
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"]) {
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) {
   --bg:var(--shell-bg);
   --panel:var(--shell-panel);
   --line:var(--shell-line);
@@ -133,25 +133,140 @@ body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"]) 
   background:var(--bg);
   color:var(--text);
 }
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"]) > header {
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) > header {
   padding:12px 16px 0;
   border:0;
 }
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"]) .brand strong,
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"]) .brand .mark,
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"]) #quick-add .quick-add-label {display:none}
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"]) .brand small {color:var(--accent);font-weight:750}
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"]) .header-actions button {
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) .brand strong,
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) .brand .mark,
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) #quick-add .quick-add-label {display:none}
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) .brand small {color:var(--accent);font-weight:750}
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) .header-actions button {
   background:var(--shell-panel);
   border-color:var(--shell-line);
   color:var(--accent);
   font-size:1.2rem;
 }
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"]) main {padding-top:0}
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"]) .primary {
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) main {padding-top:0}
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) .primary {
   background:var(--accent);
   border-color:var(--accent);
   color:var(--accent-ink);
+}
+
+.transactions-surface {display:grid;gap:var(--surface-gap);overflow-wrap:anywhere}
+.transactions-surface h1 {margin:0}
+.transaction-actions,.transaction-filter-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr));
+  gap:8px;
+}
+.transaction-actions button:not(.primary),#transaction-show-more {
+  background:var(--shell-panel);
+  border-color:var(--shell-line);
+}
+.transaction-filters,#transactions-list {
+  margin:0;
+  padding:12px;
+  border:1px solid var(--shell-line);
+  border-radius:var(--surface-radius);
+  background:var(--shell-panel);
+}
+.transaction-filters label,#modal[data-variant="transaction"] label {
+  margin:8px 0 5px;
+  font-size:.85rem;
+}
+.transaction-filters .search {margin:0}
+.transaction-filters :is(input,select),#modal[data-variant="transaction"] :is(input:not([type="checkbox"]),select) {
+  min-height:48px;
+  border-color:var(--shell-line);
+}
+.transaction-category-filter {display:grid;align-content:start;gap:8px;grid-column:1 / -1}
+#transaction-count {margin:0 4px;color:var(--shell-muted);font-size:.85rem}
+#transactions-list .transaction {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) fit-content(44%);
+  gap:8px;
+  padding:12px 4px;
+}
+#transactions-list .transaction .amount {max-width:100%;color:var(--shell-text)}
+#transactions-list .transaction small {font-size:.78rem}
+#transactions-list .empty b {font-size:1.1rem}
+#transactions-list .empty p {font-size:.9rem;margin-bottom:0}
+@media (max-width:360px) {
+  #transactions-list .transaction {grid-template-columns:minmax(0,1fr)}
+  #transactions-list .transaction .amount {text-align:start}
+}
+
+#modal[data-variant="transaction"] {
+  --bg:var(--shell-bg);
+  --panel:var(--shell-panel);
+  --line:var(--shell-line);
+  --text:var(--shell-text);
+  --muted:var(--shell-muted);
+  --mint:var(--accent);
+  background:var(--panel);
+  color:var(--text);
+  border-color:var(--line);
+  max-width:calc(100% - 20px);
+  padding:12px;
+  overflow-wrap:anywhere;
+}
+#modal[data-variant="transaction"] .dialog-head {
+  top:-12px;
+  padding:4px 0 10px;
+  align-items:center;
+}
+#modal[data-variant="transaction"] #close[aria-label="Vazgeç"] {
+  width:auto;
+  padding-inline:10px;
+  border-color:var(--line);
+  background:var(--bg);
+  font-size:.85rem;
+}
+#modal[data-variant="transaction"] #fields {display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+#modal[data-variant="transaction"] #form-error:empty {display:none}
+#modal[data-variant="transaction"] #form-error:not(:empty) {
+  padding:10px;
+  border:1px solid currentColor;
+  border-radius:12px;
+  font-size:.9rem;
+}
+#modal[data-variant="transaction"] #submit {
+  bottom:-6px;
+  margin-top:12px;
+  background:var(--accent);
+  border-color:var(--accent);
+  color:var(--accent-ink);
+}
+#modal[data-variant="transaction"] #quick-add-options {
+  display:block;
+  padding:0 10px;
+  border:1px solid var(--line);
+  border-radius:var(--surface-radius);
+}
+#modal[data-variant="transaction"] #quick-add-options .menu-row {min-height:56px}
+.transaction-section,.transaction-summary,.transaction-help {
+  padding:10px;
+  margin:0;
+  background:var(--shell-bg);
+  border:1px solid var(--shell-line);
+  border-radius:14px;
+}
+.transaction-section h3 {margin:0;color:var(--shell-text);font-size:.98rem}
+.transaction-section :is(input:not([type="checkbox"]),select) {background:var(--shell-panel)}
+.transaction-section :is(input[readonly],select:disabled) {color:var(--shell-muted);opacity:1}
+.transaction-section .transaction-help {padding:0;border:0;margin-top:8px}
+.transaction-section #installment-fields .notice {font-size:.8rem}
+.transaction-summary {display:grid;gap:4px}
+.transaction-summary b {font-size:1.5rem;font-variant-numeric:tabular-nums}
+.transaction-summary small,.transaction-help {color:var(--shell-muted);font-size:.85rem}
+.transaction-section #category-advice:empty {display:none}
+.transaction-section #expense-allocation:not(:has(> :not([hidden]))) {margin:0}
+#modal[data-variant="transaction"] [data-delete] {
+  justify-self:start;
+  border-color:var(--line);
+  background:transparent;
 }
 .dashboard-surface > h1 {margin:0 0 var(--surface-gap);font-size:1.85rem;line-height:1.2}
 .dashboard-surface .panel {border-radius:var(--surface-radius)}

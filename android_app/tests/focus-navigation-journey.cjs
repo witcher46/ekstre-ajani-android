@@ -705,6 +705,116 @@ async function checkReviewCheckbox(browser){
   }
 }
 
+async function checkTransactionForms(browser){
+  const fixture=require('./fixtures/android-0.2.0.json');
+  const wallet={...fixture,transactions:[],statements:[]};
+  const page=await browser.newPage({timezoneId:'UTC',viewport:{width:390,height:740},hasTouch:true});
+  try{
+    page.setDefaultTimeout(5000);
+    const errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    await serveWallet(page);
+    await page.addInitScript(wallet=>localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet)),wallet);
+    await page.goto('https://wallet.test/');
+    await openRoute(page,'transactions');
+    const read=()=>page.evaluate(()=>localStorage.getItem('ekstre-android-v1'));
+    const before=await read();
+    const search=page.getByRole('searchbox',{name:'İşlemlerde ara'});
+    await search.fill('Sentetik');
+    const add=page.locator('[data-action=addTransaction]');
+    const form=page.getByRole('dialog',{name:'Gider ekle'});
+    await add.click();
+    await form.getByLabel('Açıklama',{exact:true}).fill('Sentetik fiş');
+    await form.getByLabel('Tutar (TL)',{exact:true}).fill('geçersiz');
+    const save=form.getByRole('button',{name:'Kaydet',exact:true});
+    await save.click();
+    assert(await form.getByRole('alert').evaluate(el=>el===document.activeElement&&!!el.textContent));
+    assert.equal(await read(),before,'invalid amount leaves the snapshot unchanged');
+    await form.getByRole('button',{name:'Vazgeç',exact:true}).click();
+    assert.equal(await read(),before,'cancel leaves the snapshot unchanged');
+    assert.equal(await search.inputValue(),'Sentetik');
+    assert(await add.evaluate(el=>el===document.activeElement));
+
+    await add.click();
+    await form.getByLabel('Açıklama',{exact:true}).fill('Sentetik fiş');
+    await form.getByLabel('Tutar (TL)',{exact:true}).fill('12,37');
+    await save.dblclick();
+    const saved=await read();
+    const rows=JSON.parse(saved).transactions;
+    assert.equal(rows.length,1,'double save creates one transaction');
+    assert.equal(rows[0].amount,1237);
+    assert.equal(rows[0].kind,'expense');
+    assert.equal(await search.inputValue(),'Sentetik');
+    await page.locator('[data-edit]').click();
+    const detail=page.getByRole('dialog',{name:'İşlem ayrıntısı'});
+    const confirmation=page.waitForEvent('dialog');
+    const deletePress=detail.getByRole('button',{name:'İşlemi sil',exact:true}).click();
+    const prompt=await confirmation;
+    assert.equal(prompt.type(),'confirm');
+    await prompt.dismiss();
+    await deletePress;
+    assert.equal(await read(),saved,'canceling removal leaves the snapshot unchanged');
+    assert(await detail.isVisible());
+    await detail.getByRole('button',{name:'Vazgeç',exact:true}).click();
+
+    await page.locator('#quick-add').click();
+    await page.getByRole('button',{name:/^Kart Borcu Ödemesi/}).click();
+    const payment=page.getByRole('dialog',{name:'Kart ödemesi kaydet',exact:true});
+    assert.match(await payment.textContent(),/Daha önce yaptığın ödemeyi/);
+    await payment.locator('#f-account').selectOption('synthetic-bank');
+    await payment.locator('#f-amount').fill('2,11');
+    const savePayment=payment.getByRole('button',{name:'Ödemeyi kaydet',exact:true});
+    await savePayment.scrollIntoViewIfNeeded();
+    const {x,y,width,height}=await savePayment.boundingBox();
+    for(let i=0;i<2;i++)await page.touchscreen.tap(x+width/2,y+height/2);
+    await payment.waitFor({state:'hidden'});
+    assert.equal(await page.locator('dialog[open]').count(),0,'repeated taps must not reopen a dialog');
+    const after=JSON.parse(await read()).transactions;
+    assert.equal(after.length,2,'double save creates one payment');
+    assert.deepEqual(after.map(({kind,amount})=>[kind,amount]),[['expense',1237],['payment',211]]);
+    assert.equal(after[1].account,'synthetic-bank');
+    assert.equal(after[1].target,'synthetic-card');
+
+    const screenshots=process.env.SLICE3_SCREENSHOTS;
+    if(screenshots)fs.mkdirSync(screenshots,{recursive:true});
+    const capture=async(name,width)=>{
+      await settle(page);
+      const overflow=await page.evaluate(()=>{
+        const open=document.querySelector('dialog[open]');
+        return [document.documentElement,open].filter(el=>el&&el.scrollWidth>el.clientWidth).map(el=>{
+          const {left,right}=el.getBoundingClientRect();
+          return {element:el.id||el.tagName,client:el.clientWidth,scroll:el.scrollWidth,
+            descendants:Array.from(el.querySelectorAll('*')).filter(child=>{
+              const rect=child.getBoundingClientRect();
+              return rect.width>0&&(rect.right>right||rect.left<left||child.scrollWidth>child.clientWidth+1);
+            }).slice(0,12).map(child=>[child.id||child.tagName,child.clientWidth,child.scrollWidth])};
+        });
+      });
+      if(screenshots)await page.screenshot({path:path.join(screenshots,name+'-'+width+'-200.png')});
+      assert.deepEqual(overflow,[],name+' fits at '+width+' CSS pixels with 200% text');
+    };
+    await search.clear();
+    await page.evaluate(()=>document.documentElement.style.fontSize='200%');
+    for(const width of [390,320]){
+      await page.setViewportSize({width,height:780});
+      await page.evaluate(()=>scrollTo(0,0));
+      await capture('islemler',width);
+      await search.fill('Eşleşmeyen sentetik arama');
+      await page.locator('#transactions-list .empty').scrollIntoViewIfNeeded();
+      await capture('bos-sonuc',width);
+      await search.clear();
+      await page.locator('#quick-add').click();
+      await capture('hizli-ekle',width);
+      await page.keyboard.press('Escape');
+      await page.locator('[data-edit="'+rows[0].id+'"]').click();
+      await capture('islem-ayrintisi',width);
+      await page.keyboard.press('Escape');
+    }
+    assert.deepEqual(errors,[]);
+    console.log('Transaction forms validated, canceled and saved exact amounts once through the UI');
+  }finally{await page.close();}
+}
+
 async function checkDialog(page,opener,expectedTitle){
   await opener.focus();
   await page.keyboard.press('Enter');
@@ -734,6 +844,10 @@ async function checkDialog(page,opener,expectedTitle){
       await checkSlice1();
       return;
     }
+    if(process.argv.includes('--slice3')){
+      await checkTransactionForms(browser);
+      return;
+    }
     if(process.argv.includes('--u10')){
       await checkReviewCheckbox(browser);
       return;
@@ -747,6 +861,7 @@ async function checkDialog(page,opener,expectedTitle){
     if(onlyIncomePlans)return;
     await checkSlice1();
     await checkTransactionEmptyStates(browser);
+    await checkTransactionForms(browser);
     await checkShowMore(browser);
     await checkReviewCheckbox(browser);
     const failures=[];
