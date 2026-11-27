@@ -53,31 +53,31 @@ function upcoming(ctx) {
 
 const expensePercent = new Intl.NumberFormat('tr-TR',{style:'percent',maximumFractionDigits:1});
 
-function expenseBreakdown(ctx,rows) {
-  const totals = new Map();
-  let total=0;
-  for (const row of rows) {
-    if (row.kind !== 'expense' || row.amount <= 0) continue;
-    for(const {category,amount} of C.expenseCategoryAmounts(ctx.state,row)){
-      totals.set(category,C.addCents(totals.get(category) || 0,amount));
-    }
-    total=C.addCents(total,row.amount);
-  }
-  const categories=[...totals].sort((a,b)=>C.compareCents(b[1],a[1])||a[0].localeCompare(b[0],'tr'));
-  const totalCents=BigInt(total);
-  return `<section class="panel expense-breakdown" aria-labelledby="expense-breakdown-title">
-    <h2 id="expense-breakdown-title">Kategori bazlı gider dağılımı</h2>
-    ${total?`<p class="expense-total"><span>Brüt gider</span> <strong>${amount(ctx,total)}</strong></p>
-    <ul class="expense-category-list">${categories.map(([category,value])=>{
-      const permille=Number((BigInt(value)*1000n+totalCents/2n)/totalCents);
-      return `<li><button type="button" class="expense-category" data-expense-category="${ctx.esc(category)}">
-        <span class="expense-category-values"><span class="expense-category-name">${ctx.esc(category||'Kategorisiz')}</span><span class="expense-category-amount">${amount(ctx,value)}</span><span class="expense-category-share">${permille?expensePercent.format(permille/1000):'<span aria-label="Yüzde 0,1’den az">&lt;%0,1</span>'}</span></span>
-        <meter min="0" max="1000" value="${permille}" aria-hidden="true"></meter>
-      </button></li>`;
-    }).join('')}</ul>`:noRows('Seçili ayda gider kaydı yok.')}
-  </section>`;
+function sharePermille(spent,total) {
+  if (!total) return 0;
+  const denominator=BigInt(total);
+  return Number((BigInt(spent)*1000n+denominator/2n)/denominator);
 }
 
+function shareLabel(spent,permille) {
+  return spent && !permille ? '<span aria-label="Yüzde 0,1’den az">&lt;%0,1</span>' : expensePercent.format(permille/1000);
+}
+
+function expenseBreakdown(ctx,{spent,categoryBreakdown}) {
+  const categories=categoryBreakdown.filter(row=>row.spent>0)
+    .sort((a,b)=>C.compareCents(b.spent,a.spent)||a.name.localeCompare(b.name,'tr'));
+  return `<section class="panel expense-breakdown" aria-labelledby="expense-breakdown-title">
+    <h2 id="expense-breakdown-title">Kategori bazlı gider dağılımı</h2>
+    ${spent?`<p class="expense-total"><span>Brüt gider</span> <strong>${amount(ctx,spent)}</strong></p>
+    <ul class="expense-category-list" role="list">${categories.slice(0,3).map(({name,spent:value})=>{
+      const permille=sharePermille(value,spent);
+      return `<li><button type="button" class="expense-category" data-expense-category="${ctx.esc(name)}">
+        <span class="expense-category-values"><span class="expense-category-name">${ctx.esc(name||'Kategorisiz')}</span><span class="expense-category-amount">${amount(ctx,value)}</span><span class="expense-category-share">${shareLabel(value,permille)}</span></span>
+        <meter min="0" max="1000" value="${permille}" aria-hidden="true"></meter>
+      </button></li>`;
+    }).join('')}</ul>${categories.length>3?'<p class="notice">Brüt harcamaya göre ilk 3 kategori</p>':''}`:noRows('Seçili ayda gider kaydı yok.')}
+  </section>`;
+}
 const statementShortcut = '<button data-page="import">'+uiIcon('import')+' Ekstre yükle</button>';
 
 export function homeView(ctx) {
@@ -101,9 +101,9 @@ export function homeView(ctx) {
       </div></div>
       <div class="panel month-summary"><dl class="dashboard-totals">${compactStat(ctx,'income','Gelir',overview.income)}${compactStat(ctx,'netExpense','Net gider',overview.netExpense)}${compactStat(ctx,'margin','Gelir − gider',overview.margin)}</dl><p class="notice">İadeler giderden düşer. Kart ödemeleri ve transferler gider sayılmaz.</p></div>
     </section>
+    ${expenseBreakdown(ctx,overview)}
     ${reviewWarning(ctx)}${sourceWarning(ctx)}
     <section class="dashboard-section" aria-labelledby="recent-heading"><div class="section-heading"><h2 id="recent-heading">Son hareketler</h2><button class="section-link" data-page="transactions">Tüm işlemler ${uiIcon('next')}</button></div><div class="panel dashboard-list dashboard-recent">${transactionList(recent)}</div></section>
-    ${expenseBreakdown(ctx,monthRows)}
     ${overview.plannedIncome ? `<div class="panel planned-income"><div><strong>Bu ay planlanan gelir</strong><p class="notice">Alındı olarak onaylanana kadar bakiyeye ve gelire eklenmez.</p><b>${amount(ctx,overview.plannedIncome)}</b></div><button data-page="incomePlans">Gelir planları</button></div>` : ''}
     ${quickActions()}
     <div class="actions"><button data-page="incomePlans">Gelir planları</button></div>
@@ -285,58 +285,119 @@ const reportMetrics = [['income','Gelir'],['spent','Toplam harcama'],['refunds',
 const reportMonthFormat = new Intl.DateTimeFormat('tr-TR',{month:'long',year:'numeric',timeZone:'UTC'});
 const reportMonthLabel = month => reportMonthFormat.format(new Date(month+'-01T12:00:00Z'));
 
-function monthlyChart(ctx,months) {
-  const max = months.reduce((largest,m) => [m.income,m.spent].reduce((a,b) => C.compareCents(a,b)>=0?a:b,largest),1);
-  return `<section class="panel"><h2>Aylık gelir ve harcama</h2>
-    <div class="report-grid">${months.map(m => `<article class="report-chart-month"><h3>${ctx.esc(reportMonthLabel(m.month))}</h3>
-      <div class="report-bars" aria-hidden="true"><progress max="${max}" value="${m.income}"></progress><progress max="${max}" value="${m.spent}"></progress></div>
-      <dl class="report-values">${detail(ctx,'Gelir',m.income,true)}${detail(ctx,'Harcama',m.spent,true)}</dl>
-    </article>`).join('')}</div></section>`;
+
+const reportMonthShort = new Intl.DateTimeFormat('tr-TR',{month:'short',timeZone:'UTC'});
+const reportHasActivity = m => Boolean(m.categoryBreakdown.length || m.income || m.cashIn || m.cashOut || m.cardPayments || m.transfers);
+
+function monthlyChart(ctx,months,selectedMonth,{category}={}) {
+  const values=months.map(m=>category===undefined
+    ? (reportHasActivity(m)?m.netExpense:null)
+    : m.categoryBreakdown.find(row=>row.name===category)?.net??null);
+  const max=values.reduce((largest,value)=>{
+    const magnitude=C.absCents(value??0);
+    return magnitude>largest?magnitude:largest;
+  },1);
+  const hasNegative=values.some(value=>value<0);
+  const column=(value,negative=false)=>`<progress max="1000" value="${sharePermille(value,max)}" class="report-column${negative?' negative':''}"></progress>`;
+  return `<section class="report-trend" aria-labelledby="report-trend-title">
+    <h2 id="report-trend-title">Aylık değişim</h2>
+    <p class="report-trend-caption">Son ${months.length} ay · Net gider · ${ctx.esc(reportMonthLabel(months[0].month))} – ${ctx.esc(reportMonthLabel(months.at(-1).month))}</p>
+    <div class="report-chart-scroll" tabindex="0" role="region" aria-label="Aylık net gider, ayları görmek için yatay kaydır">
+      <ul class="report-chart" role="list">${months.map(({month},index)=>{
+        const value=values[index];
+        const selected=month===selectedMonth;
+        const shortMonth=reportMonthShort.format(new Date(month+'-01T12:00:00Z'));
+        return `<li data-trend-month="${month}"${selected?' aria-current="date"':''}>
+          <span class="report-column-positive" aria-hidden="true">${value>0?column(value):''}</span>
+          ${hasNegative?`<span class="report-column-negative" aria-hidden="true">${value<0?column(-value,true):''}</span>`:''}
+          <time datetime="${month}"><span class="sr-only">${ctx.esc(reportMonthLabel(month))}</span><span aria-hidden="true">${ctx.esc(shortMonth)}</span></time>
+          <span class="report-column-value">${value===null?'<span class="sr-only">Kayıt yok</span><span aria-hidden="true">—</span>':C.formatMoney(value)}</span>
+        </li>`;
+      }).join('')}</ul>
+    </div>
+    ${values.includes(null)?'<p class="report-trend-caption" aria-hidden="true">— Kayıt yok</p>':''}
+  </section>`;
 }
 
 function reportTransactionList(ctx,rows,id) {
   return ctx.transactionList(newest(rows))+(rows.length>ctx.listLimit ? `<button type="button" data-action="more" aria-controls="${id}">Daha fazla göster</button>` : '');
 }
 
-function reportCategories(ctx,report,accountId) {
-  const {state,esc,reportFilters} = ctx;
-  const rows = report.categories;
-  const category = rows.find(row => row.name===reportFilters.category);
-  const maximum = rows.reduce((max,row) => C.compareCents(row.spent,max)>0?row.spent:max,1);
-  const selection = select('report-category','Aylık değişimini ve işlemlerini görmek istediğin kategori',
-    options([['','Kategori seç'],...rows.map(row=>['category:'+row.name,row.name||'Kategorisiz'])],category?'category:'+category.name:''));
-  return `<section class="panel"><h2>Kategori dağılımı</h2>
-    ${rows.length ? `<p class="notice">Seçilen aralık · toplam harcamaya göre sıralı</p>
-      <div class="report-grid">${rows.map(row=>`<article class="report-category"><h3>${esc(row.name||'Kategorisiz')}</h3>
-        <progress class="bar" max="${maximum}" value="${row.spent}" aria-hidden="true"></progress>
-        <dl class="report-values">${detail(ctx,'Harcama',row.spent,true)}${detail(ctx,'İade',row.refunds,true)}${detail(ctx,'Net gider',row.net,true)}</dl>
-      </article>`).join('')}</div>${selection}` : noRows('Bu aralıkta kaydedilmiş gider veya iade yok.')}
-    ${category ? `<h3>${esc(category.name||'Kategorisiz')} · aylık değişim</h3>
-      <div class="report-grid">${report.months.map(m=>{
-        const entry=m.categoryBreakdown.find(row=>row.name===category.name);
-        return `<article class="report-category-month"><h4>${esc(reportMonthLabel(m.month))}</h4>
-          <dl class="report-values">${detail(ctx,'Harcama',entry?.spent??0,true)}${detail(ctx,'İade',entry?.refunds??0,true)}${detail(ctx,'Net gider',entry?.net??0,true)}</dl></article>`;
-      }).join('')}</div>
-      <h3>Kategori işlemleri</h3><div id="report-category-transactions">${reportTransactionList(ctx,reportRows(state,report.months.map(m=>m.month),{accountId,category:category.name}),'report-category-transactions')}</div>` : ''}
+function reportSpendingValues(ctx,{spent,refunds,net}) {
+  return `<dl class="dashboard-totals">${detail(ctx,'Brüt harcama',spent,true)}${detail(ctx,'İadeler',refunds,true)}${detail(ctx,'Net gider',net,true)}</dl>`;
+}
+
+function reportCategories(ctx,current) {
+  const {spent,refunds,netExpense,categoryBreakdown}=current;
+  return `<section class="panel report-distribution" aria-labelledby="report-distribution-title">
+    <h2 id="report-distribution-title">Kategori dağılımı</h2>
+    ${categoryBreakdown.length?`${reportSpendingValues(ctx,{spent,refunds,net:netExpense})}
+      <p class="notice">Brüt harcamaya göre sıralı</p>
+      <ol class="report-category-list" role="list">${categoryBreakdown.map(row=>{
+        const permille=sharePermille(row.spent,spent);
+        return `<li><button type="button" class="expense-category report-category-button" data-report-category="${ctx.esc(row.name)}">
+          <span class="report-category-heading"><strong>${ctx.esc(row.name||'Kategorisiz')}</strong><span class="expense-category-share">${shareLabel(row.spent,permille)} brüt pay</span>${uiIcon('next')}</span>
+          <meter min="0" max="1000" value="${permille}" aria-hidden="true"></meter>
+          <span class="report-category-amounts"><span>Brüt <b>${amount(ctx,row.spent)}</b></span><span>İade <b>${amount(ctx,row.refunds)}</b></span><span>Net <b>${amount(ctx,row.net)}</b></span></span>
+        </button></li>`;
+      }).join('')}</ol>`:noRows('Seçili ayda bu kapsamda gider veya iade kaydı yok.')}
   </section>`;
 }
 
-export function reportsView(ctx) {
-  const {state,esc,periodControl,reportFilters} = ctx;
+function reportControls(ctx,accountId) {
+  const range=select('report-range','Rapor aralığı',options([['6','Son 6 ay'],['12','Son 12 ay']],String(ctx.reportFilters.months)));
+  const account=select('report-account','Rapor hesabı',options([['','Tüm hesaplar'],...ctx.state.accounts.map(a=>[a.id,a.name])],accountId));
+  return `<div class="report-grid report-controls"><div>${range}</div><div><label for="period">Seçili ay</label>${ctx.periodControl}</div><div>${account}</div></div>`;
+}
+
+function reportHero(ctx,month,net,caption,content='') {
+  return `<section class="panel dashboard-hero report-hero" aria-label="Seçili ayın net gideri">
+    <div class="dashboard-hero-caption"><small>${ctx.esc(reportMonthLabel(month))} · Net gider</small><small>${ctx.esc(caption)}</small></div>
+    <div class="dashboard-amount">${net===null?'Kayıt yok':amount(ctx,net)}</div>${content}
+  </section>`;
+}
+
+function reportContext(ctx) {
+  const {state,period,reportFilters} = ctx;
   const selectedAccount = state.accounts.find(account => account.id===reportFilters.accountId);
   const accountId = selectedAccount?.id??'';
-  const report = advancedReports(state,ctx.period,{months:reportFilters.months,accountId});
+  const report = advancedReports(state,period,{months:reportFilters.months,accountId});
+  const trendEnd=C.today().slice(0,7);
+  const trend=trendEnd===period?report:advancedReports(state,trendEnd,{months:reportFilters.months,accountId});
+  return {selectedAccount,accountId,report,trend};
+}
+
+export function reportCategoryView(ctx,category) {
+  const {state,period,esc}=ctx;
+  const {accountId,report,trend}=reportContext(ctx);
+  const name=category||'Kategorisiz';
+  const entry=report.current.categoryBreakdown.find(row=>row.name===category);
+  const rows=reportRows(state,[period],{accountId,category});
+  return shell(`<div class="advanced-reports">
+    ${renderBackLink(ctx.backTitle??'Raporlar')}<h1>${esc(name)}</h1>
+    ${reportControls(ctx,accountId)}
+    ${reportHero(ctx,period,entry?.net??null,name,entry?reportSpendingValues(ctx,entry):'')}
+    <div class="panel">${monthlyChart(ctx,trend.months,period,{category})}</div>
+    <section class="panel" aria-labelledby="report-category-transactions-title">
+      <h2 id="report-category-transactions-title">Kategori işlemleri</h2>
+      <p class="notice">${esc(reportMonthLabel(period))}</p>
+      <div id="report-category-transactions">${rows.length?reportTransactionList(ctx,rows,'report-category-transactions'):noRows('Bu kapsamda kategori işlemi yok.')}</div>
+    </section>
+  </div>`);
+}
+
+export function reportsView(ctx) {
+  const {state,esc,reportFilters} = ctx;
+  const {selectedAccount,accountId,report,trend}=reportContext(ctx);
   const {current,previous,totals,changes} = report;
-  const periodSelect = select('report-range','Rapor aralığı',options([['6','Son 6 ay'],['12','Son 12 ay']],String(reportFilters.months)));
-  const accountSelect = select('report-account','Rapor hesabı',options([['','Tüm hesaplar'],...state.accounts.map(a=>[a.id,a.name])],accountId));
   return shell(`<div class="advanced-reports"><h1>Raporlar</h1>
-    <p class="lead">Takvim ayı · taksitler ait oldukları ayda</p>
-    <div class="report-grid report-controls"><div><label for="period">Bitiş ayı</label>${periodControl}</div><div>${periodSelect}</div><div>${accountSelect}</div></div>
+    ${reportControls(ctx,accountId)}
+    ${reportHero(ctx,current.month,reportHasActivity(current)?current.netExpense:null,'Takvim ayı',monthlyChart(ctx,trend.months,current.month))}
+    ${reportCategories(ctx,current)}
     <section class="panel"><h2>${reportFilters.months} aylık toplam</h2>
       <p class="notice">${esc(reportMonthLabel(report.months[0].month))} – ${esc(reportMonthLabel(current.month))}</p>
       <div class="summary-grid">${reportMetrics.map(([key,label])=>metric(ctx,'range-'+key,label,totals[key])).join('')}</div></section>
-    ${monthlyChart(ctx,report.months)}
-    ${reportCategories(ctx,report,accountId)}
+
     <section class="panel"><h2>Gelir ve gider · ${esc(reportMonthLabel(current.month))}</h2>
       <div class="summary-grid">${reportMetrics.map(([key,label])=>metric(ctx,key,label,current[key])).join('')}</div>
       <h3>${esc(reportMonthLabel(previous.month))} ayına göre değişim</h3>

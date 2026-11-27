@@ -11,7 +11,7 @@ const MORE_ITEMS=[
   ['import','Ekstre','Ekstre yükle ve geçmişi gör'],
   ['categories','Kategoriler','Gelir, gider ve satıcı kuralları'],
 ];
-const SUBPAGE_PARENT=Object.freeze({account:'wallet',balanceReview:'wallet',balanceApprovalHistory:'wallet',balanceApprovalDetail:'wallet'});
+const SUBPAGE_PARENT=Object.freeze({reportCategory:'reports',account:'wallet',balanceReview:'wallet',balanceApprovalHistory:'wallet',balanceApprovalDetail:'wallet'});
 const ICON_PATHS={
   home:'M3 11 12 4l9 7v9h-6v-6H9v6H3z',
   wallet:'M3 7h18v11H3z M3 10h18 M15 15h3',

@@ -375,8 +375,8 @@ async function checkShowMore(browser){
     ]){
       await goHome();
       await page.locator('main [data-page=reports]').click();
-      await page.locator('#f-report-category').selectOption('category:'+category);
-      await page.locator('#report-movements-toggle').click();
+      if(scope==='#report-category-transactions')await page.locator('[data-report-category]').filter({hasText:category}).click();
+      else await page.locator('#report-movements-toggle').click();
       await expand(name,page.locator(scope),key,ids,150);
     }
 
