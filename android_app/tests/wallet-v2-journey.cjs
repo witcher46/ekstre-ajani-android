@@ -308,7 +308,7 @@ async function ambiguousStatementPaymentJourney(browser,{bankFirst=false}={}){
     await page.getByText(/1 hareket eşleşme incelemesinde/).waitFor();
 
     await page.locator('.card-statement-link').click();
-    assert.match(await page.locator('dt').getByText('Ödeme',{exact:true}).locator('..').innerText(),/80,00/);
+    assert.match(await page.locator('.statement-totals dt').getByText('Kart ödemesi',{exact:true}).locator('..').innerText(),/80,00/);
     await page.getByText('Bu ekstreyle ilişkili olası eşleşmeler inceleme kutusunda.').waitFor();
     await page.locator('nav [data-page=home]').click();
     await page.locator('main [data-page=reports]').click();

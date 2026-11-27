@@ -1,7 +1,7 @@
 import * as C from './core.mjs';
 import * as W from './wallet.mjs';
 import {advancedReports,reportRows} from './reports.mjs';
-import {options,select} from './ui/form-controls.mjs';
+import {escapeHtml as esc,options,select} from './ui/form-controls.mjs';
 import {renderBalanceAccount} from './ui/balance-review.mjs';
 import {renderBackLink,uiIcon} from './ui/navigation.mjs';
 
@@ -475,7 +475,7 @@ function statementTotals(rows) {
 }
 
 function totalsList(ctx,totals,debt=undefined) {
-  return `<dl class="statement-totals">${detail(ctx,'Harcama',totals.expenses,true)}${detail(ctx,'Ödeme',totals.payments,true)}${detail(ctx,'İade / indirim',totals.refunds,true)}${debt!==undefined?detail(ctx,'Dönem borcu',debt,true):''}</dl>`;
+  return `<dl class="statement-totals">${detail(ctx,'Brüt harcama',totals.expenses,true)}${detail(ctx,'Kart ödemesi',totals.payments,true)}${detail(ctx,'İade / indirim',totals.refunds,true)}${debt!==undefined?detail(ctx,'Dönem borcu',debt,true):''}</dl>`;
 }
 
 function statementDateWarning(statement,rows) {
@@ -501,6 +501,7 @@ function statementCard(ctx,statement,rows,pending) {
   return `<article class="statement-card">
     <div class="statement-card-heading"><div><h3>${esc(statement.bank || 'Banka bilinmiyor')} <span>· ${esc(statement.period)}</span></h3><p>${esc(accountName(state,statement.account))}</p></div><span class="statement-status ${status.tone||''}">${status.label}</span></div>
     <p class="statement-meta">${esc(rows.length)} hareket${statement.imported?` · Aktarım ${esc(statement.imported)}`:''}</p>
+    ${status.reason?`<p class="statement-meta">${status.reason}</p>`:''}
     ${totalsList(ctx,statementTotals(rows),statement.debt??null)}
     <button type="button" class="statement-detail-button" data-statement-view="${esc(statement.id)}" aria-label="${esc(`Detayı aç · ${statement.bank||'Ekstre'} · ${statement.period} · ${accountName(state,statement.account)}`)}">Detayı aç</button>
   </article>`;
@@ -519,10 +520,9 @@ export function statementView(ctx,id) {
   const rows=rowsByStatement.get(id) || [];
   const pending=underReview.has(id);
   const status=statementStatus(statement,pending,rows.length);
-  return shell(`${back}
-    <h1>${title}</h1>
-    <p class="lead">${ctx.esc(accountName(ctx.state,statement.account))}</p>
-    <section class="panel"><h2>Ekstre bilgileri</h2><p class="statement-status ${status.tone||''}">${status.label}</p>
+  return shell(`<div class="statement-surface">${back}
+    <header class="statement-heading"><h1>${title}</h1><p>${ctx.esc(accountName(ctx.state,statement.account))}</p></header>
+    <section class="panel statement-overview"><h2>Ekstre bilgileri</h2><p class="statement-status ${status.tone||''}">${status.label}</p>
       ${status.reason?`<p>${status.reason}</p>`:''}
       ${statementDateWarning(statement,rows)}
       ${totalsList(ctx,statementTotals(rows),statement.debt??null)}
@@ -530,12 +530,71 @@ export function statementView(ctx,id) {
       <div class="actions"><button data-card-view="${ctx.esc(statement.account)}">Kredi kartını aç</button>${pending?'<button data-page="review">İnceleme kutusu</button>':''}</div>
     </section>
     <section class="panel" id="statement-transactions"><h2>Belgedeki hareketler · ${ctx.esc(rows.length)}</h2>
-      ${rows.length?ctx.transactionList(newest(rows)):noRows('Bu ekstreye bağlı hareket kaydı yok.')}
+      ${rows.length?ctx.transactionList(newest(rows),{statementSource:true}):noRows('Bu ekstreye bağlı hareket kaydı yok.')}
       ${rows.length>ctx.listLimit?'<button type="button" data-action="more" aria-controls="statement-transactions">Daha fazla göster</button>':''}
-    </section>`);
+    </section></div>`);
 }
 
-export function importView(ctx,pending) {
+export function statementSource(source) {
+  return source?`<details class="raw-source"><summary>Orijinal banka açıklaması</summary><p>${esc(source)}</p></details>`:'';
+}
+
+const movementGroups = [['expense','Harcamalar'],['cardPayment','Ödemeler'],['refund','İadeler ve indirimler']];
+const csvKinds = {harcama:'expense',odeme:'cardPayment',indirim:'refund'};
+
+function importRow(ctx,row,amountValue,extra='') {
+  const {esc}=ctx;
+  return `<article class="import-row"><div class="statement-movement-row"><div>
+      <strong>${esc(row.desc)}</strong><small>${esc(row.date)}${row.category?' · '+esc(row.category):''}${row.installment?' · '+esc(row.installment):''}</small>
+    </div><b>${amount(ctx,amountValue)}</b></div>${extra}</article>`;
+}
+
+function pdfMovementGroups(ctx,rows) {
+  return movementGroups.map(([kind,label])=>{
+    const members=rows.map((row,index)=>({row,index})).filter(({row})=>row.kind===kind);
+    if(!members.length)return '';
+    return `<section class="statement-movement-group"><h4>${label} · ${members.length}</h4>${members.map(({row,index})=>
+      importRow(ctx,row,row.amount,statementSource(row.sourceDesc??row.desc)+
+        (kind==='cardPayment'?'':ctx.importCategoryOption(row.desc,row.category,index,ctx.importDraft.suggestions.get(index))))).join('')}</section>`;
+  }).join('');
+}
+
+function cardPicker(id,label,cards,{selected=cards[0],name,displayId}={}) {
+  return `<label for="${id}">${esc(label)}</label><div class="preview-select">
+    <select id="${id}" ${name?`name="${name}" data-csv-target`:''} ${cards.length?'':'disabled'}>${cards.length?
+      options(cards.map(card=>[card.id,card.name]),selected?.id):'<option value="">Önce kredi kartı ekle</option>'}</select>
+    <span class="preview-select-value" aria-hidden="true"><span ${displayId?`id="${displayId}"`:''}>${esc(selected?.name??'Önce kredi kartı ekle')}</span><span>⌄</span></span>
+  </div>`;
+}
+
+export function csvImportPreview(ctx,rows,categoryChoices) {
+  const byCard=new Map();
+  for(const row of rows){
+    const key=JSON.stringify([row.bank,row.card]);
+    if(!byCard.has(key))byCard.set(key,[]);
+    byCard.get(key).push({...row,kind:csvKinds[row.kind],amount:C.absCents(row.cents)});
+  }
+  const cards=ctx.state.accounts.filter(account=>account.type==='card');
+  return `<div class="csv-import-preview"><p class="statement-file-type">Masaüstü CSV’si</p>
+    <p class="csv-read-count">${rows.length} hareket okundu.</p>
+    <h3>Kaynak kartları eşleştir</h3>${[...byCard].map(([key,group],index)=>{
+      const periods=[...new Set(group.map(row=>row.period))].sort();
+      const period=periods.length>1?`${periods[0]} – ${periods.at(-1)}`:periods[0];
+      return `<section class="csv-source-card">
+        <p class="statement-period">${esc(period)} · ${group.length} hareket</p>
+        ${cardPicker(`f-card-${index}`,JSON.parse(key).join(' · '),cards,{name:`card-${index}`})}
+        ${totalsList(ctx,statementTotals(group))}
+        <details class="csv-source-rows"><summary>Okunan hareketler · ${group.length}</summary>
+          ${group.slice(0,5).map(row=>importRow(ctx,row,row.amount,
+            `<small>${kindNames[row.kind]}</small>`)).join('')}
+          ${group.length>5?'<p class="notice">Önizleme ilk 5 hareketi gösterir.</p>':''}
+        </details>
+      </section>`;
+    }).join('')}${categoryChoices?`<section><h3>Kategori önerileri</h3>${categoryChoices}</section>`:''}
+    <p class="notice">Daha önce işlenen satırlar atlanır. Olası çakışmalar incelemeye alınır.</p></div>`;
+}
+
+export function importView(ctx,pending,failure) {
   const {state,esc} = ctx;
   let preview = '';
   if (pending) {
@@ -547,28 +606,39 @@ export function importView(ctx,pending) {
     const cards = state.accounts.filter(a => a.type === 'card');
     const selectedCard = cards.find(a=>a.id===ctx.importDraft.account) || cards[0];
     preview = `<section class="panel statement-preview" aria-labelledby="statement-preview-title">
-      <div class="preview-heading"><h2 id="statement-preview-title">Aktarım önizlemesi</h2><p>${esc(pending.bank || 'Kaynak banka bilinmiyor')} · ${esc(pending.period)} · ${esc(rows.length)} hareket</p></div>
-      ${totalsList(ctx,pending.reconciliation?.totals || statementTotals(rows))}
+      <div class="preview-heading"><p class="statement-file-type">PDF ekstresi</p><h2 id="statement-preview-title" tabindex="-1">Aktarım önizlemesi</h2>
+        <p class="statement-period">${esc(pending.bank || 'Kaynak banka bilinmiyor')} · ${esc(pending.period)} · ${esc(rows.length)} hareket</p></div>
       <div class="preview-card-controls">
-        <div><label for="import-account">Hedef kredi kartı</label>
-          <div class="preview-select">
-            <select id="import-account" ${!cards.length ? 'disabled' : ''}>${cards.length ? cards.map(a => `<option value="${esc(a.id)}" ${a===selectedCard?'selected':''}>${esc(a.name)}</option>`).join('') : '<option value="">Önce kredi kartı ekle</option>'}</select>
-            <span class="preview-select-value" aria-hidden="true"><span id="import-account-display">${esc(selectedCard?.name ?? 'Önce kredi kartı ekle')}</span><span>⌄</span></span>
-          </div>
-        </div>
+        <div>${cardPicker('import-account','Hedef kredi kartı',cards,{selected:selectedCard,displayId:'import-account-display'})}</div>
         <button type="button" data-action="addImportCard">+ Kart ekle</button>
       </div>
+      <h3 class="statement-totals-title">Okunan hareketlerin toplamı</h3>
+      ${totalsList(ctx,rows.length?(pending.reconciliation?.totals||statementTotals(rows)):{})}
+      ${needsAcknowledgement?'<p class="notice">Bu tutarlar okunan satırlara aittir. Ekstre toplamı için mutabakat durumunu kontrol et.</p>':''}
       ${reconciliationPreview(ctx,pending)}
       ${statementDateWarning(pending,rows)}
-      <div class="preview-movements"><h3 id="preview-movement-title">Okunan hareketler</h3><div class="preview import-preview" role="region" aria-labelledby="preview-movement-title" tabindex="0">${rows.map((r,i) => `<article class="import-row"><div class="row"><div class="left"><strong>${esc(r.desc)}</strong><small>${esc(r.date)} · ${esc(kindNames[r.kind] || r.kind)}<br>${esc(r.category || 'Kategori belirlenmedi')}${r.installment ? ' · '+esc(r.installment) : ''}</small></div><b>${amount(ctx,r.amount)}</b></div><details class="raw-source"><summary>Orijinal banka açıklaması</summary><p>${esc(r.sourceDesc ?? r.desc)}</p></details>${['expense','refund'].includes(r.kind)?ctx.importCategoryOption(r.desc,r.category,i,ctx.importDraft.suggestions.get(i)):''}</article>`).join('') || noRows('Okunmuş hareket yok.')}</div></div>
+      <div class="preview-movements"><h3 id="preview-movement-title">Okunan hareketler</h3><div class="preview import-preview" role="region" aria-labelledby="preview-movement-title" tabindex="0">
+        ${pdfMovementGroups(ctx,rows) || noRows('Okunmuş hareket yok.')}</div></div>
       <p class="notice">Aynı kartın aynı dönemini tekrar aktarmak ekstre hareketlerini yeniler. Manuel kayıtlar korunur.</p>
+      <p class="warning" id="statement-save-error" hidden></p>
       <div class="preview-actions"><button class="primary" data-action="confirmImport" ${blocked || !cards.length || !rows.length || (needsAcknowledgement && !ctx.importDraft.acknowledged) ? 'disabled' : ''}>Onayla ve kaydet</button><button data-action="cancelImport">Vazgeç</button></div>
     </section>`;
   }
   const {rowsByStatement,underReview}=statementGroups(state);
   const history=[...state.statements].sort((a,b)=>b.cut.localeCompare(a.cut));
-  return shell(`<h1>Ekstreler</h1><p class="lead">PDF cihazda işlenir. Dosyan dışarı gönderilmez.</p><section class="panel"><h2>Yeni ekstre aktar</h2><p>Metin içeren, şifresiz Yapı Kredi veya QNB kredi kartı PDF'i seç. En fazla 20 MB / 100 sayfa.</p><div class="actions"><button class="primary" data-action="pdf">PDF seç</button><button data-action="csv">Masaüstü CSV'si</button></div><p class="notice">Taranmış görseller ve diğer bankaların PDF'leri desteklenmez. PDF kart hareketlerini aktarır; banka hesabının canlı bakiyesini getirmez.</p></section>${preview}
-    <section class="statement-history" aria-labelledby="statement-history-title"><h2 id="statement-history-title" tabindex="-1">Aktarılan ekstreler</h2>${history.map(st=>statementCard(ctx,st,rowsByStatement.get(st.id)||[],underReview.has(st.id))).join('') || noRows('Henüz ekstre aktarılmadı.')}</section>`);
+  return shell(`<div class="statement-surface"><header class="statement-heading"><h1>Ekstreler</h1><p>PDF cihazda işlenir. Dosyan dışarı gönderilmez.</p></header>
+    ${failure?`<aside class="warning statement-failure" aria-labelledby="statement-failure-title"><h2 id="statement-failure-title">${failure.format==='pdf'?'PDF seçimi ve okuma':'CSV dosyası okuma'}</h2>
+      <p>${esc(failure.message)}</p><button type="button" data-action="retryImport">${failure.format==='pdf'?'PDF’yi yeniden seç':'CSV’yi yeniden seç'}</button></aside>`:''}
+    ${preview}
+    <section class="panel statement-upload"><h2>Yeni ekstre aktar</h2>
+      <div class="statement-upload-options"><div><button type="button" class="primary" id="statement-pdf" data-action="pdf">${uiIcon('import')} PDF seç</button>
+        <p>Yapı Kredi veya QNB kredi kartı ekstresi. Metin içeren şifresiz PDF, en fazla 20 MB / 100 sayfa.</p></div>
+      <div><button type="button" id="statement-csv" data-action="csv">${uiIcon('import')} Masaüstü CSV'si</button>
+        <p>Masaüstü Raporlar ekranından indirilen kart hareketleri. En fazla 5 MB.</p></div></div>
+      <p class="notice">Taranmış PDF'ler desteklenmez. PDF kart hareketlerini aktarır; banka hesabının canlı bakiyesini getirmez.</p>
+    </section>
+    ${reviewWarning(ctx)}
+    <section class="statement-history" aria-labelledby="statement-history-title"><h2 id="statement-history-title" tabindex="-1">Aktarılan ekstreler</h2>${history.map(st=>statementCard(ctx,st,rowsByStatement.get(st.id)||[],underReview.has(st.id))).join('') || noRows('Henüz ekstre aktarılmadı.')}</section></div>`);
 }
 
 

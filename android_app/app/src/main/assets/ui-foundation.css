@@ -122,7 +122,7 @@ html.navigation-sheet-open {overflow-y:hidden}
   color:var(--accent);
 }
 
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) {
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"],[data-surface="import"],[data-surface="statement"],[data-surface="review"]) {
   --bg:var(--shell-bg);
   --panel:var(--shell-panel);
   --line:var(--shell-line);
@@ -133,22 +133,22 @@ body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[
   background:var(--bg);
   color:var(--text);
 }
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) > header {
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"],[data-surface="import"],[data-surface="statement"],[data-surface="review"]) > header {
   padding:12px 16px 0;
   border:0;
 }
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) .brand strong,
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) .brand .mark,
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) #quick-add .quick-add-label {display:none}
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) .brand small {color:var(--accent);font-weight:750}
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) .header-actions button {
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"],[data-surface="import"],[data-surface="statement"],[data-surface="review"]) .brand strong,
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"],[data-surface="import"],[data-surface="statement"],[data-surface="review"]) .brand .mark,
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"],[data-surface="import"],[data-surface="statement"],[data-surface="review"]) #quick-add .quick-add-label {display:none}
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"],[data-surface="import"],[data-surface="statement"],[data-surface="review"]) .brand small {color:var(--accent);font-weight:750}
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"],[data-surface="import"],[data-surface="statement"],[data-surface="review"]) .header-actions button {
   background:var(--shell-panel);
   border-color:var(--shell-line);
   color:var(--accent);
   font-size:1.2rem;
 }
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) main {padding-top:0}
-body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"]) .primary {
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"],[data-surface="import"],[data-surface="statement"],[data-surface="review"]) main {padding-top:0}
+body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[data-surface="transactions"],[data-surface="import"],[data-surface="statement"],[data-surface="review"]) .primary {
   background:var(--accent);
   border-color:var(--accent);
   color:var(--accent-ink);
@@ -486,3 +486,173 @@ body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[
 .dashboard-surface .expense-category {padding:8px 10px;min-height:48px;border-color:var(--shell-line)}
 .dashboard-surface .expense-category-list {gap:6px}
 .dashboard-surface .expense-category-name {flex-basis:6rem}
+
+.statement-surface {display:grid;gap:var(--surface-gap);overflow-wrap:anywhere}
+.statement-surface > .back-link {justify-self:start}
+.statement-heading {display:block;width:100%;padding:0;border:0}
+.statement-heading h1,.review-center h1 {margin:0;font-size:1.85rem;line-height:1.2}
+.statement-heading p {margin:5px 0 0;font-size:.9rem}
+.statement-surface .panel,.statement-surface .statement-history {margin:0}
+.statement-surface .panel,.statement-surface .statement-card,.review-center .panel {border-radius:var(--surface-radius)}
+.statement-upload-options {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));
+  gap:8px;
+}
+.statement-upload-options > div,.csv-source-card {
+  min-width:0;
+  padding:12px;
+  border:1px solid var(--shell-line);
+  border-radius:14px;
+  background:var(--shell-bg);
+}
+.statement-upload-options button {width:100%}
+.statement-upload-options p,.statement-upload > .notice {margin:8px 0 0;font-size:.85rem}
+.statement-failure {margin:0}
+.statement-failure h2,.statement-failure p {margin:0 0 8px}
+.statement-failure button {width:100%}
+.statement-surface :is(button,select),.review-center :is(button,select),
+#modal[data-variant="statement-csv"] :is(button,select) {
+  min-height:48px;
+  min-width:48px;
+  overflow-wrap:anywhere;
+}
+.statement-surface .preview-heading h2 {margin:2px 0 6px}
+.statement-file-type {margin:0;color:var(--accent);font-size:.84rem;font-weight:700}
+.wallet-v2 .preview-heading .statement-file-type {color:var(--accent)}
+.statement-surface .statement-period,.csv-import-preview .statement-period {
+  color:var(--shell-text);
+  font-size:.95rem;
+  font-weight:650;
+  font-variant-numeric:tabular-nums;
+}
+.statement-surface .preview-card-controls {margin-top:14px}
+.statement-surface .preview-card-controls label,.csv-source-card label {
+  font-size:.9rem;
+  font-weight:650;
+  color:var(--shell-text);
+}
+.statement-surface .preview-select,.csv-import-preview .preview-select {
+  position:relative;
+  min-width:0;
+  border:1px solid var(--accent);
+  border-radius:12px;
+  background:var(--shell-bg);
+}
+.csv-import-preview .preview-select select {
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  opacity:0;
+  cursor:pointer;
+}
+.csv-import-preview .preview-select:focus-within {outline:2px solid var(--accent);outline-offset:3px}
+.statement-surface .preview-select-value,.csv-import-preview .preview-select-value {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:8px;
+  min-height:48px;
+  padding:10px 12px;
+  color:var(--shell-text);
+  line-height:1.4;
+  overflow-wrap:anywhere;
+}
+.csv-import-preview .preview-select select:disabled + .preview-select-value {color:var(--shell-muted)}
+.statement-totals-title {margin:16px 0 0;font-size:.94rem}
+.statement-surface .statement-totals,.csv-import-preview .statement-totals {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,7.5em),1fr));
+  gap:8px;
+  margin:10px 0;
+}
+.statement-surface .statement-totals > div,.csv-import-preview .statement-totals > div {
+  min-width:0;
+  padding:9px 10px;
+  border:1px solid var(--shell-line);
+  border-radius:12px;
+  background:var(--shell-bg);
+}
+.statement-totals dt {font-size:.85rem;color:var(--shell-muted)}
+.statement-totals dd {margin:4px 0 0;font-variant-numeric:tabular-nums;font-weight:650;overflow-wrap:anywhere}
+.statement-surface .statement-detail-button {background:var(--shell-bg);border-color:var(--shell-line);color:var(--accent)}
+.statement-surface .import-preview {max-height:42dvh;padding:0 4px 4px}
+.statement-movement-group + .statement-movement-group {margin-top:12px}
+.statement-movement-group h4 {
+  margin:0;
+  padding:8px 10px;
+  border-radius:8px;
+  background:var(--shell-bg);
+  color:var(--shell-text);
+  font-size:.9rem;
+}
+.statement-movement-row,.statement-surface .saved-statement-row .transaction {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) fit-content(44%);
+  align-items:start;
+  gap:6px 10px;
+  min-width:0;
+}
+.statement-movement-row :is(strong,small) {display:block}
+.statement-movement-row b {text-align:end;overflow-wrap:anywhere}
+.statement-surface .saved-statement-row {padding:4px 0;border-bottom:1px solid var(--shell-line)}
+.statement-surface .saved-statement-row:last-of-type {border-bottom:0}
+.statement-surface .saved-statement-row .transaction {border:0;background:transparent;padding:10px 0}
+.statement-surface .saved-statement-row .amount {max-width:none;color:var(--shell-text)}
+.statement-surface .raw-source p {background:var(--shell-bg)}
+.statement-surface .raw-source summary,.statement-surface .statement-preview .reconciliation summary,
+.csv-source-rows summary {
+  min-height:48px;
+  min-width:48px;
+  padding:12px 0;
+  cursor:pointer;
+  line-height:1.45;
+}
+.statement-surface summary:focus-visible,.review-center summary:focus-visible,.csv-source-rows summary:focus-visible {
+  outline:2px solid var(--accent);
+  outline-offset:-2px;
+}
+.statement-surface .raw-source summary {color:var(--shell-muted)}
+.statement-surface .acknowledge,.import-category-choice {min-height:48px}
+.import-category-choice {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:4px 0 0;
+  padding:8px 0;
+  line-height:1.45;
+  cursor:pointer;
+}
+.import-category-choice input {flex:0 0 24px;min-height:24px;margin:0}
+.import-category-choice span {min-width:0}
+.statement-surface .statement-overview .actions {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr));
+}
+#modal[data-variant="statement-csv"] {
+  padding:clamp(12px,4vw,22px);
+  color:var(--shell-text);
+  background:var(--shell-panel);
+  border-color:var(--shell-line);
+}
+#modal[data-variant="statement-csv"] #close {width:auto;font-size:inherit;padding:8px 12px}
+#modal[data-variant="statement-csv"] .dialog-head {align-items:start;flex-wrap:wrap}
+#modal[data-variant="statement-csv"] #submit {background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.csv-import-preview {overflow-wrap:anywhere}
+.csv-import-preview h3 {margin:10px 0 6px;font-size:1.05rem}
+.csv-read-count {margin:4px 0 0;font-size:.9rem}
+.csv-import-preview .csv-source-card {margin:8px 0}
+.csv-import-preview .csv-source-card :is(label,.statement-period) {margin:0 0 6px}
+.csv-import-preview .import-row {padding:8px 0;border-top:1px solid var(--shell-line)}
+.review-center {overflow-wrap:anywhere}
+.review-center .review-principle {background:var(--shell-panel);border-radius:0 12px 12px 0}
+.review-center .review-counts > div {background:var(--shell-panel)}
+.review-center .review-candidates {padding:10px 12px;border-radius:12px;background:var(--shell-bg)}
+.review-center .review-candidates label {margin-top:0}
+.review-center .review-item-head h3 {margin:7px 0;font-size:1.05rem;line-height:1.45}
+.review-center .review-candidates .notice {margin-bottom:0}
+@media (max-width:360px) {
+  .statement-movement-row,.statement-surface .saved-statement-row .transaction {grid-template-columns:minmax(0,1fr)}
+  .statement-movement-row b,.statement-surface .saved-statement-row .amount {text-align:start}
+}
