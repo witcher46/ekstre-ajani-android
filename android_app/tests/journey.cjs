@@ -1,3 +1,4 @@
+const openRoute=require('./journey-navigation.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'playwright');
 const fs=require('fs'),path=require('path'),assert=require('assert');
 const root=path.resolve(__dirname,'../app/src/main/assets'),out=path.resolve(__dirname,'../test-output/journey');fs.mkdirSync(out,{recursive:true});
@@ -21,7 +22,7 @@ const root=path.resolve(__dirname,'../app/src/main/assets'),out=path.resolve(__d
  async function csv(rows){await page.locator('#csv-file').setInputFiles({name:'sentetik.csv',mimeType:'text/csv',buffer:Buffer.from(header+rows.join('\n'))});await page.locator('[name=card-0]').selectOption(card);await page.locator('#submit').click();}
  await csv(csvrows);const count=(await read()).transactions.length;await csv([...csvrows].reverse());assert.equal((await read()).transactions.length,count);
  // Planned and paid dates are deliberately different.
- await page.locator('nav [data-page=plan]').click();await page.locator('[data-action=subscription]').click();await page.locator('[name=name]').fill('Sentetik internet');await page.locator('[name=amount]').fill('50');await page.locator('[name=next]').fill('2026-10-15');await page.locator('[name=account]').selectOption(bank);await page.locator('#submit').click();await page.locator('[data-pay]').click();await page.locator('[name=paidOn]').fill('2026-10-20');await page.locator('#submit').click();
+ await openRoute(page,'plan');await page.locator('[data-action=subscription]').click();await page.locator('[name=name]').fill('Sentetik internet');await page.locator('[name=amount]').fill('50');await page.locator('[name=next]').fill('2026-10-15');await page.locator('[name=account]').selectOption(bank);await page.locator('#submit').click();await page.locator('[data-pay]').click();await page.locator('[name=paidOn]').fill('2026-10-20');await page.locator('#submit').click();
  s=await read();assert.equal(s.transactions.at(-1).date,'2026-10-20');assert.equal(s.transactions.at(-1).subscriptionDue,'2026-10-15');assert.equal(s.subscriptions[0].next,'2026-11-15');
  // Native backup I/O has its own Android tests; exercise the real browser download and file input here.
  await page.locator('#settings').click();const downloaded=page.waitForEvent('download');await page.locator('[data-action=backup]').click();const download=await downloaded;const backupPath=path.join(out,'synthetic-backup.json');let downloadSaved=true;try{await download.saveAs(backupPath);}catch{downloadSaved=false;fs.writeFileSync(backupPath,await page.evaluate(()=>window.__exportedBlob.text()));}const backup=JSON.parse(fs.readFileSync(backupPath,'utf8'));assert.deepEqual(backup,s);

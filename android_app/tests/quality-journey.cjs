@@ -1,3 +1,4 @@
+const openRoute=require('./journey-navigation.cjs');
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -41,7 +42,7 @@ async function categorySuggestionReasonsJourney(browser) {
       localStorage.setItem('ekstre-android-v1',C.backupText(W.normalizeWallet(wallet)));
     },cases);
     await page.reload();
-    await page.locator('nav [data-page=transactions]').click();
+    await openRoute(page,'transactions');
     for(const [id,,,category,reason] of cases){
       const row=page.locator('[data-edit='+id+']');
       await row.waitFor();
@@ -76,8 +77,8 @@ async function categorySuggestionsJourney(browser) {
     const saved=()=>page.evaluate(()=>localStorage.getItem('ekstre-android-v1'));
     const stats=()=>page.locator('[data-stat]').allTextContents();
     const before=await saved(), totals=await stats();
-    await page.locator('nav [data-page=transactions]').click();
-    assert.equal(await page.locator('nav button').count(),5);
+    await openRoute(page,'transactions');
+    assert.equal(await page.locator('nav button').count(),4);
     const panel=page.locator('.transaction-with-suggestion').filter({has:page.locator('[data-edit=test-movement]')});
     const apply=panel.getByRole('button',{name:/Öneriyi uygula: Sentetik Mağaza/});
     const choose=panel.getByRole('button',{name:/Başka kategori seç: Sentetik Mağaza/});
@@ -233,7 +234,7 @@ async function csvCategorySuggestionsJourney(browser) {
 }
 
 async function quickAddJourney(page) {
-  const add = page.getByRole('button',{name:'Ekle',exact:true});
+  const add = page.locator('#quick-add');
   const menu = page.getByRole('dialog',{name:'Hızlı Ekle'});
   const option = name => menu.getByRole('button',{name,exact:true});
   const active = () => page.evaluate(() => document.activeElement.id);
@@ -248,7 +249,7 @@ async function quickAddJourney(page) {
   await page.keyboard.press('Enter');
   await menu.waitFor();
   assert.equal(await active(),'dialog-title');
-  assert.deepEqual(await page.locator('#nav button').allTextContents(),['⌂Özet','▣Cüzdan','⇅İşlemler','◷Plan','↓Ekstre']);
+  assert.deepEqual(await page.locator('#nav button').allTextContents(),['Özet','Cüzdan','Raporlar','Diğer']);
   assert.equal(await menu.getByRole('button',{name:'Kaydet'}).count(),0);
   assert.equal(await page.evaluate(() => {
     const buttons = document.querySelectorAll('header button, #quick-add-options button, #close');
@@ -304,7 +305,7 @@ async function quickAddJourney(page) {
   }
 
   await open('Kart Borcu Ödemesi');
-  const paymentForm = page.getByRole('dialog',{name:'Kart borcu öde'});
+  const paymentForm = page.getByRole('dialog',{name:'Kart ödemesi kaydet'});
   const source = paymentForm.getByLabel('Paranın çıktığı banka / nakit hesabı');
   assert.equal(await source.inputValue(),'quick-bank');
   await source.selectOption('quick-cash');
@@ -334,7 +335,7 @@ async function quickAddJourney(page) {
   await page.locator('#submit').click();
   assert.equal(await page.locator('[data-stat=income]').innerText(),'₺50,00');
 
-  await page.locator('nav [data-page=transactions]').click();
+  await openRoute(page,'transactions');
   await open('Transfer');
   await page.getByRole('dialog',{name:'Transfer yap'}).waitFor();
   assert.equal(await page.locator('#f-kind').inputValue(),'transfer');
@@ -348,7 +349,7 @@ async function quickAddJourney(page) {
   await page.locator('nav [data-page=wallet]').click();
   await page.locator('[data-card-view=quick-card-b]').click();
   await open('Kart Borcu Ödemesi');
-  await page.getByRole('dialog',{name:'Kart borcu öde'}).waitFor();
+  await page.getByRole('dialog',{name:'Kart ödemesi kaydet'}).waitFor();
   assert.equal(await page.locator('#f-target').inputValue(),'quick-card-b');
   assert.equal(await source.inputValue(),'');
   await page.locator('#submit').click();
@@ -395,9 +396,9 @@ async function reviewCenterJourney(page) {
     localStorage.setItem('ekstre-android-v1',C.backupText(s));
   });
   await page.reload();
-  await page.locator('nav [data-page=transactions]').click();
+  await openRoute(page,'transactions');
   await page.getByRole('button',{name:'İnceleme Merkezi'}).click();
-  assert.equal(await page.locator('nav button[aria-current=page]').getAttribute('data-page'),'transactions');
+  assert.equal(await page.locator('nav button[aria-current=page]').count(),0);
   assert.equal(await page.locator('.review-item').count(),1);
   assert.match(await page.locator('.review-item').innerText(),/Olası eşleşme/);
   assert.match(await page.locator('.review-item').innerText(),/ikinci kez|ayrıca finansal/);
@@ -529,10 +530,10 @@ async function advancedReportsJourney(page) {
     await advancedReportsJourney(page);
     await page.locator('nav [data-page=wallet]').focus();
     await page.keyboard.press('Enter');
-    assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Cüzdanım');
+    assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Cüzdan');
 
     await page.getByRole('button',{name:'Örnek cüzdan'}).click();
-    await page.locator('nav [data-page=transactions]').click();
+    await openRoute(page,'transactions');
     const transaction = page.locator('button[data-edit]').first();
     await transaction.focus();
     await page.keyboard.press('Space');
@@ -590,13 +591,13 @@ async function advancedReportsJourney(page) {
     assert.equal(await page.evaluate(() => window.handleBack()), true);
     await page.waitForFunction(() => document.activeElement.textContent === 'İnceleme ve kaynak bağlantıları');
 
-    await page.locator('nav [data-page=plan]').click();
+    await openRoute(page,'plan');
     await page.getByRole('button',{name:'+ Bütçe'}).click();
     await page.locator('[name=amount]').fill('5000');
     await page.locator('#submit').click();
     await page.getByRole('progressbar',{name:'Toplam bütçe kullanımı'}).waitFor();
 
-    await page.locator('nav [data-page=transactions]').click();
+    await openRoute(page,'transactions');
     await page.locator('[data-action=addTransaction]').click();
     const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('ekstre-android-v1')));
     const card = (await stored()).accounts.find(a => a.type === 'card');
@@ -650,7 +651,7 @@ async function advancedReportsJourney(page) {
     assert.deepEqual((await stored()).transactions,beforeCategoryRemoval.transactions);
     assert.equal(await page.evaluate(() => document.activeElement.matches('#main h1')), true);
 
-    await page.locator('nav [data-page=transactions]').click();
+    await openRoute(page,'transactions');
     await page.locator('[data-action=addTransaction]').click();
     await page.locator('[name=desc]').fill('MIGROS 1234 IZMIR');
     await suggestion.waitFor();
@@ -669,7 +670,7 @@ async function advancedReportsJourney(page) {
     await page.getByRole('button',{name:'Abonelik kategorisini düzenle'}).click();
     await page.getByRole('button',{name:'Kategoriyi sil'}).click();
     await page.locator('#submit').click();
-    await page.locator('nav [data-page=plan]').click();
+    await openRoute(page,'plan');
     await page.locator('[data-action=subscription]').click();
     await page.getByLabel('Abonelik adı').fill('Sentetik kategori kontrolü');
     await page.locator('[name=amount]').fill('50,00');
@@ -731,7 +732,7 @@ async function advancedReportsJourney(page) {
     await importPrivatePdf([firstPan,secondPan]);
     const initialPrivate=(await stored()).transactions.filter(t=>t.importKey?.startsWith('pdf-hmac-v1:'));
     assert.equal(initialPrivate.length,2);
-    await page.locator('nav [data-page=transactions]').click();
+    await openRoute(page,'transactions');
     await page.locator('button[data-edit="'+initialPrivate[0].id+'"]').click();
     await page.locator('[name=desc]').fill('Sentetik düzenleme');
     await page.locator('[name=note]').fill('Sentetik not');
@@ -791,7 +792,7 @@ async function advancedReportsJourney(page) {
     await page.reload();
     await page.locator('#period').fill('2026-01');
     assert.equal(await page.locator('[data-stat=netExpense]').innerText(),'₺99.999.999.999.900,01');
-    await page.locator('[data-page=reports]').click();
+    await page.locator('main [data-page=reports]').click();
     await page.getByRole('heading',{name:'Kategori dağılımı'}).waitFor();
     assert.deepEqual(errors, []);
     console.log('Category, installment, accessibility and failed restore journeys passed');

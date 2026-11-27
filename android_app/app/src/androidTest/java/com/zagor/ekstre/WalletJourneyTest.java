@@ -42,6 +42,12 @@ public class WalletJourneyTest {
  private String js(ActivityScenario<MainActivity> a,String code)throws Exception{CountDownLatch done=new CountDownLatch(1);AtomicReference<String> value=new AtomicReference<>();a.onActivity(activity->web(activity).evaluateJavascript(code,r->{value.set(r);done.countDown();}));assertTrue(done.await(10,TimeUnit.SECONDS));return value.get();}
  private void waitJs(ActivityScenario<MainActivity> a,String condition)throws Exception{String last="";for(int i=0;i<60;i++){last=js(a,condition);if("true".equals(last))return;Thread.sleep(200);}fail("WebView condition failed: "+condition+" returned "+last);}
  private void click(ActivityScenario<MainActivity> a,String selector)throws Exception{js(a,"document.querySelector("+JSONObject.quote(selector)+").click()");}
+ private void openRoute(ActivityScenario<MainActivity> a,String route)throws Exception{
+  if(route.equals("plan")||route.equals("import")||route.equals("transactions")){
+   click(a,"#more");
+   click(a,"#modal[open] [data-destination="+route+"]");
+  }else click(a,"nav [data-page="+route+"]");
+ }
  private void value(ActivityScenario<MainActivity> a,String name,String value)throws Exception{js(a,"(()=>{const e=document.querySelector('[name="+name+"]');e.value="+JSONObject.quote(value)+";e.dispatchEvent(new Event('change',{bubbles:true}));return true})()");}
  private void submit(ActivityScenario<MainActivity> a)throws Exception{js(a,"document.getElementById('form').requestSubmit()");waitJs(a,"!document.querySelector('dialog[open]')");}
  private void account(ActivityScenario<MainActivity> a,String name,String type)throws Exception{account(a,name,type,"10000");}
@@ -80,16 +86,19 @@ public class WalletJourneyTest {
    waitJs(a,"!!document.querySelector('[data-action=addAccount]')");account(a,"Sentetik banka","bank");click(a,"nav [data-page=wallet]");account(a,"Sentetik nakit","cash");account(a,"Sentetik kart A","card");account(a,"Sentetik kart B","card");
    transaction(a,"income",0,-1,"30000","Maaş");transaction(a,"expense",0,-1,"1000","Market");transaction(a,"expense",1,-1,"100","Nakit gider");transaction(a,"expense",2,-1,"2000","Kart gideri");transaction(a,"refund",2,-1,"500","Kart iadesi");transaction(a,"payment",0,2,"1500","Kart ödemesi");transaction(a,"transfer",0,1,"300","Transfer");
    assertEquals("7",js(a,"JSON.parse(Android.load()).transactions.length"));a.recreate();waitJs(a,"!!document.querySelector('nav [data-page=home]')");assertEquals("7",js(a,"JSON.parse(Android.load()).transactions.length"));
-   click(a,"nav [data-page=plan]");click(a,"[data-action=budget]");value(a,"amount","5000");submit(a);assertEquals("1",js(a,"Object.keys(JSON.parse(Android.load()).budgets).length"));
+   openRoute(a,"plan");click(a,"[data-action=budget]");value(a,"amount","5000");submit(a);assertEquals("1",js(a,"Object.keys(JSON.parse(Android.load()).budgets).length"));
    click(a,"[data-action=subscription]");value(a,"name","Sentetik abonelik");value(a,"amount","50");value(a,"next","2026-10-15");submit(a);click(a,"[data-pay]");value(a,"paidOn","2026-10-20");submit(a);assertEquals("\"2026-10-20\"",js(a,"JSON.parse(Android.load()).transactions.at(-1).date"));
-   click(a,"nav [data-page=home]");click(a,"[data-page=reports]");waitJs(a,"document.body.innerText.includes('Kategori dağılımı')");
+   click(a,"nav [data-page=home]");click(a,"main [data-page=reports]");waitJs(a,"document.body.innerText.includes('Kategori dağılımı')");
    waitJs(a,"document.querySelectorAll('[data-report-month]').length===6");
    value(a,"report-range","12");
    waitJs(a,"document.querySelectorAll('[data-report-month]').length===12 && document.activeElement.id==='f-report-range'");
    device.pressBack();
    waitJs(a,"document.activeElement.matches('button[data-page=reports]')");
+   click(a,"#more");waitJs(a,"!!document.querySelector('#modal[open] #more-options')");
+   device.pressBack();
+   waitJs(a,"!document.querySelector('#modal[open]') && document.activeElement.id==='more'");
    // Verify a real Android file picker can open and cancel, then exercise actual ContentResolver PDF bytes.
-   click(a,"nav [data-page=import]");click(a,"[data-action=pdf]");waitPicker();evidence("pdf-picker");assertTrue("PDF picker package="+device.getCurrentPackageName()+" "+systemLabels(),device.getCurrentPackageName().contains("documentsui"));device.pressBack();
+   openRoute(a,"import");click(a,"[data-action=pdf]");waitPicker();evidence("pdf-picker");assertTrue("PDF picker package="+device.getCurrentPackageName()+" "+systemLabels(),device.getCurrentPackageName().contains("documentsui"));device.pressBack();
    Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();PDFBoxResourceLoader.init(context);byte[] pdfBytes;
    try(PDDocument pdf=new PDDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()){PDPage p=new PDPage();pdf.addPage(p);try(PDPageContentStream stream=new PDPageContentStream(pdf,p)){stream.beginText();stream.setFont(PDType1Font.HELVETICA,12);stream.setLeading(18);stream.newLineAtOffset(30,700);for(String line:new String[]{"QNB","Hesap Kesim Tarihi: 05/10/2026","04/10/2026 SENTETIK MARKET 123.00"}){stream.showText(line);stream.newLine();}stream.endText();}pdf.save(out);pdfBytes=out.toByteArray();}
    Uri uri=document("ekstre-synthetic.pdf","application/pdf",pdfBytes);
@@ -174,8 +183,8 @@ public class WalletJourneyTest {
     String original=js(a,"Android.load()"),totals=js(a,"[...document.querySelectorAll('[data-stat]')].map(e=>e.textContent)");
     click(a,"#settings");
     assertEquals(JSONObject.quote("Android sürümü "+version),js(a,"document.querySelector('main .lead').textContent"));
-    click(a,"nav [data-page=transactions]");
-    waitJs(a,"innerWidth===320 && Android.textZoom()===200 && document.querySelectorAll('nav button').length===5 && !!document.querySelector('"+apply+"')");
+    openRoute(a,"transactions");
+    waitJs(a,"innerWidth===320 && Android.textZoom()===200 && document.querySelectorAll('nav button').length===4 && !!document.querySelector('"+apply+"')");
     assertEquals("Actions fit at large text and have accessible context","true",js(a,"[...document.querySelectorAll('.transaction-category-suggestion button')].every(b=>{const r=b.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.width>=48&&r.height>=48&&!!b.getAttribute('aria-label')&&!!document.getElementById(b.getAttribute('aria-describedby'));})"));
     assertEquals("true",js(a,"document.querySelector('.transaction-category-suggestion').textContent.includes('Önerilen kategori: Giyim')"));
     js(a,"document.querySelector('.transaction-with-suggestion').scrollIntoView({block:'center'})");drawn(a);evidence("category-suggestion-320-200");
@@ -222,7 +231,7 @@ public class WalletJourneyTest {
       js(a,"if(document.querySelector('dialog[open]'))window.handleBack()");
       if(page.equals("settings"))click(a,"#settings");
       else if(page.equals("reports")){
-       click(a,"nav [data-page=home]");click(a,"[data-page=reports]");
+       click(a,"nav [data-page=home]");click(a,"main [data-page=reports]");
        if(width==320){
         value(a,"report-range","12");
         js(a,"(()=>{const select=document.getElementById('f-report-category');select.selectedIndex=1;select.dispatchEvent(new Event('change',{bubbles:true}));})();");
@@ -240,7 +249,7 @@ public class WalletJourneyTest {
        waitJs(a,"document.querySelectorAll('#quick-add-options button').length===4");
        assertEquals("Quick Add tap targets fit the viewport", "true",js(a,"[...document.querySelectorAll('header button,#quick-add-options button,#close')].every(b=>{const r=b.getBoundingClientRect();return r.left>=0&&r.right<=document.documentElement.clientWidth+1&&r.width>=48&&r.height>=48;})"));
       }
-      else click(a,"nav [data-page="+page+"]");
+      else openRoute(a,page);
       reports.put(layoutCase(a,page,width,dir));
      }
     }
@@ -271,7 +280,7 @@ public class WalletJourneyTest {
    }
    Uri source=document("synthetic-matched-payment.pdf","application/pdf",bytes);
    try{
-    click(a,"nav [data-page=import]");click(a,"[data-action=pdf]");waitPicker();selectDownload("synthetic-matched-payment.pdf");
+    openRoute(a,"import");click(a,"[data-action=pdf]");waitPicker();selectDownload("synthetic-matched-payment.pdf");
     waitJs(a,"!!document.querySelector('#import-account')");click(a,"[data-action=confirmImport]");
     assertEquals("5",js(a,"JSON.parse(Android.load()).transactions.length"));
     click(a,"nav [data-page=home]");click(a,"[data-page=review]");
@@ -283,9 +292,9 @@ public class WalletJourneyTest {
     }
     click(a,"nav [data-page=home]");assertEquals("No second bank outflow from PDF","true",js(a,"document.querySelector('[data-stat=cash]').textContent.includes('48.000,00')"));
     assertEquals("No second expense from PDF","true",js(a,"document.querySelector('[data-stat=netExpense]').textContent.includes('2.000,00')"));
-    click(a,"[data-page=reports]");assertEquals("Income remains in report","true",js(a,"document.querySelector('[data-stat=income]').textContent.includes('30.000,00')"));
+    click(a,"main [data-page=reports]");assertEquals("Income remains in report","true",js(a,"document.querySelector('[data-stat=income]').textContent.includes('30.000,00')"));
    }finally{context.getContentResolver().delete(source,null,null);}
-   click(a,"nav [data-page=plan]");click(a,"[data-action=incomePlan]");value(a,"name","Sentetik gelir planı");value(a,"amount","30000");value(a,"next","2026-11-03");submit(a);
+   openRoute(a,"plan");click(a,"[data-action=incomePlan]");value(a,"name","Sentetik gelir planı");value(a,"amount","30000");value(a,"next","2026-11-03");submit(a);
    assertEquals("5",js(a,"JSON.parse(Android.load()).transactions.length"));
    click(a,"[data-income-receive]");value(a,"receivedOn","2026-11-05");submit(a);
    assertEquals("\"2026-11-05\"",js(a,"JSON.parse(Android.load()).transactions.at(-1).date"));
@@ -688,7 +697,7 @@ public class WalletJourneyTest {
    waitJs(a,"!!document.querySelector('[data-action=addAccount]')");
    account(a,"Sentetik kart","card","0");
    transaction(a,"expense",0,-1,"1000","Sentetik bölünebilir gider");
-   click(a,"nav [data-page=transactions]");
+   openRoute(a,"transactions");
    js(a,"(()=>{const p=document.querySelector('#period');p.value='2026-10';p.dispatchEvent(new Event('change',{bubbles:true}));})()");
    waitJs(a,"!!document.querySelector('#transactions-list [data-edit]')");
    click(a,"#transactions-list [data-edit]");
@@ -875,7 +884,7 @@ public class WalletJourneyTest {
    Map<Integer,String> snapshots=nativeSnapshots(context);
    openNativeApprovalHistory(a,"bank");
    assertEquals("2",js(a,"document.querySelectorAll('[data-balance-approval-entry]').length"));
-   assertEquals("true",js(a,"!document.querySelector('[data-balance-approval-entry=cash-approval]') && document.querySelectorAll('nav button').length===5"));
+   assertEquals("true",js(a,"!document.querySelector('[data-balance-approval-entry=cash-approval]') && document.querySelectorAll('nav button').length===4"));
    click(a,"[data-balance-approval=approval-2]");
    waitJs(a,"!!document.getElementById('balance-approval-detail')");
    assertEquals("true",js(a,"document.getElementById('balance-approval-detail').textContent.includes('Kayıtlarla güncel')"));

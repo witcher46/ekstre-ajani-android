@@ -25,10 +25,18 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
     title.focus({preventScroll:true});
   }
 
+  function openSheet(heading, html) {
+    dialog.classList.add('navigation-sheet');
+    dialog.ownerDocument.documentElement.classList.add('navigation-sheet-open');
+    open(heading, html, null);
+  }
+
   function close() {
     if (!dialog.open) return false;
     const target = opener;
     opener = save = null;
+    dialog.classList.remove('navigation-sheet');
+    dialog.ownerDocument.documentElement.classList.remove('navigation-sheet-open');
     dialog.close();
     restoreFocus(target);
     return true;
@@ -86,5 +94,5 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
     }
   });
 
-  return {open, close, showError};
+  return {open, openSheet, close, showError};
 }

@@ -1,3 +1,4 @@
+const openRoute=require('./journey-navigation.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'playwright');
 const fs=require('fs'),path=require('path'),assert=require('assert');
 const root=path.resolve(process.env.AUDIT_ASSETS||path.join(__dirname,'../app/src/main/assets')),before=process.argv.includes('--before'),out=path.resolve(__dirname,'../test-output',before?'before':'after');fs.mkdirSync(out,{recursive:true});
@@ -6,6 +7,8 @@ try{
  const page=await browser.newPage({viewport:{width:390,height:844}});const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
  await page.route('https://wallet.test/**',route=>{const rel=new URL(route.request().url()).pathname;const f=path.join(root,rel==='/'?'index.html':rel);if(!f.startsWith(root+path.sep)||!fs.existsSync(f))return route.abort();return route.fulfill({body:fs.readFileSync(f),contentType:f.endsWith('.mjs')?'text/javascript':f.endsWith('.css')?'text/css':'text/html'});});
  await page.goto('https://wallet.test/');await page.locator('[data-action=addAccount]').first().waitFor();
+ const hasMore=await page.locator('#more').count();
+ const openPage=name=>hasMore?openRoute(page,name):page.locator('nav [data-page="'+name+'"]').click();
  async function addAccount(name,type,opening){await page.locator('[data-action=addAccount]').first().click();await page.locator('[name=name]').fill(name);await page.locator('[name=type]').selectOption(type);await page.locator('[name=opening]').fill(opening);await page.locator('#submit').click();}
  await addAccount('Maaş ve günlük banka hesabım','bank','50000');
  await page.locator('nav [data-page=wallet]').click();await addAccount('Nakit cüzdan','cash','500');await addAccount('QNB günlük kredi kartım','card','0');await addAccount('Yapı Kredi ek kartım','card','0');
@@ -24,7 +27,7 @@ try{
    else if(name==='incomePlans'){await page.locator('nav [data-page=home]').click();await page.locator('[data-page=incomePlans]').first().click();}
    else if(name==='importPreview'){await page.evaluate(()=>window.onPdfText('QNB\nHesap Kesim Tarihi: 05/10/2026\n04/10/2026 SENTETIK UZUN MAGAZA PEN 4.ndirim 9999999999.99'));}
    else if(['transactionModal','paymentModal'].includes(name)){await page.locator('nav [data-page=home]').click();await page.locator(name==='paymentModal'?'[data-action=payCard]':'[data-action=addTransaction]').first().click();}
-   else if(name==='settings')await page.locator('#settings').click();else if(name==='reports'){await page.locator('nav [data-page=home]').click();await page.locator('[data-page=reports]').click();}else await page.locator(`nav [data-page=${name}]`).click();
+   else if(name==='settings')await page.locator('#settings').click();else if(name==='reports'){await page.locator('nav [data-page=home]').click();await page.locator('main [data-page=reports]').click();}else await openPage(name);
    if(!await page.locator('dialog[open]').count()&&await page.locator('#period').count())await page.locator('#period').fill('2026-09');
    await page.evaluate(scale=>{window.auditTextScale=scale;if(scale===1)return;const all=[...document.querySelectorAll('main *,nav *,header *,dialog *')].map(e=>{const size=Number(e.dataset.auditBaseFont)||parseFloat(getComputedStyle(e).fontSize);e.dataset.auditBaseFont=size;return [e,size];});for(const [e,n]of all)e.style.fontSize=(n*scale)+'px';},scale);
    await page.waitForTimeout(30);

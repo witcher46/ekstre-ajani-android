@@ -8,7 +8,7 @@ import {parseStatementCsv} from './csv.mjs';
 import {createDialog} from './ui/dialog.mjs';
 import {escapeHtml as esc,options,field,select} from './ui/form-controls.mjs';
 import {expenseAllocationFields,attachExpenseAllocationFields} from './ui/expense-allocations.mjs';
-import {renderBottomNavigation} from './ui/navigation.mjs';
+import {renderBottomNavigation,renderMoreNavigation} from './ui/navigation.mjs';
 import {renderReviewCenter} from './ui/review-center.mjs';
 import {compareBalanceObservation} from './balance-reconciliation.mjs';
 import {prepareBalanceApproval,readBalanceApprovalSnapshot,saveBalanceApproval} from './balance-approval-flow.mjs';
@@ -201,7 +201,7 @@ function restoreFocus(target,{returning=false}={}){
  }
  opener.focus({preventScroll:returning});
 }
-const {open:modal,close:closeModal,showError:showDialogError}=createDialog($('modal'),{
+const {open:modal,openSheet,close:closeModal,showError:showDialogError}=createDialog($('modal'),{
  captureOpener:()=>focusTarget(actionTrigger||document.activeElement),
  restoreFocus,
 });
@@ -243,7 +243,7 @@ window.onPdfText=async (text,request)=>{
 function backFallback(){
  if(page==='savingsGoals'||page==='reminders')return {page:'plan',title:'Planlama'};
  return page==='statement'||page==='review'
-  ? {page:'import',title:'Ekstreler'} : {page:'wallet',title:'Cüzdanım'};
+  ? {page:'import',title:'Ekstreler'} : {page:'wallet',title:'Cüzdan'};
 }
 function backDestinationTitle(){
  const previous=history.at(-1);
@@ -288,14 +288,14 @@ function categorySuggestionRow(row,edit,index,lookup){
   </div>
  </div></div>`;
 }
-function guardCategoryActivation(event){
+function guardRepeatedActivation(event,includeNearby=true){
  if(!event.detail)return;
  const {clientX,clientY}=event;
  let lastPress=event.timeStamp;
  const ignoreRepeat=repeat=>{
-  // A touch series can reset the click count after the selected row moves.
+  // A touch series can reset the click count after a control changes or closes the view.
   const near=Math.hypot(repeat.clientX-clientX,repeat.clientY-clientY)<=6;
-  const repeats=repeat.detail>1||(repeat.detail===1&&near&&repeat.timeStamp-lastPress<450);
+  const repeats=repeat.detail>1||(includeNearby&&repeat.detail===1&&near&&repeat.timeStamp-lastPress<450);
   if(!repeats){
    document.removeEventListener('mousedown',ignoreRepeat,true);
    document.removeEventListener('click',ignoreRepeat,true);
@@ -328,7 +328,8 @@ function importCategoryOption(merchant,current,index,selectedCategory,category=C
  return category&&category!==current?`<label><input type="checkbox" data-category-suggestion="${index}" value="${esc(category)}" ${category===selectedCategory?'checked':''}> ${esc(merchant)} · Öneriyi seç: ${esc(category)}</label>`:'';
 }
 function render(){
-  $('nav').innerHTML=renderBottomNavigation(page);
+ $('nav').innerHTML=renderBottomNavigation(page);
+ document.body.dataset.surface=loadFailed?'':page;
  if(loadFailed){
   const buttons=[];
   for(const slot of [3,2]){
@@ -382,10 +383,12 @@ function render(){
  }else if(page==='reports'){html=V.reportsView(ctx);
  }else if(page==='import'){html=V.importView(ctx,pending);
  }else if(page==='statement'){html=V.statementView(ctx,detailId);
+ }else if(page==='categories'){
+  html='<h1>Kategoriler</h1>'+categorySettings();
  }else if(page==='review'){
  html=renderReviewCenter(state,backTitle);
  }else{
- html=`<h1>Ayarlar</h1><p class="lead">${esc(installedVersionLabel())}</p><div class="actions"><button data-page="reminders">Hatırlatmalar</button><button data-page="review">İnceleme ve kaynak bağlantıları</button></div><div class="panel"><h2>Veriler ve yedek</h2><p>Kayıtların bu cihazda saklanır. Uygulamayı kaldırmadan veya yeni bir deneme APK’sı kurmadan önce yedek al.</p><div class="actions"><button data-action="backup">Yedek dışa aktar</button><button data-action="restore">Yedek yükle</button></div><p class="notice">Bu sürüm Android JSON yedeklerini açar. Masaüstü .db yedeği doğrudan aktarılamaz; kart hareketleri için CSV aktarımını kullan.</p></div><button data-action="recover">Geri yükleme öncesi cüzdanı kurtar</button>${expenseCategoriesPanel()}${merchantRulesPanel()}<div class="panel"><h2>Gelir kategorileri</h2><p>${state.incomeCategories.map(esc).join(' · ')}</p><button data-action="incomeCategory">+ Gelir kategorisi</button></div><div class="panel"><h2>İlk deneme</h2><p>Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Gerçek belgelerini yüklemeden önce temel işlevleri deneyebilirsin.</p><button data-action="demo">Örnek cüzdan oluştur</button></div><div class="panel"><h2>Bu sürümün kapsamı</h2><p>Hesaplar, işlemler, PDF/CSV aktarımı, kategori düzenleme, manuel gider bölme, bütçe, aylık abonelik, rapor ve yedekleme. Çoklu profil, AI yorumu, otomatik eşleştirme ve gelişmiş kurallar henüz yoktur.</p></div>`;
+ html=`<h1>Ayarlar</h1><p class="lead">${esc(installedVersionLabel())}</p><div class="actions"><button data-page="reminders">Hatırlatmalar</button><button data-page="review">İnceleme ve kaynak bağlantıları</button></div><div class="panel"><h2>Veriler ve yedek</h2><p>Kayıtların bu cihazda saklanır. Uygulamayı kaldırmadan veya yeni bir deneme APK’sı kurmadan önce yedek al.</p><div class="actions"><button data-action="backup">Yedek dışa aktar</button><button data-action="restore">Yedek yükle</button></div><p class="notice">Bu sürüm Android JSON yedeklerini açar. Masaüstü .db yedeği doğrudan aktarılamaz; kart hareketleri için CSV aktarımını kullan.</p></div><button data-action="recover">Geri yükleme öncesi cüzdanı kurtar</button>${categorySettings()}<div class="panel"><h2>İlk deneme</h2><p>Örnek cüzdan yalnızca henüz kayıt yapılmamış bir cüzdanda açılır. Gerçek belgelerini yüklemeden önce temel işlevleri deneyebilirsin.</p><button data-action="demo">Örnek cüzdan oluştur</button></div><div class="panel"><h2>Bu sürümün kapsamı</h2><p>Hesaplar, işlemler, PDF/CSV aktarımı, kategori düzenleme, manuel gider bölme, bütçe, aylık abonelik, rapor ve yedekleme. Çoklu profil, AI yorumu, otomatik eşleştirme ve gelişmiş kurallar henüz yoktur.</p></div>`;
  }
  $('main').innerHTML=html;
  $('main').querySelector('h1')?.setAttribute('tabindex','-1');
@@ -437,6 +440,11 @@ function confirmSavingsGoalRemoval(id){
  },'Hedefi sil');
 }
 
+function categorySettings(){
+ return expenseCategoriesPanel()+merchantRulesPanel()+
+  '<section class="panel"><h2>Gelir kategorileri</h2><p>'+state.incomeCategories.map(esc).join(' · ')+'</p>'+
+  '<button data-action="incomeCategory">+ Gelir kategorisi</button></section>';
+}
 function merchantRulesPanel(){
  const rules=state.merchantCategoryRules||[];
  return `<section class="panel"><h2>Satıcı kategori kuralları</h2>${rules.map(rule=>`<div class="row"><span class="left"><strong>${esc(rule.merchant)}</strong><small>${esc(rule.category)}</small></span><button data-merchant-rule="${esc(rule.id)}">Kuralı düzenle</button></div>`).join('')||'<p>Henüz kaydedilmiş satıcı kuralı yok.</p>'}<button data-action="merchantRule">+ Satıcı kuralı</button></section>`;
@@ -564,7 +572,7 @@ function payCardForm(cardId,{sourceId=''}={}){
  if(!cards.length||!sources.length)throw Error('Kart ödemesi için bir kredi kartı ve kaynak banka / nakit hesabı ekle.');
  const card=cards.find(a=>a.id===cardId)||cards[0],status=W.cardDetail(state,card.id),suggested=status.statementRemaining>0?status.statementRemaining:status.debt;
  const source=sources.find(account=>account.id===sourceId);
- modal('Kart borcu öde',select('target','Ödenecek kredi kartı',options(cards.map(a=>[a.id,a.name]),card.id))+select('account','Paranın çıktığı banka / nakit hesabı',options([['','Kaynak hesabı seç'],...sources.map(a=>[a.id,a.name])],source?.id??''))+field('amount','Ödenen tutar (TL)',suggested?C.decimalMoney(suggested):'','text','inputmode="decimal" required')+field('date','Gerçek ödeme tarihi',C.today(),'date','required')+'<p class="notice">Banka / nakit bakiyesi azalır, kart borcu kapanır. Bu ödeme yeni bir gider değildir. Ekstrede aynı ödeme varsa incelemede eşleştir.</p>',f=>{
+ modal('Kart ödemesi kaydet',select('target','Ödenecek kredi kartı',options(cards.map(a=>[a.id,a.name]),card.id))+select('account','Paranın çıktığı banka / nakit hesabı',options([['','Kaynak hesabı seç'],...sources.map(a=>[a.id,a.name])],source?.id??''))+field('amount','Ödenen tutar (TL)',suggested?C.decimalMoney(suggested):'','text','inputmode="decimal" required')+field('date','Gerçek ödeme tarihi',C.today(),'date','required')+'<p class="notice">Banka / nakit bakiyesi azalır, kart borcu kapanır. Bu ödeme yeni bir gider değildir. Ekstrede aynı ödeme varsa incelemede eşleştir.</p>',f=>{
   const date=f.get('date');
   rejectFutureCardPaymentDate(date);
   if(!f.get('account'))throw Error('Kaynak hesabı seç.');
@@ -625,7 +633,7 @@ function dateStatus(date){const days=Math.round((new Date(date+'T12:00:00')-new 
 function upcoming(){const items=C.upcomingPayments(state).filter(r=>r.days<=7).slice(0,3);return items.length?`<div class="panel"><h2>Yaklaşan / geciken ödemeler</h2>${items.map(r=>`<div class="row"><div><strong>${esc(r.name)}</strong><small>${dateStatus(r.date)}${r.estimated?' · kayıtlı ödemelere göre tahmin':''}</small></div><b>${r.amount===null?'Tutar bilinmiyor':fmt(r.amount)}</b></div>`).join('')}<button data-page="plan">Ödeme planına git</button></div>`:'';}
 function subscriptionPayment(rid,due){const r=state.subscriptions.find(r=>r.id===rid);if(!r)return;modal('Abonelik ödemesi',`<p>${esc(r.name)} · Planlanan vade ${esc(due)}</p><b>${fmt(r.amount)}</b>`+field('paidOn','Gerçek ödeme tarihi',C.today(),'date','required'),f=>commit(C.paySubscription(state,rid,{paidOn:f.get('paidOn'),expectedDue:due})),'Ödemeyi kaydet');}
 function fitLayout(){
- const nav=$('nav');if(!nav.classList.contains('expanded')&&[...nav.children].some(b=>b.scrollWidth>b.clientWidth+1))nav.classList.add('expanded');
+ const nav=$('nav');
  document.documentElement.style.setProperty('--nav-height',nav.getBoundingClientRect().height+'px');
 }
 const layoutObserver=new ResizeObserver(()=>requestAnimationFrame(fitLayout));layoutObserver.observe($('main'));layoutObserver.observe($('nav'));window.addEventListener('resize',fitLayout);
@@ -640,6 +648,23 @@ $('main').addEventListener('focusin',({target})=>{
   if(rect.height>availableHeight&&rect.top<clearance)window.scrollBy(0,rect.top-clearance);
  });
 });
+
+function openMore(){
+ if(!$('modal').open)openSheet('Diğer',renderMoreNavigation());
+}
+
+function selectMorePage(event){
+ if(!$('modal').open)return;
+ guardRepeatedActivation(event,event.pointerType==='touch');
+ const destination=actionTrigger.dataset.destination;
+ closeModal();
+ actionTrigger=$('more');
+ go(destination);
+}
+
+$('close').addEventListener('click',event=>{
+ if($('modal').open&&$('more-options'))guardRepeatedActivation(event,event.pointerType==='touch');
+},{capture:true});
 
 function openQuickAdd(){
  if($('modal').open)return;
@@ -831,7 +856,7 @@ const actions={
   const row=state.transactions.find(t=>t.id===transactionId);
   if(expenseCategorySuggestion(row)?.category!==suggestedCategory)return;
   const target=focusTarget(actionTrigger.closest('.transaction-with-suggestion').querySelector('[data-edit]'));
-  guardCategoryActivation(event);
+  guardRepeatedActivation(event);
   commit(C.setTransactionCategory(state,row.id,suggestedCategory));
   restoreFocus(target);
   notice('Kategori güncellendi.');
@@ -848,6 +873,8 @@ const actions={
   });
  },
  quickAdd:openQuickAdd,
+ openMore,
+ selectMorePage,
  quickPayCard:()=>{
   const account=page==='account'?state.accounts.find(a=>a.id===detailId):undefined;
   if(account?.type==='card')payCardForm(account.id);

@@ -1,3 +1,4 @@
+const openRoute=require('./journey-navigation.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'playwright');
 const fs=require('fs'),path=require('path'),assert=require('assert');
 const {createHash}=require('node:crypto');
@@ -144,7 +145,7 @@ async function savingsGoalsJourney(browser){
       assert.deepEqual(transactions,wallet.transactions);
     };
 
-    await page.locator('nav [data-page=plan]').click();
+    await openRoute(page,'plan');
     await page.getByRole('button',{name:'Birikim hedefleri',exact:true}).click();
     await page.getByRole('heading',{name:'Birikim hedefleri',exact:true}).waitFor();
     await addGoal('Acil durum','bank','600');
@@ -209,7 +210,7 @@ async function futureManualPaymentJourney(browser){
     for(const [metric,value] of [['cash',cash],['cardDebt',debt],['netExpense','0,00']]){
       await assertMetric(metric,value);
     }
-    await page.locator('[data-page=reports]').click();
+    await page.locator('main [data-page=reports]').click();
     await assertMetric('cardCashPayments',paid);
     await assertMetric('cardPayments',paid);
     await openCard();
@@ -310,7 +311,7 @@ async function ambiguousStatementPaymentJourney(browser,{bankFirst=false}={}){
     assert.match(await page.locator('dt').getByText('Ödeme',{exact:true}).locator('..').innerText(),/80,00/);
     await page.getByText('Bu ekstreyle ilişkili olası eşleşmeler inceleme kutusunda.').waitFor();
     await page.locator('nav [data-page=home]').click();
-    await page.locator('[data-page=reports]').click();
+    await page.locator('main [data-page=reports]').click();
     assert.equal(await metric('cardPayments'),'80,00');
     assert.equal(await metric('cardCashPayments'),'40,00');
     assert.equal(await metric('cashOut'),'40,00');
@@ -338,7 +339,7 @@ async function ambiguousStatementPaymentJourney(browser,{bankFirst=false}={}){
     await openCard();
     assert.equal(await metric('cardStatementRemaining'),'70,00');
     await page.locator('nav [data-page=home]').click();
-    await page.locator('[data-page=reports]').click();
+    await page.locator('main [data-page=reports]').click();
     await page.locator('#f-report-account').selectOption('');
     assert.equal(await metric('cardPayments'),'80,00');
     assert.equal(await metric('cardCashPayments'),'40,00');
@@ -426,7 +427,7 @@ async function reconciliationJourney(browser){
     const button=name=>page.getByRole('button',{name,exact:true});
     const review=()=>page.getByRole('button',{name:/^Mutabakatı incele · /});
     async function openAccount(type){
-      await button('Cüzdan').click();
+      await page.locator('nav [data-page=wallet]').click();
       await page.locator(`[data-account-view="reconciliation-${type}"]`).click();
       await page.locator('#balance-reconciliation').waitFor();
     }
@@ -485,8 +486,8 @@ async function reconciliationJourney(browser){
       for(const value of ['Mutabakat bankası','100,00','148,00','150,00','-₺2,00','Banka kapanışı A','Banka hareket dökümü A','Banka satır A14']){
         assert(screen.includes(value),`Missing reviewed value: ${value}`);
       }
-      assert.equal(await page.locator('nav button').count(),5);
-      assert.equal(await button('Cüzdan').getAttribute('aria-current'),'page');
+      assert.equal(await page.locator('nav button').count(),4);
+      assert.equal(await page.locator('nav [data-page=wallet]').getAttribute('aria-current'),'page');
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
       assert(await page.locator('#balance-confirmed').evaluate(control=>[...control.labels].some(label=>label.textContent.trim())));
     }
@@ -620,8 +621,8 @@ async function reconciliationJourney(browser){
       await openAccount(type);
       await page.locator(`[data-balance-history="reconciliation-${type}"]`).click();
       await historyPage.waitFor();
-      assert.equal(await page.locator('nav button').count(),5);
-      assert.equal(await button('Cüzdan').getAttribute('aria-current'),'page');
+      assert.equal(await page.locator('nav button').count(),4);
+      assert.equal(await page.locator('nav [data-page=wallet]').getAttribute('aria-current'),'page');
     }
     async function openApproval(id){
       await detailButton(id).click();
@@ -855,7 +856,7 @@ async function reconciliationJourney(browser){
       ],
     };
     async function cardDebt(){
-      await button('Cüzdan').click();
+      await page.locator('nav [data-page=wallet]').click();
       await page.locator('[data-card-view=reconciliation-card]').click();
       return page.locator('[data-stat=cardDebt]').innerText();
     }
@@ -896,13 +897,13 @@ async function reconciliationJourney(browser){
  await page.locator('nav [data-page=home]').click();await page.locator('[data-page=review]').first().click();while(await page.locator('[data-link]').count())await page.locator('[data-link]').first().click();s=await read();assert.equal(s.transactions.filter(t=>t.linkedTo).length,2);const count=s.transactions.length;
  await page.evaluate(t=>window.onPdfText(t),pdf);await page.locator('#import-account').selectOption(card);await page.locator('[data-action=confirmImport]').click();assert.equal((await read()).transactions.length,count);
  await page.locator('nav [data-page=home]').click();assert((await page.locator('[data-stat=cash]').innerText()).includes('48.000,00'));assert((await page.locator('[data-stat=netExpense]').innerText()).includes('2.000,00'));
- await page.locator('nav [data-page=plan]').click();await page.locator('[data-action=incomePlan]').click();await page.locator('[name=name]').fill('Sentetik düzenli maaş');await page.locator('[name=account]').selectOption(bank);await page.locator('[name=amount]').fill('30000');await page.locator('[name=next]').fill('2026-11-03');await page.locator('#submit').click();const before=(await read()).transactions.length;await page.locator('nav [data-page=home]').click();assert((await page.locator('[data-stat=cash]').innerText()).includes('48.000,00'));assert.equal((await read()).transactions.length,before);
- await page.locator('nav [data-page=plan]').click();await page.locator('[data-income-receive]').click();await page.locator('[name=account]').selectOption(cash);await page.locator('[name=receivedOn]').fill('2026-11-05');await page.locator('#submit').click();s=await read();assert.equal(s.transactions.at(-1).kind,'income');assert.equal(s.transactions.at(-1).account,cash);assert.equal(s.transactions.at(-1).date,'2026-11-05');assert.equal(s.transactions.at(-1).incomePlanDue,'2026-11-03');assert.equal(s.incomePlans[0].next,'2026-12-03');
+ await openRoute(page,'plan');await page.locator('[data-action=incomePlan]').click();await page.locator('[name=name]').fill('Sentetik düzenli maaş');await page.locator('[name=account]').selectOption(bank);await page.locator('[name=amount]').fill('30000');await page.locator('[name=next]').fill('2026-11-03');await page.locator('#submit').click();const before=(await read()).transactions.length;await page.locator('nav [data-page=home]').click();assert((await page.locator('[data-stat=cash]').innerText()).includes('48.000,00'));assert.equal((await read()).transactions.length,before);
+ await openRoute(page,'plan');await page.locator('[data-income-receive]').click();await page.locator('[name=account]').selectOption(cash);await page.locator('[name=receivedOn]').fill('2026-11-05');await page.locator('#submit').click();s=await read();assert.equal(s.transactions.at(-1).kind,'income');assert.equal(s.transactions.at(-1).account,cash);assert.equal(s.transactions.at(-1).date,'2026-11-05');assert.equal(s.transactions.at(-1).incomePlanDue,'2026-11-03');assert.equal(s.incomePlans[0].next,'2026-12-03');
  const unknown='QNB\nHesap Kesim Tarihi: 05/11/2026\n04/11/2026 SENTETIK MAGAZA PEN 4.ndirim 75.25';await page.evaluate(t=>window.onPdfText(t),unknown);assert((await page.locator('main').innerText()).includes('İade'));await page.locator('#import-account').selectOption(card);const n=(await read()).transactions.length;assert(await page.locator('[data-action=confirmImport]').isDisabled());assert.equal((await read()).transactions.length,n);await page.locator('#acknowledge-import').check();await page.locator('[data-action=confirmImport]').click();assert.equal((await read()).transactions.length,n+1);
- s=await read();const importedRefund=s.transactions.at(-1);await page.locator('nav [data-page=transactions]').click();await page.locator('#period').fill('2026-11');await page.locator(`[data-edit="${importedRefund.id}"]`).click();assert(await page.locator('[name=kind]').isDisabled());assert(await page.locator('[name=account]').isDisabled());await page.locator('[name=desc]').fill('Düzeltilmiş sentetik iade');await page.locator('[name=category]').selectOption('Market / Gıda');await page.locator('[name=note]').fill('Belgeyle kontrol edildi');await page.locator('#submit').click();assert.equal(await page.locator('dialog[open]').count(),0);await page.evaluate(t=>window.onPdfText(t),unknown);await page.locator('#import-account').selectOption(card);await page.locator('#acknowledge-import').check();await page.locator('[data-action=confirmImport]').click();const kept=(await read()).transactions.find(t=>t.id===importedRefund.id);assert.equal(kept.desc,'Düzeltilmiş sentetik iade');assert.equal(kept.category,'Market / Gıda');assert.equal(kept.note,'Belgeyle kontrol edildi');assert.equal(kept.sourceDesc,importedRefund.sourceDesc);
+ s=await read();const importedRefund=s.transactions.at(-1);await openRoute(page,'transactions');await page.locator('#period').fill('2026-11');await page.locator(`[data-edit="${importedRefund.id}"]`).click();assert(await page.locator('[name=kind]').isDisabled());assert(await page.locator('[name=account]').isDisabled());await page.locator('[name=desc]').fill('Düzeltilmiş sentetik iade');await page.locator('[name=category]').selectOption('Market / Gıda');await page.locator('[name=note]').fill('Belgeyle kontrol edildi');await page.locator('#submit').click();assert.equal(await page.locator('dialog[open]').count(),0);await page.evaluate(t=>window.onPdfText(t),unknown);await page.locator('#import-account').selectOption(card);await page.locator('#acknowledge-import').check();await page.locator('[data-action=confirmImport]').click();const kept=(await read()).transactions.find(t=>t.id===importedRefund.id);assert.equal(kept.desc,'Düzeltilmiş sentetik iade');assert.equal(kept.category,'Market / Gıda');assert.equal(kept.note,'Belgeyle kontrol edildi');assert.equal(kept.sourceDesc,importedRefund.sourceDesc);
  s=await read();const old={...s,legacyUnknown:{keep:'sentetik'}};delete old.incomePlans;delete old.incomeCategories;await page.locator('#backup-file').setInputFiles({name:'synthetic-v1.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});await page.waitForFunction(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')).legacyUnknown?.keep==='sentetik');assert.deepEqual((await read()).transactions.map(t=>t.id),old.transactions.map(t=>t.id));assert.deepEqual((await read()).accounts,old.accounts);await page.reload();assert.equal((await read()).legacyUnknown.keep,'sentetik');
  // Legacy v1 linked manual payments may carry a statement period different from the date.
- s=await read();s.transactions.push({id:'legacy-manual',source:'manual',account:bank,target:card,date:'2026-10-03',period:'2026-11',desc:'Sentetik eski ödeme',amount:100,kind:'payment',category:'Kart ödemesi',note:''},{id:'legacy-pdf',source:'pdf',account:card,date:'2026-10-03',period:'2026-11',desc:'Sentetik eski ödeme',amount:100,kind:'cardPayment',category:'Kart ödemesi',note:'',linkedTo:'legacy-manual',matchStatus:'linked'});await page.evaluate(s=>localStorage.setItem('ekstre-android-v1',JSON.stringify(s)),s);await page.reload();await page.locator('nav [data-page=transactions]').click();await page.locator('#period').fill('2026-10');await page.locator('[data-edit=legacy-manual]').click();await page.locator('[name=note]').fill('Eski dönemi koruyan not');await page.locator('#submit').click();assert.equal((await read()).transactions.find(t=>t.id==='legacy-manual').period,'2026-11');assert.equal((await read()).transactions.find(t=>t.id==='legacy-manual').note,'Eski dönemi koruyan not');
+ s=await read();s.transactions.push({id:'legacy-manual',source:'manual',account:bank,target:card,date:'2026-10-03',period:'2026-11',desc:'Sentetik eski ödeme',amount:100,kind:'payment',category:'Kart ödemesi',note:''},{id:'legacy-pdf',source:'pdf',account:card,date:'2026-10-03',period:'2026-11',desc:'Sentetik eski ödeme',amount:100,kind:'cardPayment',category:'Kart ödemesi',note:'',linkedTo:'legacy-manual',matchStatus:'linked'});await page.evaluate(s=>localStorage.setItem('ekstre-android-v1',JSON.stringify(s)),s);await page.reload();await openRoute(page,'transactions');await page.locator('#period').fill('2026-10');await page.locator('[data-edit=legacy-manual]').click();await page.locator('[name=note]').fill('Eski dönemi koruyan not');await page.locator('#submit').click();assert.equal((await read()).transactions.find(t=>t.id==='legacy-manual').period,'2026-11');assert.equal((await read()).transactions.find(t=>t.id==='legacy-manual').note,'Eski dönemi koruyan not');
  await page.locator('nav [data-page=wallet]').click();await account('Sentetik ikinci kart','card','0');s=await read();const card2=s.accounts.at(-1).id;
  const sourcePdf='QNB\nHesap Kesim Tarihi: 05/10/2026\nOnceki Donem Hesap Ozeti Borcu: 1000.00\nDonem Borcu: 400.00\n04/10/2026 ODEME TESEKKUR 600.00';await page.evaluate(t=>window.onPdfText(t),sourcePdf);await page.locator('#import-account').selectOption(card2);await page.locator('[data-action=confirmImport]').click();s=await read();const debtBefore=await page.evaluate(async id=>{const C=await import('./core.mjs');return C.cardStatus(JSON.parse(localStorage.getItem('ekstre-android-v1')),id).current;},card2);assert.equal(debtBefore,40000);
  const bankBefore=await page.evaluate(async id=>{const C=await import('./core.mjs'),s=JSON.parse(localStorage.getItem('ekstre-android-v1'));return C.balance(s,s.accounts.find(a=>a.id===id));},bank);

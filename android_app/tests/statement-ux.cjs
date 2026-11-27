@@ -1,3 +1,4 @@
+const openRoute=require('./journey-navigation.cjs');
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -179,7 +180,7 @@ async function run() {
     await page.evaluate(()=>window.handleBack());
     assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Detayı aç');
     await page.reload();
-    await page.locator('nav [data-page=import]').click();
+    await openRoute(page,'import');
     assert.match(await history.getByRole('article').filter({hasText:'2026-11'}).innerText(),/Doğrulandı/);
 
     await page.evaluate(text=>window.onPdfText(text),statement.replace('Borcu: 1000.00','Borcu: 1001.00'));
@@ -224,7 +225,7 @@ async function run() {
       localStorage.setItem(key,JSON.stringify(wallet));
     });
     await page.reload();
-    await page.locator('nav [data-page=import]').click();
+    await openRoute(page,'import');
     await saved.getByRole('button',{name:'Detayı aç'}).click();
     await page.getByText('Belgedeki ekstre toplamları uyuşmuyor.',{exact:true}).waitFor();
     const snapshot=()=>page.evaluate(()=>['ekstre-android-v1','ekstre-android-v1-recovery'].map(key=>localStorage.getItem(key)));
