@@ -234,9 +234,21 @@ public class WalletJourneyTest {
        click(a,"nav [data-page=home]");click(a,"main [data-page=reports]");
        if(width==320){
         value(a,"report-range","12");
-        js(a,"(()=>{const select=document.getElementById('f-report-category');select.selectedIndex=1;select.dispatchEvent(new Event('change',{bubbles:true}));})();");
+        String reportAccount=js(a,"JSON.parse(Android.load()).transactions[0].account");
+        value(a,"report-account",new JSONArray("["+reportAccount+"]").getString(0));
+        assertEquals(reportAccount,js(a,"document.getElementById('f-report-account').value"));
+        String filtersExpression="['period','f-report-account','f-report-range'].map(id=>document.getElementById(id).value)";
+        String reportFilters=js(a,filtersExpression);
+        String categoryButton="main button[data-report-category]";
+        waitJs(a,"!!document.querySelector('"+categoryButton+"')");
+        click(a,categoryButton);
+        waitJs(a,"!!document.querySelector('#report-category-transactions button[data-edit]') && !!document.querySelector('nav [data-page=reports][aria-current=page]')");
+        reports.put(layoutCase(a,"reportCategory",width,dir));
+        assertTrue("Android Back returns from the report category",device.pressBack());
+        waitJs(a,"document.activeElement.matches('"+categoryButton+"')");
+        assertEquals("Report month, account and range survive Back",reportFilters,js(a,filtersExpression));
         click(a,"#report-movements-toggle");
-        waitJs(a,"!!document.querySelector('#report-category-transactions button[data-edit]') && !!document.querySelector('#report-movements button[data-edit]')");
+        waitJs(a,"!!document.querySelector('#report-movements:not([hidden]) button[data-edit]')");
        }
        waitJs(a,"document.querySelectorAll('[data-report-month]').length==="+(width==320?12:6));
       }
@@ -254,7 +266,7 @@ public class WalletJourneyTest {
      }
     }
    }finally{try(FileOutputStream out=new FileOutputStream(new File(dir,"native-layout-results.json"))){out.write(reports.toString().getBytes(StandardCharsets.UTF_8));}device.executeShellCommand("settings put system font_scale 1.0");device.executeShellCommand("wm size reset");device.executeShellCommand("wm density reset");}
-   JSONArray failures=new JSONArray();for(int i=0;i<reports.length();i++){JSONObject report=reports.getJSONObject(i);if(report.getJSONArray("failures").length()>0)failures.put(report);}assertEquals("All native money, overlap and system bar bounds: "+failures,0,failures.length());assertEquals(56,reports.length());
+   JSONArray failures=new JSONArray();for(int i=0;i<reports.length();i++){JSONObject report=reports.getJSONObject(i);if(report.getJSONArray("failures").length()>0)failures.put(report);}assertEquals("All native money, overlap and system bar bounds: "+failures,0,failures.length());assertEquals(57,reports.length());
   }
  }
  @Test public void salaryCardPaymentAndIncomePlanStayConsistent()throws Exception{
