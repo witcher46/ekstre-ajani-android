@@ -455,12 +455,12 @@ async function advancedReportsJourney(page) {
   const original = await saved();
   await page.reload();
   await page.getByRole('button',{name:'Raporlar ↗'}).click();
-  await page.getByLabel('Bitiş ayı').fill('2026-11');
-  await page.getByLabel('Bitiş ayı').evaluate(input => {
+  await page.getByLabel('Seçili ay',{exact:true}).fill('2026-11');
+  await page.getByLabel('Seçili ay',{exact:true}).evaluate(input => {
     input.value='10000-01';
     input.dispatchEvent(new Event('change',{bubbles:true}));
   });
-  assert.equal(await page.getByLabel('Bitiş ayı').inputValue(),'2026-11');
+  assert.equal(await page.getByLabel('Seçili ay',{exact:true}).inputValue(),'2026-11');
   const stat = name => page.locator('[data-stat='+name+']').innerText();
   const months = page.locator('[data-report-month]');
   assert.equal(await months.count(),6);
@@ -477,14 +477,15 @@ async function advancedReportsJourney(page) {
   await page.getByLabel('Rapor hesabı').selectOption('report-card');
   assert.equal(await stat('range-income'),'₺0,00');
   assert.match(await stat('range-netExpense'),/^[-−]₺50,00$/);
-  await page.getByLabel('Aylık değişimini ve işlemlerini görmek istediğin kategori').selectOption('category:Market / Gıda');
+  await page.locator('[data-report-category="Market / Gıda"]').click();
   const details = page.locator('#report-category-transactions');
-  assert.equal(await details.locator('button[data-edit]').count(),2);
+  assert.equal(await details.locator('button[data-edit]').count(),1);
   await details.getByText('Sentetik iade',{exact:true}).waitFor();
-  await details.getByText('Sentetik kart alışverişi',{exact:true}).waitFor();
+  assert.equal(await details.getByText('Sentetik kart alışverişi',{exact:true}).count(),0);
+  assert.equal(await page.evaluate(() => window.handleBack()),true);
 
   await page.getByLabel('Rapor hesabı').selectOption('report-bank');
-  await page.getByLabel('Bitiş ayı').fill('2026-10');
+  await page.getByLabel('Seçili ay',{exact:true}).fill('2026-10');
   assert.equal(await stat('cashOut'),'₺180,00');
   assert.equal(await stat('cardCashPayments'),'₺100,00');
   assert.equal(await stat('netExpense'),'₺50,00');
@@ -505,6 +506,155 @@ async function advancedReportsJourney(page) {
   await page.evaluate(() => localStorage.removeItem('ekstre-android-v1'));
   await page.reload();
   console.log('Advanced Reports: range, account, signed categories, drilldowns, navigation and 320px passed');
+}
+
+
+async function reportsSliceJourney(browser) {
+  const page=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+  try {
+    page.setDefaultTimeout(5000);
+    const errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    await page.clock.setFixedTime(new Date('2026-11-26T12:00:00Z'));
+    await routeWallet(page);
+    await page.goto('https://wallet.test/');
+    const original=await page.evaluate(async()=>{
+      const C=await import('/core.mjs');
+      let wallet=C.empty();
+      wallet.accounts=[
+        {id:'a',name:'Sentetik günlük banka hesabı',type:'bank',opening:0},
+        {id:'b',name:'Sentetik kredi kartı',type:'card',opening:0},
+      ];
+      wallet.categories=['Market','Ulaşım','Ev','Eğitim','Giyim'];
+      const add=(id,date,kind,account,amount,category,allocations)=>{
+        wallet=C.addTransaction(wallet,{id,date,kind,account,amount,category,desc:'Sentetik '+id},{allocations});
+      };
+      add('bölünmüş alışveriş','2026-10-12','expense','a',70000,'Market',[
+        {category:'Market',amount:60000},{category:'Eğitim',amount:10000},
+      ]);
+      add('market iadesi','2026-10-13','refund','a',10000,'Market');
+      add('ulaşım','2026-10-08','expense','a',20000,'Ulaşım');
+      add('ev','2026-10-07','expense','a',10000,'Ev');
+      add('yalnız iade','2026-10-09','refund','a',2000,'Giyim');
+      add('önceki ay','2026-09-10','expense','a',8000,'Market');
+      add('önceki iade','2026-09-11','refund','a',8000,'Market');
+      add('başka hesap','2026-10-14','expense','b',90000,'Market');
+      add('güncel ay','2026-11-16','expense','a',9000,'Market');
+      const raw=C.backupText(wallet);
+      localStorage.setItem('ekstre-android-v1',raw);
+      return raw;
+    });
+    await page.reload();
+    const main=page.getByRole('main');
+    const heading=main.getByRole('heading',{level:1});
+    const month=()=>main.locator('#period');
+    const account=main.getByLabel('Rapor hesabı');
+    const range=main.getByLabel('Rapor aralığı');
+    const distribution=main.getByRole('region',{name:'Kategori dağılımı'});
+    const market=distribution.getByRole('button',{name:/^Market/});
+    const refundOnly=distribution.getByRole('button',{name:/^Giyim/});
+    const trend=main.getByRole('region',{name:'Aylık değişim'});
+    const trendMonths=()=>trend.locator('time').evaluateAll(items=>items.map(item=>item.dateTime));
+    const rows=main.locator('#report-category-transactions [data-edit]');
+    const active=locator=>locator.evaluate(node=>node===document.activeElement);
+    const nav=page.getByRole('navigation',{name:'Ana menü'});
+    const capture=async(name,locator)=>{
+      const dir=process.env.REPORT_SCREENSHOT_DIR;
+      if(!dir)return;
+      fs.mkdirSync(dir,{recursive:true});
+      if(locator)await locator.screenshot({path:path.join(dir,name)});
+      else await page.screenshot({path:path.join(dir,name)});
+    };
+
+    await month().fill('2026-10');
+    const preview=main.getByRole('region',{name:'Kategori bazlı gider dağılımı'});
+    assert.deepEqual(await preview.getByRole('button').evaluateAll(items=>items.map(node=>node.dataset.expenseCategory)),
+      ['Market','Ulaşım','Eğitim'],'Özet shows only the three largest gross categories');
+    await capture('01-ozet-harcama-onizleme.png',preview);
+    await main.getByRole('button',{name:'Raporlar ↗'}).click();
+    assert.equal(await heading.innerText(),'Raporlar');
+    assert(await active(heading));
+    await account.selectOption('a');
+    assert.deepEqual(await distribution.getByRole('button').evaluateAll(items=>items.map(node=>node.dataset.reportCategory)),
+      ['Market','Ulaşım','Eğitim','Ev','Giyim']);
+    assert.match(await market.innerText(),/%60 brüt pay[\s\S]*₺600,00[\s\S]*₺100,00[\s\S]*₺500,00/);
+    assert.match(await refundOnly.innerText(),/%0 brüt pay[\s\S]*-₺20,00/);
+    assert.match(await distribution.innerText(),/₺1.000,00/);
+    const six=await trendMonths();
+    assert.deepEqual(six,['2026-06','2026-07','2026-08','2026-09','2026-10','2026-11']);
+    await trend.locator('[data-trend-month="2026-08"]').getByText('Kayıt yok',{exact:true}).waitFor();
+    await trend.locator('[data-trend-month="2026-09"]').getByText('₺0,00',{exact:true}).waitFor();
+    await month().fill('2026-09');
+    assert.deepEqual(await trendMonths(),six,'changing the active month leaves the trend window in place');
+    assert.equal(await trend.locator('[aria-current=date]').getAttribute('data-trend-month'),'2026-09');
+    await month().fill('2026-10');
+    await capture('02-raporlar-390.png');
+    await capture('06-kategori-dagilimi.png',distribution);
+    await range.selectOption('12');
+    assert.equal((await trendMonths()).length,12);
+    assert(await active(range));
+    await market.focus();
+    const scrollBefore=await page.evaluate(()=>scrollY);
+    await page.keyboard.press('Enter');
+    assert.equal(await heading.innerText(),'Market');
+    assert(await active(heading));
+    assert.equal(await nav.locator('[aria-current=page]').innerText(),'Raporlar');
+    assert.deepEqual(await rows.evaluateAll(items=>items.map(node=>node.dataset.edit)),['market iadesi','bölünmüş alışveriş']);
+    assert.match(await rows.nth(1).innerText(),/₺600,00/);
+    assert.equal((await trendMonths()).length,12);
+    await range.selectOption('6');
+    await capture('03-market-390.png');
+    await capture('04-market-islemleri.png',main.getByRole('region',{name:'Kategori işlemleri'}));
+    await month().fill('2026-09');
+    await account.selectOption('b');
+    assert.equal(await rows.count(),0);
+    await main.getByText('Bu kapsamda kategori işlemi yok.').waitFor();
+    assert.equal(await page.evaluate(()=>window.handleBack()),true);
+    assert.equal(await heading.innerText(),'Raporlar');
+    assert.equal(await month().inputValue(),'2026-10');
+    assert.equal(await account.inputValue(),'a');
+    assert.equal(await range.inputValue(),'12');
+    assert(await active(market));
+    assert.equal(await page.evaluate(()=>scrollY),scrollBefore);
+
+    await refundOnly.click();
+    assert.equal(await heading.innerText(),'Giyim');
+    assert.deepEqual(await rows.evaluateAll(items=>items.map(node=>node.dataset.edit)),['yalnız iade']);
+    assert.match(await trend.locator('[data-trend-month="2026-10"]').innerText(),/-₺20,00/);
+    await main.getByRole('button',{name:'Raporlar',exact:true}).click();
+    assert(await active(refundOnly));
+    await page.setViewportSize({width:320,height:844});
+    await market.click();
+    await page.evaluate(()=>{
+      const elements=[...document.querySelectorAll('main *,nav *')];
+      const sizes=elements.map(el=>parseFloat(getComputedStyle(el).fontSize));
+      elements.forEach((el,i)=>el.style.fontSize=(sizes[i]*2)+'px');
+    });
+    const layout=await page.evaluate(()=>{
+      const edge=document.documentElement.clientWidth;
+      const controls=[...document.querySelectorAll('.advanced-reports :is(button,select,input),#nav button')];
+      const invalid=controls.flatMap(el=>{
+        const {left,right,width,height}=el.getBoundingClientRect();
+        return left>=-1&&right<=edge+1&&width>=48&&height>=48?[]:
+          [{control:el.id||el.dataset.action||el.dataset.page||el.dataset.edit,left,right,width,height}];
+      });
+      return {edge,scrollWidth:document.documentElement.scrollWidth,invalid};
+    });
+    assert.deepEqual(layout,{edge:320,scrollWidth:320,invalid:[]});
+    const scroller=trend.locator('.report-chart-scroll');
+    await scroller.focus();
+    await page.keyboard.press('ArrowRight');
+    await page.waitForFunction(()=>document.querySelector('.report-chart-scroll').scrollLeft>0);
+    await scroller.evaluate(el=>{el.scrollLeft=el.scrollWidth;});
+    assert(await trend.locator('[data-trend-month="2026-11"]').evaluate(el=>
+      el.getBoundingClientRect().right<=el.closest('.report-chart-scroll').getBoundingClientRect().right+1));
+    await capture('05-market-320-200.png',trend);
+    assert.equal(await page.evaluate(()=>localStorage.getItem('ekstre-android-v1')),original);
+    assert.deepEqual(errors,[]);
+    console.log('Slice 2 Reports: gross/refund/net, split rows, account/month isolation, fixed trend, Back/focus, 320px at 200%');
+  } finally {
+    await page.close();
+  }
 }
 
 (async () => {
@@ -528,6 +678,7 @@ async function advancedReportsJourney(page) {
     await quickAddJourney(page);
     await reviewCenterJourney(page);
     await advancedReportsJourney(page);
+    await reportsSliceJourney(browser);
     await page.locator('nav [data-page=wallet]').focus();
     await page.keyboard.press('Enter');
     assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Cüzdan');
@@ -781,19 +932,40 @@ async function advancedReportsJourney(page) {
     assert.deepEqual(await stored(),reviewed);
     console.log('CSV source labels rendered as text; fake button blocked and reimport kept the wallet intact');
 
-    await page.evaluate(cardId => {
-      const wallet = JSON.parse(localStorage.getItem('ekstre-android-v1'));
-      wallet.transactions = Array.from({length:10001},(_,i) => ({
-        id:'synthetic-large-'+i, account:cardId, date:'2026-01-01', period:'2026-01',
-        kind:'expense', desc:'Sentetik alışveriş', category:'Diğer', amount:i===10000?1:999999999999,
+    const periods=await page.evaluate(async cardId => {
+      const C=await import('/core.mjs');
+      const wallet=JSON.parse(localStorage.getItem('ekstre-android-v1'));
+      const current=C.today().slice(0,7);
+      const priorDate=new Date(current+'-01T12:00:00Z');
+      priorDate.setUTCMonth(priorDate.getUTCMonth()-1);
+      const previous=priorDate.toISOString().slice(0,7);
+      const movement=(kind,period,count,amount,lastCent)=>Array.from({length:count+1},(_,i)=>({
+        id:'synthetic-large-'+kind+'-'+i, account:cardId, date:period+'-01', period,
+        kind, desc:'Sentetik hareket', category:'Diğer', amount:i===count?lastCent:amount,
       }));
-      localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet));
+      wallet.transactions=[
+        ...movement('expense',current,10000,999999999999,1),
+        ...movement('refund',previous,9008,1000000000000,3),
+      ];
+      localStorage.setItem('ekstre-android-v1',C.backupText(wallet));
+      return {current,previous};
     },card.id);
     await page.reload();
-    await page.locator('#period').fill('2026-01');
+    await page.locator('#period').fill(periods.current);
     assert.equal(await page.locator('[data-stat=netExpense]').innerText(),'₺99.999.999.999.900,01');
     await page.locator('main [data-page=reports]').click();
     await page.getByRole('heading',{name:'Kategori dağılımı'}).waitFor();
+    const checkExactTrend=async()=>{
+      const trend=page.getByRole('region',{name:'Aylık değişim'});
+      const amount=month=>trend.locator(`[data-trend-month="${month}"] .report-column-value`).innerText();
+      assert.equal(await amount(periods.current),'₺99.999.999.999.900,01');
+      assert.equal(await amount(periods.previous),'-₺90.080.000.000.000,03');
+    };
+    await checkExactTrend();
+    await page.locator('main [data-report-category="Diğer"]').click();
+    await page.getByRole('heading',{level:1,name:'Diğer',exact:true}).waitFor();
+    await checkExactTrend();
+    console.log('Reports and category trends render exact signed BigInt totals from a validated synthetic wallet');
     assert.deepEqual(errors, []);
     console.log('Category, installment, accessibility and failed restore journeys passed');
   } finally {

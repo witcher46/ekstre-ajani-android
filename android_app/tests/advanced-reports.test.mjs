@@ -5,6 +5,8 @@ import * as C from '../app/src/main/assets/core.mjs';
 import {parseStatement} from '../app/src/main/assets/parser.mjs';
 import {advancedReports, reportRows} from '../app/src/main/assets/reports.mjs';
 import {addIncomePlan} from '../app/src/main/assets/wallet.mjs';
+import {reportCategoryView, reportsView} from '../app/src/main/assets/views.mjs';
+import {escapeHtml} from '../app/src/main/assets/ui/form-controls.mjs';
 
 const base = () => ({
   ...C.empty(),
@@ -421,3 +423,63 @@ test('aggregated kuruş remain exact above Number.MAX_SAFE_INTEGER', () => {
   assert.equal(report.totals.margin, 9_008_000_000_000_001n);
   assert.equal(report.changes.income, -9_007_999_999_999_999n);
 });
+
+test('the selected report month ranks gross category share and keeps refund-only categories reachable', () => {
+  const state = base();
+  state.transactions = [
+    movement('market-spend', 'bank', 'expense', '2026-10-04', 60_000, 'Market'),
+    movement('market-refund', 'bank', 'refund', '2026-10-08', 10_000, 'Market'),
+    movement('other-spend', 'bank', 'expense', '2026-10-04', 40_000, 'Ulaşım'),
+    movement('refund-only', 'bank', 'refund', '2026-10-09', 2_000, 'Giyim'),
+    movement('other-month', 'bank', 'expense', '2026-09-04', 90_000, 'Eski gider'),
+    movement('other-account', 'card', 'expense', '2026-10-04', 90_000, 'Kart gideri'),
+  ];
+  const html = reportsView({
+    state, period:'2026-10', reportFilters:{months:6,accountId:'bank',reveal:false},
+    fmt:C.formatMoney, esc:escapeHtml, periodControl:'',
+  });
+  const categories = [...html.matchAll(/<button[^>]+data-report-category="([^"]*)"[^>]*>([\s\S]*?)<\/button>/g)];
+  assert.deepEqual(categories.map(([,name])=>name), ['Market','Ulaşım','Giyim']);
+  assert.match(categories[0][2], /%60/);
+  assert.match(categories[0][2], /₺600,00[\s\S]*₺100,00[\s\S]*₺500,00/);
+  assert.match(categories[2][2], /%0/);
+  assert.match(categories[2][2], /-₺20,00/);
+});
+
+for (const [surface, render] of [
+  ['Reports', reportsView],
+  ['category', ctx => reportCategoryView(ctx, 'Diğer')],
+]) {
+  test(`${surface} trend renders exact signed kuruş above Number.MAX_SAFE_INTEGER`, () => {
+    const current = C.today().slice(0, 7);
+    const [year, month] = current.split('-').map(Number);
+    const monthAt = offset => new Date(Date.UTC(year, month - 1 + offset, 1)).toISOString().slice(0, 7);
+    const previous = monthAt(-1);
+    const zero = monthAt(-2);
+    const largeRows = (count, kind, period) => Array.from({length:count}, (_, index) =>
+      movement(`${kind}-${index}`, 'bank', kind, period+'-01', 1_000_000_000_000, 'Diğer'));
+    const state = C.validate({
+      ...base(),
+      transactions: [
+        ...largeRows(9_008, 'expense', current),
+        movement('extra-expense', 'bank', 'expense', current+'-01', 1, 'Diğer'),
+        ...largeRows(11_260, 'refund', previous),
+        movement('extra-refund', 'bank', 'refund', previous+'-01', 3, 'Diğer'),
+        movement('zero-expense', 'bank', 'expense', zero+'-01', 100, 'Diğer'),
+        movement('zero-refund', 'bank', 'refund', zero+'-01', 100, 'Diğer'),
+      ],
+    });
+    const html = render({
+      state, period:current, reportFilters:{months:6,accountId:'bank',reveal:false},
+      fmt:C.formatMoney, esc:escapeHtml, periodControl:'', transactionList:() => '', listLimit:150,
+    });
+    const columns = Object.fromEntries([...html.matchAll(/<li data-trend-month="([\d-]+)"[^>]*>([\s\S]*?)<\/li>/g)]
+      .map(([, period, column]) => [period, column]));
+    assert.match(columns[current], /class="report-column-value">₺90\.080\.000\.000\.000,01</);
+    assert.match(columns[previous], /class="report-column-value">-₺112\.600\.000\.000\.000,03</);
+    assert.match(columns[current], /<progress max="1000" value="800" class="report-column">/);
+    assert.match(columns[previous], /<progress max="1000" value="1000" class="report-column negative">/);
+    assert.match(columns[zero], /class="report-column-value">₺0,00</);
+    assert.match(columns[monthAt(-3)], /Kayıt yok/);
+  });
+}

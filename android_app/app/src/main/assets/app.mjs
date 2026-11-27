@@ -42,7 +42,8 @@ window.hideBalanceApprovalDetails=()=>{
 document.addEventListener('visibilitychange',()=>{
  if(document.visibilityState==='hidden')window.hideBalanceApprovalDetails();
 });
-const reportFilters={months:6,accountId:'',category:null,reveal:false};
+const reportFilters={months:6,accountId:'',reveal:false};
+const isReportPage=route=>route==='reports'||route==='reportCategory';
 function notice(message,{error=false}={}){
  const live=$(error?'error-announcement':'status-announcement');
  live.textContent=message;
@@ -210,6 +211,10 @@ window.handleBack=()=>{
  const previous=history.pop();
  if(!previous)return false;
  ({page,detailId,query,expenseCategory}=previous);
+ if(previous.reportContext){
+  period=previous.reportContext.period;
+  Object.assign(reportFilters,previous.reportContext.filters);
+ }
  resetBalanceReview(page,detailId);
  render();restoreFocus(previous.opener,{returning:true});window.scrollTo(0,previous.scroll);
  return true;
@@ -241,6 +246,7 @@ window.onPdfText=async (text,request)=>{
  }catch(e){window.onPdfError(e.message,request);}
 };
 function backFallback(){
+ if(page==='reportCategory')return {page:'reports',title:'Raporlar'};
  if(page==='savingsGoals'||page==='reminders')return {page:'plan',title:'Planlama'};
  return page==='statement'||page==='review'
   ? {page:'import',title:'Ekstreler'} : {page:'wallet',title:'Cüzdan'};
@@ -255,6 +261,7 @@ function go(next,id=null,category=null,{recordHistory=true}={}){
  if(next!==page||id!==detailId||category!==expenseCategory){
   if(recordHistory)history.push({
    page,detailId,query,expenseCategory,title:$('main').querySelector('h1')?.textContent.trim(),
+   reportContext:isReportPage(page)?{period,filters:{...reportFilters}}:null,
    scroll:window.scrollY,opener:focusTarget(actionTrigger||document.activeElement),
   });
   resetBalanceReview(next,id);
@@ -329,7 +336,7 @@ function importCategoryOption(merchant,current,index,selectedCategory,category=C
 }
 function render(){
  $('nav').innerHTML=renderBottomNavigation(page);
- document.body.dataset.surface=loadFailed?'':page;
+ document.body.dataset.surface=loadFailed?'':isReportPage(page)?'reports':page;
  if(loadFailed){
   const buttons=[];
   for(const slot of [3,2]){
@@ -341,7 +348,7 @@ function render(){
  }
  const filteredExpenses=page==='transactions'&&expenseCategory!==null;
  const mode=!filteredExpenses&&['transactions','reports'].includes(page)?periodMode:'calendar';
- const periodLabel=page==='reports'?'Bitiş ayı':'Takvim ayı / ekstre dönemi';
+ const periodLabel=isReportPage(page)?'Seçili ay':'Takvim ayı / ekstre dönemi';
  const s=C.summary(state,period,mode),rows=C.rowsForPeriod(state,period,mode),periodControl=`<input class="period" id="period" aria-label="${periodLabel}" type="month" max="9999-12" value="${period}">`;
  const modeControl=select('view-mode','Rapor kapsamı',options([['calendar','Takvim ayı · işlem tarihine göre'],['statement','Ekstre dönemi · yalnız kartlar']],periodMode));
  let html='';
@@ -381,6 +388,7 @@ function render(){
  const budgets=Object.entries(state.budgets).filter(([k])=>k.startsWith(period+'|'));
  html=`<h1>Planlama</h1><p class="lead">Bütçeni ve yaklaşan ödemelerini takip et.</p><div class="actions"><button type="button" data-page="reminders">Hatırlatmalar</button><button type="button" data-page="savingsGoals">Birikim hedefleri</button></div>${V.incomePlansView(ctx,{embedded:true})}<div class="toolbar">${periodControl}<button data-action="budget">+ Bütçe</button></div><div class="panel"><h2>Aylık bütçe</h2>${budgets.map(([k,v])=>{const cat=k.slice(8),used=cat==='Toplam'?s.net:s.categories.find(([c])=>c===cat)?.[1]||0;return `<div class="row"><div><strong>${esc(cat)}</strong><small>${fmt(used)} / ${fmt(v)}</small>${used>v?'<small class="danger">Bütçe aşıldı</small>':''}</div><button data-budget="${esc(k)}" aria-label="Bütçeyi kaldır">×</button></div><progress class="bar" aria-label="${esc(cat)} bütçe kullanımı" aria-valuetext="${esc(`${plainMoney(used)} / ${plainMoney(v)}${used>v?' · Bütçe aşıldı':''}`)}" max="${Math.max(v,1)}" value="${C.positiveCents(used)}"></progress>`;}).join('')||'<p>Bu dönem için bütçe ekle.</p>'}</div><div class="panel"><div class="row"><h2>Abonelikler</h2><button data-action="subscription">+ Ekle</button></div>${state.subscriptions.map(r=>`<div class="row"><div><strong>${esc(r.name)}</strong><small>${dateStatus(r.next)} · ${fmt(r.amount)}<br>${esc(accountName(r.account))}</small></div><div><button data-pay="${esc(r.id)}" data-due="${esc(r.next)}">Ödendi</button><button data-subdelete="${esc(r.id)}" aria-label="Aboneliği sil">×</button></div></div>`).join('')||'<p>Aylık ödemelerini planla. Ödendi düğmesi gerçek ödeme tarihini sorar; bir vade bir kez kaydedilir.</p>'}</div><div class="panel"><h2>Ekstre ödeme takvimi</h2>${C.upcomingPayments(state).filter(st=>st.type==='statement').map(st=>`<div class="row"><div><strong>${esc(st.name)}</strong><small>${dateStatus(st.date)} · kaydedilen ödemelere göre kalan tahmin</small></div><strong>${st.amount===null?'Okunamadı':fmt(st.amount)}</strong></div>`).join('')||'<p>Son ödeme tarihi bulunan bir ekstre aktar.</p>'}<p class="notice">Ödeme takvimi bankadaki ödeme durumunu doğrulamaz.</p></div><div class="panel"><h2>Taksitli hareketler</h2>${transactionList(rows.filter(t=>t.installment))}<p class="notice">Taksit ayrıntıları ve kalan taksit tahmini kartın ayrıntısında gösterilir. Tahmin gelecekteki harcamaları bugünün giderine eklemez.</p></div>`;
  }else if(page==='reports'){html=V.reportsView(ctx);
+ }else if(page==='reportCategory'){html=V.reportCategoryView(ctx,detailId);
  }else if(page==='import'){html=V.importView(ctx,pending);
  }else if(page==='statement'){html=V.statementView(ctx,detailId);
  }else if(page==='categories'){
@@ -395,8 +403,7 @@ function render(){
  for(const [id,key] of [['view-mode','mode'],['kind-filter','kind'],['account-filter','account']])$('f-'+id)?.addEventListener('change',e=>{if(key==='mode')periodMode=e.target.value;else if(key==='kind')kindFilter=e.target.value;else accountFilter=e.target.value;render();$('f-'+id)?.focus({preventScroll:true});});
  for(const [id,update] of [
   ['f-report-range',value=>{reportFilters.months=Number(value);}],
-  ['f-report-account',value=>{reportFilters.accountId=value;reportFilters.category=null;}],
-  ['f-report-category',value=>{reportFilters.category=value?value.slice('category:'.length):null;}],
+  ['f-report-account',value=>{reportFilters.accountId=value;}],
  ])$(id)?.addEventListener('change',e=>{update(e.target.value);render();$(id)?.focus({preventScroll:true});});
  requestAnimationFrame(fitLayout);
  $('period')?.addEventListener('change',e=>{
@@ -969,7 +976,7 @@ const actions={
  },
  cancelImport:()=>{invalidatePdfPreview();document.querySelector('[data-action="pdf"]')?.focus();}
 };
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if('balanceHistory' in b.dataset){go('balanceApprovalHistory',b.dataset.balanceHistory);}else if(b.dataset.balanceApproval){go('balanceApprovalDetail',b.dataset.balanceApproval);}else if(b.dataset.balanceReapprove){reexamineBalanceApproval(b.dataset.balanceReapprove);}else if(b.dataset.balanceReview){go('balanceReview',b.dataset.balanceReview);}else if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete&&confirm('Gelir planı kaldırılsın mı? Kaydedilmiş gelirler korunur.')){const next=copy();next.incomePlans=next.incomePlans.filter(p=>p.id!==b.dataset.incomeDelete);commit(next);}else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action](e);else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule&&confirm('Bu satıcı kuralı silinsin mi?')){commit(C.removeMerchantRule(state,b.dataset.removeRule));closeModal();}else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link){if(confirm('Bu iki kaynak aynı işlemi mi gösteriyor? İkinci kez sayılmayacak.'))commit(C.resolveCandidate(state,b.dataset.link,'link',$('match-'+b.dataset.link).value));}else if(b.dataset.distinct){if(confirm('Bu ayrı bir gerçek işlem mi? Toplama ayrıca eklenecek.'))commit(C.resolveCandidate(state,b.dataset.distinct,'distinct'));}else if(b.dataset.subdelete&&confirm('Abonelik silinsin mi?')){const next=copy();next.subscriptions=next.subscriptions.filter(r=>r.id!==b.dataset.subdelete);commit(next);}else if(b.dataset.budget&&confirm('Bütçe kaldırılsın mı?')){const next=copy();delete next.budgets[b.dataset.budget];commit(next);}}catch(error){if(b.closest('#quick-add-options'))showDialogError(error.message);else errorNotice(error.message);}finally{actionTrigger=null;}});
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;actionTrigger=b;try{if('balanceHistory' in b.dataset){go('balanceApprovalHistory',b.dataset.balanceHistory);}else if(b.dataset.balanceApproval){go('balanceApprovalDetail',b.dataset.balanceApproval);}else if(b.dataset.balanceReapprove){reexamineBalanceApproval(b.dataset.balanceReapprove);}else if(b.dataset.balanceReview){go('balanceReview',b.dataset.balanceReview);}else if('reportCategory' in b.dataset){go('reportCategory',b.dataset.reportCategory);}else if('expenseCategory' in b.dataset){go('transactions',null,b.dataset.expenseCategory);}else if(b.dataset.statementView){go('statement',b.dataset.statementView);}else if(b.dataset.cardView||b.dataset.accountView){go('account',b.dataset.cardView||b.dataset.accountView);}else if(b.dataset.payCard)payCardForm(b.dataset.payCard);else if(b.dataset.bindPayment)attachPaymentForm(b.dataset.bindPayment);else if(b.dataset.incomeReceive)receiveIncomeForm(b.dataset.incomeReceive,b.dataset.due);else if(b.dataset.incomeDelete&&confirm('Gelir planı kaldırılsın mı? Kaydedilmiş gelirler korunur.')){const next=copy();next.incomePlans=next.incomePlans.filter(p=>p.id!==b.dataset.incomeDelete);commit(next);}else if(b.dataset.page)go(b.dataset.page);else if(b.dataset.action)actions[b.dataset.action](e);else if(b.dataset.expenseCategoryEdit)expenseCategoryForm(b.dataset.expenseCategoryEdit);else if(b.dataset.expenseCategoryRemove)confirmExpenseCategoryRemoval(b.dataset.expenseCategoryRemove);else if(b.dataset.merchantRule)merchantRuleForm(state.merchantCategoryRules.find(r=>r.id===b.dataset.merchantRule));else if(b.dataset.removeRule&&confirm('Bu satıcı kuralı silinsin mi?')){commit(C.removeMerchantRule(state,b.dataset.removeRule));closeModal();}else if(b.dataset.edit)transactionForm(state.transactions.find(t=>t.id===b.dataset.edit));else if(b.dataset.account)accountForm(state.accounts.find(t=>t.id===b.dataset.account));else if(b.dataset.delete)confirmTransactionRemoval(b.dataset.delete);else if(b.dataset.pay)subscriptionPayment(b.dataset.pay,b.dataset.due);else if(b.dataset.unlink){commit(C.resolveCandidate(state,b.dataset.unlink,'unlink'));}else if(b.dataset.link){if(confirm('Bu iki kaynak aynı işlemi mi gösteriyor? İkinci kez sayılmayacak.'))commit(C.resolveCandidate(state,b.dataset.link,'link',$('match-'+b.dataset.link).value));}else if(b.dataset.distinct){if(confirm('Bu ayrı bir gerçek işlem mi? Toplama ayrıca eklenecek.'))commit(C.resolveCandidate(state,b.dataset.distinct,'distinct'));}else if(b.dataset.subdelete&&confirm('Abonelik silinsin mi?')){const next=copy();next.subscriptions=next.subscriptions.filter(r=>r.id!==b.dataset.subdelete);commit(next);}else if(b.dataset.budget&&confirm('Bütçe kaldırılsın mı?')){const next=copy();delete next.budgets[b.dataset.budget];commit(next);}}catch(error){if(b.closest('#quick-add-options'))showDialogError(error.message);else errorNotice(error.message);}finally{actionTrigger=null;}});
 function rememberImportAccount(field){
  importDraft.account=field.value;
  $('import-account-display').textContent=field.selectedOptions[0]?.textContent??'';
