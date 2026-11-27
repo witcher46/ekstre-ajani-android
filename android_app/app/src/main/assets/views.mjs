@@ -115,7 +115,7 @@ function walletCard(ctx,account) {
   const id = ctx.esc(account.id);
   return `<article class="wallet-card">
     <button class="panel wallet-card-hero" data-card-view="${id}">
-      <small>Kredi kartı</small><strong>${ctx.esc(account.name)}</strong>
+      <small>Kredi kartı ${uiIcon('next')}</small><strong>${ctx.esc(account.name)}</strong>
       <b class="dashboard-amount">${amount(ctx,card.debt)}</b><small>Güncel kart borcu tahmini</small>
     </button>
     <div class="panel dashboard-list">
@@ -123,6 +123,23 @@ function walletCard(ctx,account) {
       <div class="dashboard-row">${dashboardRow('plan','Kalan dönem borcu',card.latest?.due?'Son ödeme · '+ctx.esc(card.latest.due):'Son ödeme tarihi bilinmiyor',amount(ctx,card.statementRemaining))}</div>
       ${card.credit ? `<div class="dashboard-row">${dashboardRow('wallet','Kart artı bakiyesi','Kayıtlarına göre',amount(ctx,card.credit))}</div>` : ''}
       <div class="dashboard-actions wallet-account-actions"><button data-account="${id}">Hesabı düzenle</button><button data-pay-card="${id}">Ödeme kaydet</button></div>
+    </div>
+  </article>`;
+}
+
+function walletLiquidAccount(ctx,account) {
+  const {state,esc} = ctx;
+  const id = esc(account.id);
+  const type = account.type === 'bank' ? 'Banka hesabı' : 'Nakit hesabı';
+  const balance = C.balance(state,account);
+  const label = esc(`${account.name} ${type} · Kullanılabilir bakiye ${C.formatMoney(balance)}`);
+  return `<article class="wallet-card">
+    <button class="panel wallet-card-hero" type="button" data-account-view="${id}" aria-label="${label}">
+      <small>${type} ${uiIcon('next')}</small><strong>${esc(account.name)}</strong>
+      <b class="dashboard-amount">${amount(ctx,balance)}</b><small>Kullanılabilir bakiye</small>
+    </button>
+    <div class="dashboard-actions wallet-account-actions">
+      <button type="button" data-account="${id}" aria-label="${esc(account.name+' hesabını düzenle')}">Hesabı düzenle</button>
     </div>
   </article>`;
 }
@@ -139,10 +156,8 @@ export function walletView(ctx) {
     ${!state.accounts.length ? `<section class="panel empty"><b>Henüz hesap yok</b><p>Banka veya nakit bakiyeni ve kartlarını ekleyerek başla.</p><button data-action="demo">Örnek cüzdan</button></section>` : ''}
     <section class="dashboard-section" aria-labelledby="available-cash">
       <div class="section-heading"><h2 id="available-cash">Banka ve nakit bakiyesi</h2><b data-stat="cash">${amount(ctx,overview.cash)}</b></div>
-      <div class="panel dashboard-list">${accounts.map(account => `<div class="wallet-account-row">
-        <button class="dashboard-row" type="button" data-account-view="${esc(account.id)}">${dashboardRow(account.type,esc(account.name),account.type==='bank'?'Banka hesabı':'Nakit hesabı',amount(ctx,C.balance(state,account)))}</button>
-        <button class="icon wallet-account-edit" type="button" data-account="${esc(account.id)}" aria-label="${esc(account.name+' hesabını düzenle')}">${uiIcon('edit')}</button>
-      </div>`).join('') || noRows('Henüz banka veya nakit hesabı yok.')}</div>
+      ${accounts.length ? `<div class="wallet-cards">${accounts.map(account => walletLiquidAccount(ctx,account)).join('')}</div>` :
+        `<div class="panel">${noRows('Henüz banka veya nakit hesabı yok.')}</div>`}
     </section>
     <section class="panel" aria-label="Cüzdan toplamı"><dl class="dashboard-totals">${compactStat(ctx,'cardDebt','Toplam kart borcu tahmini',overview.cardDebt)}${compactStat(ctx,'cardCredit','Toplam kart artı bakiyesi',overview.cardCredit)}${compactStat(ctx,'netWorth','Net varlık',overview.netWorth)}</dl><p class="notice">Borç ve bakiye, uygulamadaki kayıtlara göre gösterilir.</p></section>
     <button data-action="transfer">Hesaplar arası transfer</button>

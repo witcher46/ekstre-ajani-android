@@ -35,7 +35,7 @@ try{
     if(document.documentElement.scrollWidth>innerWidth+1)result.push('page-overflow');
     for(const row of document.querySelectorAll('main .row,main .chart-label,main .grid,main .summary-grid,main .comparison-values,main .quick-actions,main .compact-totals>div,main .card-details>div')){const children=[...row.children];for(let i=0;i<children.length;i++)for(let j=i+1;j<children.length;j++){const a=rect(children[i]),b=rect(children[j]);if(intersects(a,b))result.push('sibling-overlap:'+row.className);}}
     for(const e of document.querySelectorAll('main .money,dialog .money')){const r=document.createRange();r.selectNodeContents(e);const box=e.getBoundingClientRect(),text=r.getBoundingClientRect();if(text.left<box.left-1||text.right>box.right+1||text.right>innerWidth+1)result.push('money-clipped');if(e.dataset.auditBaseFont&&parseFloat(getComputedStyle(e).fontSize)<Number(e.dataset.auditBaseFont)*window.auditTextScale-.1)result.push('money-font-shrunk');}
-    for(const e of document.querySelectorAll('button'))if(e.closest('main')&&e.getBoundingClientRect().width<44)result.push('small-target');return [...new Set(result)];});
+    for(const e of document.querySelectorAll('main button,main summary'))if(e.checkVisibility()&&e.getBoundingClientRect().width<44)result.push('small-target');return [...new Set(result)];});
    results.push({width,scale,page:name,findings});if((width===320||width===390)&&scale===1.5&&['home','wallet','transactions','plan','reports','cardDetail','bankDetail','incomePlans','importPreview','transactionModal','paymentModal'].includes(name)){await page.evaluate(()=>document.querySelector('#toast').classList.remove('visible'));await page.screenshot({path:path.join(out,`${name}-${width}-150.png`),fullPage:true});}
   }
  }
