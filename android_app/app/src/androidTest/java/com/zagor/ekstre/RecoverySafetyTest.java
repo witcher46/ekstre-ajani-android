@@ -116,9 +116,13 @@ public class RecoverySafetyTest {
    waitFor(scenario,"!!document.querySelector('#nav:not([hidden])')");
    js(scenario,"document.querySelector('#settings').click()");
    waitFor(scenario,"!!document.querySelector('[data-action=recover]')");
-   js(scenario,"window.confirm=()=>false;document.querySelector('[data-action=recover]').click()");
+   js(scenario,"document.querySelector('[data-action=recover]').click()");
+   waitFor(scenario,"!!document.querySelector('#modal[open][data-variant=backup-replace]')");
    assertArrayEquals(new String[]{DAMAGED,DAMAGED+"2",GOOD},rawSlots(db));
-   js(scenario,"window.confirm=()=>true;document.querySelector('[data-action=recover]').click()");
+   assertEquals("true",js(scenario,"window.handleBack()"));
+   assertArrayEquals(new String[]{DAMAGED,DAMAGED+"2",GOOD},rawSlots(db));
+   js(scenario,"document.querySelector('[data-action=recover]').click()");
+   js(scenario,"document.querySelector('#modal[open][data-variant=backup-replace] #submit').click()");
    waitFor(scenario,"Android.load()==="+JSONObject.quote(GOOD));
    assertEquals(GOOD,rawSlots(db)[2]);
    scenario.recreate();
@@ -158,7 +162,9 @@ public class RecoverySafetyTest {
    scenario.recreate();
    waitFor(scenario,"document.querySelector('main h1')?.textContent==='Cüzdan kurtarma'");
    assertEquals("0",js(scenario,"document.querySelectorAll('[data-action=backup]').length"));
-   js(scenario,"window.confirm=()=>true;document.querySelector('[data-action=recover][data-slot=\"3\"]').click()");
+   js(scenario,"document.querySelector('[data-action=recover][data-slot=\"3\"]').click()");
+   waitFor(scenario,"!!document.querySelector('#modal[open][data-variant=backup-replace]')");
+   js(scenario,"document.querySelector('#modal[open][data-variant=backup-replace] #submit').click()");
    waitFor(scenario,"Android.load()==="+JSONObject.quote(GOOD));
    assertArrayEquals(new String[]{GOOD,DAMAGED+"2",GOOD},rawSlots(db));
   }

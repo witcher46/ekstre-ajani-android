@@ -3,6 +3,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_PATH||'playwright');
 const fs=require('fs'),path=require('path'),assert=require('assert');
 const {createHash}=require('node:crypto');
 const root=path.resolve(__dirname,'../app/src/main/assets'),out=path.resolve(__dirname,'../test-output/wallet-v2');fs.mkdirSync(out,{recursive:true});
+const approveBackup=page=>page.getByRole('dialog',{name:'JSON yedeğini incele'}).getByRole('button',{name:'Cüzdanı değiştir'}).click();
 
 function serveAssets(page){
   return page.route('https://wallet.test/**',route=>{
@@ -195,6 +196,7 @@ async function futureManualPaymentJourney(browser){
     budgets:{},subscriptions:[],categories:['Diğer']};
   async function restore(state){
     await page.locator('#backup-file').setInputFiles({name:'synthetic-fs1.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(state))});
+    await approveBackup(page);
     await page.waitForFunction(count=>JSON.parse(localStorage.getItem('ekstre-android-v1'))?.transactions.length===count,state.transactions.length);
   }
   async function openCard(){
@@ -245,6 +247,7 @@ async function futureManualPaymentJourney(browser){
     const legacy={...payment,id:'fs1-legacy',date:future};
     await page.locator('#backup-file').setInputFiles({name:'synthetic-fs1-legacy.json',mimeType:'application/json',
       buffer:Buffer.from(JSON.stringify({...wallet,transactions:[legacy]}))});
+    await approveBackup(page);
     await page.waitForFunction(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')).transactions[0]?.id==='fs1-legacy');
     assert.deepEqual((await read()).transactions,[legacy]);
     await assertFigures('1.000,00','100,00','0,00');
@@ -638,6 +641,7 @@ async function reconciliationJourney(browser){
       await page.locator('#backup-file').setInputFiles({
         name:`synthetic-history-v${state.version}.json`,mimeType:'application/json',buffer:Buffer.from(JSON.stringify(state)),
       });
+      await approveBackup(page);
       await page.waitForFunction(version=>window.fixture.snapshot().version===version,state.version);
     }
     async function assertFinancialOverview(){
@@ -901,7 +905,7 @@ async function reconciliationJourney(browser){
  await openRoute(page,'plan');await page.locator('[data-income-receive]').click();await page.locator('[name=account]').selectOption(cash);await page.locator('[name=receivedOn]').fill('2026-11-05');await page.locator('#submit').click();s=await read();assert.equal(s.transactions.at(-1).kind,'income');assert.equal(s.transactions.at(-1).account,cash);assert.equal(s.transactions.at(-1).date,'2026-11-05');assert.equal(s.transactions.at(-1).incomePlanDue,'2026-11-03');assert.equal(s.incomePlans[0].next,'2026-12-03');
  const unknown='QNB\nHesap Kesim Tarihi: 05/11/2026\n04/11/2026 SENTETIK MAGAZA PEN 4.ndirim 75.25';await page.evaluate(t=>window.onPdfText(t),unknown);assert((await page.locator('main').innerText()).includes('İade'));await page.locator('#import-account').selectOption(card);const n=(await read()).transactions.length;assert(await page.locator('[data-action=confirmImport]').isDisabled());assert.equal((await read()).transactions.length,n);await page.locator('#acknowledge-import').check();await page.locator('[data-action=confirmImport]').click();assert.equal((await read()).transactions.length,n+1);
  s=await read();const importedRefund=s.transactions.at(-1);await openRoute(page,'transactions');await page.locator('#period').fill('2026-11');await page.locator(`[data-edit="${importedRefund.id}"]`).click();assert(await page.locator('[name=kind]').isDisabled());assert(await page.locator('[name=account]').isDisabled());await page.locator('[name=desc]').fill('Düzeltilmiş sentetik iade');await page.locator('[name=category]').selectOption('Market / Gıda');await page.locator('[name=note]').fill('Belgeyle kontrol edildi');await page.locator('#submit').click();assert.equal(await page.locator('dialog[open]').count(),0);await page.evaluate(t=>window.onPdfText(t),unknown);await page.locator('#import-account').selectOption(card);await page.locator('#acknowledge-import').check();await page.locator('[data-action=confirmImport]').click();const kept=(await read()).transactions.find(t=>t.id===importedRefund.id);assert.equal(kept.desc,'Düzeltilmiş sentetik iade');assert.equal(kept.category,'Market / Gıda');assert.equal(kept.note,'Belgeyle kontrol edildi');assert.equal(kept.sourceDesc,importedRefund.sourceDesc);
- s=await read();const old={...s,legacyUnknown:{keep:'sentetik'}};delete old.incomePlans;delete old.incomeCategories;await page.locator('#backup-file').setInputFiles({name:'synthetic-v1.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});await page.waitForFunction(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')).legacyUnknown?.keep==='sentetik');assert.deepEqual((await read()).transactions.map(t=>t.id),old.transactions.map(t=>t.id));assert.deepEqual((await read()).accounts,old.accounts);await page.reload();assert.equal((await read()).legacyUnknown.keep,'sentetik');
+ s=await read();const old={...s,legacyUnknown:{keep:'sentetik'}};delete old.incomePlans;delete old.incomeCategories;await page.locator('#backup-file').setInputFiles({name:'synthetic-v1.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});await approveBackup(page);await page.waitForFunction(()=>JSON.parse(localStorage.getItem('ekstre-android-v1')).legacyUnknown?.keep==='sentetik');assert.deepEqual((await read()).transactions.map(t=>t.id),old.transactions.map(t=>t.id));assert.deepEqual((await read()).accounts,old.accounts);await page.reload();assert.equal((await read()).legacyUnknown.keep,'sentetik');
  // Legacy v1 linked manual payments may carry a statement period different from the date.
  s=await read();s.transactions.push({id:'legacy-manual',source:'manual',account:bank,target:card,date:'2026-10-03',period:'2026-11',desc:'Sentetik eski ödeme',amount:100,kind:'payment',category:'Kart ödemesi',note:''},{id:'legacy-pdf',source:'pdf',account:card,date:'2026-10-03',period:'2026-11',desc:'Sentetik eski ödeme',amount:100,kind:'cardPayment',category:'Kart ödemesi',note:'',linkedTo:'legacy-manual',matchStatus:'linked'});await page.evaluate(s=>localStorage.setItem('ekstre-android-v1',JSON.stringify(s)),s);await page.reload();await openRoute(page,'transactions');await page.locator('#period').fill('2026-10');await page.locator('[data-edit=legacy-manual]').click();await page.locator('[name=note]').fill('Eski dönemi koruyan not');await page.locator('#submit').click();assert.equal((await read()).transactions.find(t=>t.id==='legacy-manual').period,'2026-11');assert.equal((await read()).transactions.find(t=>t.id==='legacy-manual').note,'Eski dönemi koruyan not');
  await page.locator('nav [data-page=wallet]').click();await account('Sentetik ikinci kart','card','0');s=await read();const card2=s.accounts.at(-1).id;

@@ -142,14 +142,15 @@ async function categorySuggestionsJourney(browser) {
     await page.locator('nav [data-page=home]').click();
     assert.deepEqual(await stats(),totals);
     await page.locator('#settings').click();
-    assert.equal(await page.locator('main .lead').innerText(),'Tarayıcı önizlemesi');
+    const displayedVersion=page.locator('.settings-intro > p');
+    assert.equal(await displayedVersion.innerText(),'Tarayıcı önizlemesi');
     await page.evaluate(()=>{window.Android={versionName:()=>'<b>9.8.7-test</b>'};});
     await page.locator('#settings').click();
-    assert.equal(await page.locator('main .lead').innerText(),'Android sürümü <b>9.8.7-test</b>');
-    assert.equal(await page.locator('main .lead b').count(),0);
+    assert.equal(await displayedVersion.innerText(),'Android sürümü <b>9.8.7-test</b>');
+    assert.equal(await displayedVersion.locator('b').count(),0);
     await page.evaluate(()=>{window.Android={versionName:()=>{throw Error('Köprü kullanılamıyor');}};});
     await page.locator('#settings').click();
-    assert.equal(await page.locator('main .lead').innerText(),'Android sürüm bilgisi kullanılamıyor');
+    assert.equal(await displayedVersion.innerText(),'Android sürüm bilgisi kullanılamıyor');
     console.log('Category suggestions: 320px, explicit saves, cancel/keyboard focus, stable totals and version fallbacks passed');
   } finally {
     await page.close();

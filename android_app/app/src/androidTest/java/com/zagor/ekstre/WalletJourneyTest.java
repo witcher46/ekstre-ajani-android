@@ -183,7 +183,7 @@ public class WalletJourneyTest {
     waitJs(a,"!!document.querySelector('[data-stat=cardDebt]')");
     String original=js(a,"Android.load()"),totals=js(a,"[...document.querySelectorAll('[data-stat]')].map(e=>e.textContent)");
     click(a,"#settings");
-    assertEquals(JSONObject.quote("Android sürümü "+version),js(a,"document.querySelector('main .lead').textContent"));
+    assertEquals(JSONObject.quote("Android sürümü "+version),js(a,"document.querySelector('.settings-intro > p').textContent"));
     openRoute(a,"transactions");
     try{
      waitJs(a,"innerWidth===320 && Android.textZoom()===200 && document.querySelectorAll('nav button').length===4 && !!document.querySelector('"+apply+"')");
@@ -444,10 +444,10 @@ public class WalletJourneyTest {
  }
  private void restoreDownload(ActivityScenario<MainActivity> a,String name)throws Exception{
   openBackupPicker(a);selectDownload(name);
-  UiObject2 confirm=device.wait(Until.findObject(By.res("android:id/button1").text(java.util.regex.Pattern.compile("(?iu)onayla"))),10000);
-  if(confirm==null)evidence("restore-no-confirm");
-  assertNotNull("Restore asks before replacing wallet",confirm);
-  confirm.click();
+  String confirm="#modal[open][data-variant=backup-replace] #submit";
+  waitJs(a,"!!document.querySelector('"+confirm+"')");
+  assertEquals("\"Cüzdanı değiştir\"",js(a,"document.querySelector('"+confirm+"').textContent"));
+  click(a,confirm);
  }
  @Test public void restorePreviousTrialBackup()throws Exception{
   String path=InstrumentationRegistry.getArguments().getString("previousTrialBackup");
