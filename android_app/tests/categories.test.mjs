@@ -230,3 +230,26 @@ test('new subscription payments use an active category and preserve the historic
   assert.equal(legacy.transactions.at(-1).category,'');
   assert.deepEqual(C.readBackup(C.backupText(legacy)),legacy);
 });
+
+test('conservative PDF merchant aliases fold Turkish characters without guessing ambiguous words', () => {
+  for (const [name,category] of [
+    ['POS/KOMAGENE – SENTETIK', 'Dışarıda yeme'],
+    ['YEMEN KAHVESİ', 'Dışarıda yeme'],
+    ['YEMEN KAHVESI', 'Dışarıda yeme'],
+    ['Sentetik Kafe', 'Dışarıda yeme'],
+    ['Sentetik Café', 'Dışarıda yeme'],
+    ['Sentetik Coffee', 'Dışarıda yeme'],
+    ['Sentetik Eczane', 'Sağlık'],
+    ['SENTETİK ECZANESİ', 'Sağlık'],
+    ['SENTETIK ECZANESI', 'Sağlık'],
+    ['ECZANESIYIM', 'Diğer'],
+    ['AKOMAGENE', 'Diğer'],
+    ['KOMA(cid:7)GENE', 'Diğer'],
+    ['KOMAGENE MARKET', 'Diğer'],
+    ['YEMEN KAHVESI ECZANESI', 'Diğer'],
+    ['EFT KOMAGENE', 'Diğer'],
+    ['REF 123456 KOMAGENE', 'Diğer'],
+    ['SENTETIK ECZANESI ISLEM UCRETI', 'Diğer'],
+    ['BAHARAT KAHVESI MAKINESI', 'Diğer'],
+  ]) assert.equal(categorize(name),category,name);
+});

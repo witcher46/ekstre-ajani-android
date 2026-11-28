@@ -2,7 +2,7 @@ import {sha256} from './sha256.mjs';
 import * as C from './core.mjs';
 import * as W from './wallet.mjs';
 import * as V from './views.mjs';
-import {parseStatementWithIdentity} from './parser.mjs';
+import {parseStatementWithIdentity,pdfMerchantAliasCategory} from './parser.mjs';
 import {loadPdfIdentityKey} from './pdf-identity.mjs';
 import {parseStatementCsv} from './csv.mjs';
 import {createDialog} from './ui/dialog.mjs';
@@ -334,12 +334,19 @@ function go(next,id=null,category=null,{recordHistory=true}={}){
  render({tabEntry,walletEntry});window.scrollTo(0,0);focusMain();
 }
 const empty=(message,title='Buradan başlayalım')=>`<div class="empty"><b>${title}</b><p>${message}</p></div>`;
-function expenseCategorySuggestion(row,lookup=merchant=>C.categorySuggestion(state,merchant)){
+function expenseCategorySuggestion(row,lookup){
  if(!row||row.linkedTo||C.allocationsFor(state,row)||!['expense','refund'].includes(row.kind))return null;
- const suggestion=lookup(row.merchantName??row.sourceDesc??row.desc);
- return suggestion&&suggestion.category!==row.category?suggestion:null;
+ const pdfFallback=C.sourceOf(row)==='pdf'&&row.category==='Diğer';
+ if(pdfFallback&&(row.reviewed||row.categoryConfirmed===true))return null;
+ const sourceName=row.merchantName??row.sourceDesc;
+ const suggestion=(lookup??C.indexCategorySuggestions(state,{includeConflicts:true}))(sourceName??row.desc);
+ if(suggestion)return suggestion.category&&suggestion.category!==row.category?suggestion:null;
+ if(!pdfFallback||!sourceName||row.kind!=='expense'||row.matchStatus==='pending')return null;
+ const category=pdfMerchantAliasCategory(sourceName);
+ return category&&state.categories.includes(category)?{category,source:'pdf-alias'}:null;
 }
 const categorySuggestionReasons={
+ 'pdf-alias':'Banka açıklamasına göre önerildi. Yalnızca seçtiğin hareketin kategorisi değişir.',
  exact:'Bu satıcı için kaydettiğin kategori kuralı eşleşti.',
  parent:'Bu satıcı için kaydettiğin genel kategori kuralı eşleşti.',
  sibling:'Başka bir numaralı şube için kaydettiğin kategori kuralı bu kategoriyi öneriyor.',
@@ -408,12 +415,12 @@ function installedVersionLabel(){
  return 'Android sürüm bilgisi kullanılamıyor';
 }
 function transactionList(rows,{suggestCategories=false,limit=listLimit,statementSource=false}={}){
- const lookup=suggestCategories&&!loadFailed&&rows.length&&C.indexCategorySuggestions(state);
+ const lookup=suggestCategories&&!loadFailed&&rows.length&&C.indexCategorySuggestions(state,{includeConflicts:true});
  return rows.length?rows.slice(0,limit).map((t,index)=>{
   const categoryText=t.allocationView?t.category:C.allocationsFor(state,t)?'Bölünmüş gider':t.category;
   const edit=`<button class="row transaction" type="button" data-edit="${esc(t.id)}"><span class="left"><strong>${esc(t.desc)}</strong><small>${esc(t.date)} · ${esc(accountName(t.account))}<br>${esc(categoryText)} · ${esc(kinds[t.kind])}${t.installment?' · '+esc(t.installment):''}${t.matchStatus==='pending'?(t.kind==='payment'?'<br>Banka hareketi kaydedildi; ikinci kart etkisi incelemede':'<br>Olası eşleşme · henüz toplama eklenmedi'):t.linkedTo?'<br>Aynı işleme bağlı · ikinci kez sayılmıyor':''}</small></span><span class="amount">${fmt(t.amount)}${t.reviewed?'<small>İncelendi</small>':''}</span></button>`;
-  if(statementSource)return `<article class="saved-statement-row">${edit}${V.statementSource(t.sourceDesc)}</article>`;
-  return lookup?categorySuggestionRow(t,edit,index,lookup):edit;
+  const content=lookup&&(!statementSource||t.category==='Diğer')?categorySuggestionRow(t,edit,index,lookup):edit;
+  return statementSource?`<article class="saved-statement-row">${content}${V.statementSource(t.sourceDesc)}</article>`:content;
  }).join(''):empty('Henüz işlem yok. Hesap ekleyebilir veya bir ekstre aktarabilirsin.');
 }
 function transactionResults(rows,filteredExpenses){
@@ -458,8 +465,18 @@ function transactionsView(rows,filteredExpenses,periodControl,modeControl){
   ${result.count>result.visible?transactionMore:''}
  </div>`;
 }
-function importCategoryOption(merchant,current,index,selectedCategory,category=C.suggestCategory(state,merchant)){
+function importCategoryOption(merchant,current,index,selectedCategory,category){
  return category&&category!==current?`<label class="import-category-choice"><input type="checkbox" data-category-suggestion="${index}" value="${esc(category)}" ${category===selectedCategory?'checked':''}> <span>${esc(merchant)} · Öneriyi seç: ${esc(category)}</span></label>`:'';
+}
+function pdfImportCategory(row,lookup,selected){
+ if(row.kind==='cardPayment')return {category:row.category};
+ const rule=lookup(row.desc);
+ const defaultCategory=C.activeExpenseCategory(state,row.category);
+ const explicit=Boolean(selected&&rule?.category===selected);
+ // An applicable or conflicting local rule takes precedence over a new automatic alias.
+ const deferToRule=rule&&rule.category!==defaultCategory&&pdfMerchantAliasCategory(row.desc)===defaultCategory;
+ const category=explicit?selected:deferToRule?C.activeExpenseCategory(state,'Diğer'):defaultCategory;
+ return {category,defaultCategory,ruleCategory:rule?.category,explicit};
 }
 function clearMotionEntry({target,animationName}){
  if(animationName==='tab-content-in'||animationName==='tab-indicator-in')target.classList.remove('tab-entry');
@@ -514,7 +531,12 @@ function render({tabEntry=false,walletEntry=false}={}){
   html=V.planView(ctx,C.summary(state,period,mode),rows);
  }else if(page==='reports'){html=V.reportsView(ctx);
  }else if(page==='reportCategory'){html=V.reportCategoryView(ctx,detailId);
- }else if(page==='import'){html=V.importView(ctx,pending,importFailure);
+ }else if(page==='import'){
+  if(pending){
+   const lookup=C.indexCategorySuggestions(state,{includeConflicts:true});
+   ctx.pdfCategory=(row,index)=>pdfImportCategory(row,lookup,importDraft.suggestions.get(index));
+  }
+  html=V.importView(ctx,pending,importFailure);
  }else if(page==='statement'){html=V.statementView(ctx,detailId);
  }else if(page==='categories'){
   html=categoriesView({backTitle,categorySections:categorySettings()});
@@ -737,10 +759,13 @@ function transactionForm(existing,preset='expense'){
   field('note','Not',existing?.note||'','text','maxlength="2000"')+
   `<label class="transaction-reviewed"><input name="reviewed" type="checkbox" ${existing?.reviewed?'checked':''}><span>İncelendi</span></label>`);
  const remove=existing?`<button type="button" class="danger" data-delete="${esc(existing.id)}">${existing.installmentPlan?'Taksit planını sil':'İşlemi sil'}</button>`:'';
+ let categoryChanged=false;
  const savedMessage=!isEdit?'İşlem kaydedildi.':C.sourceOf(existing)==='manual'?'İşlem güncellendi.':undefined;
  transactionDialog(isEdit?'İşlem ayrıntısı':preset==='income'?'Gelir ekle':preset==='transfer'?'Transfer kaydet':'Gider ekle',
   (existing?transactionSummary(existing):'')+sourceInfo+accounts+entry+classification+notes+remove,f=>{
   const kind=fixed?existing.kind:f.get('kind'),t={...existing,id:existing?.id||C.id(),account:fixed?existing.account:f.get('account'),kind,desc:f.get('desc').trim(),amount:existing&&f.get('amount')===C.decimalMoney(existing.amount)?existing.amount:C.money(f.get('amount')),date:f.get('date'),period:existing&&(locked||existing.date===f.get('date'))?existing.period:f.get('date').slice(0,7),category:['payment','transfer','cardPayment'].includes(kind)?kinds[kind]:f.get('category'),note:f.get('note'),reviewed:f.get('reviewed')==='on'};
+  if(existing&&C.sourceOf(existing)==='pdf'&&['expense','refund'].includes(kind)&&
+    (categoryChanged||t.category!==existing.category||f.get('remember-category')==='on'))t.categoryConfirmed=true;
   if(kind==='payment'&&C.sourceOf(t)==='manual')rejectFutureCardPaymentDate(t.date);
   if(['payment','transfer'].includes(kind))t.target=f.get('target');else delete t.target;
   const count=f.get('installmentCount')?.trim();
@@ -793,7 +818,7 @@ function transactionForm(existing,preset='expense'){
   const advice=category?'Kayıtlı öneri: '+category:'';
   if($('category-advice').textContent!==advice)$('category-advice').textContent=advice;
   $('choose-category').hidden=!category;
-  $('choose-category').onclick=()=>{if(category){$('f-category').value=category;$('f-category').focus();}};
+  $('choose-category').onclick=()=>{if(category){categoryChanged=true;$('f-category').value=category;$('f-category').focus();}};
  }
  if(canAllocate){
   allocationFields=attachExpenseAllocationFields($('expense-allocation'),state.categories,initialAllocations,{
@@ -801,6 +826,7 @@ function transactionForm(existing,preset='expense'){
   });
  }
  $('f-desc').addEventListener('input',updateSuggestion);
+ $('f-category').addEventListener('change',()=>{categoryChanged=true;});
  $('f-kind').onchange=updateFields;$('f-account').onchange=updateFields;updateFields();
  if(fixed){for(const name of ['amount','date','installment'])if($('f-'+name))$('f-'+name).readOnly=true;}
 }
@@ -1150,7 +1176,7 @@ const actions={
   if(expenseCategorySuggestion(row)?.category!==suggestedCategory)return;
   const target=focusTarget(actionTrigger.closest('.transaction-with-suggestion').querySelector('[data-edit]'));
   guardRepeatedActivation(event);
-  commit(C.setTransactionCategory(state,row.id,suggestedCategory));
+  commit(C.setTransactionCategory(state,row.id,suggestedCategory,{confirm:true}));
   restoreFocus(target);
   notice('Kategori güncellendi.');
  },
@@ -1160,8 +1186,10 @@ const actions={
   const choices=(row.category?'':options([['','Kategorisiz']],''))+categoryOptions(row.kind,row.category);
   modal('Kategori seç',`<p>${esc(row.desc)}</p>`+select('category','Kategori',choices),form=>{
    const category=form.get('category');
-   if(category===row.category)return;
-   commit(C.setTransactionCategory(state,row.id,category));
+   if(!category&&category===row.category)return;
+   const next=C.setTransactionCategory(state,row.id,category,{confirm:true});
+   if(next===state)return;
+   commit(next);
    notice('Kategori güncellendi.');
   });
  },
@@ -1281,9 +1309,10 @@ const actions={
   if(!pending)return;
   if(pending.reconciliation?.status==='mismatch')throw Error('Ekstre toplamları çelişiyor; kayıt yapılamaz.');
   if(pending.reconciliation?.status!=='verified'&&!$('acknowledge-import')?.checked)throw Error('Toplamları doğrulanamayan ekstreyi kaydetmeden önce uyarıyı onayla.');
+  const lookup=C.indexCategorySuggestions(state,{includeConflicts:true});
   const rows=pending.rows.map((row,index)=>{
-   const selected=importDraft.suggestions.get(index);
-   return selected&&C.suggestCategory(state,row.desc)===selected?{...row,category:selected}:row;
+   const {category,explicit}=pdfImportCategory(row,lookup,importDraft.suggestions.get(index));
+   return explicit?{...row,category,categoryConfirmed:true}:{...row,category};
   });
   try{commit(C.importStatement(state,{...pending,rows},$('import-account').value));}
   catch(error){
@@ -1320,6 +1349,8 @@ $('main').addEventListener('change',event=>{
   const index=Number(field.dataset.categorySuggestion);
   if(field.checked)importDraft.suggestions.set(index,field.value);
   else importDraft.suggestions.delete(index);
+  const {category}=pdfImportCategory(pending.rows[index],C.indexCategorySuggestions(state,{includeConflicts:true}),importDraft.suggestions.get(index));
+  field.closest('.import-row').querySelector('.import-row-category').textContent=category?' · '+category:'';
  }
 });
 $('settings').dataset.page='settings';
