@@ -55,15 +55,26 @@
 
 @media (prefers-reduced-motion:no-preference) {
   #main > .tab-entry {animation:tab-content-in 170ms ease-out}
+  #main > .wallet-detail.wallet-entry {animation:wallet-detail-in 170ms ease-out}
   #nav button[aria-current="page"] .nav-icon.tab-entry {animation:tab-indicator-in 170ms ease-out}
   @keyframes tab-content-in {
     from {opacity:.86}
+    to {opacity:1}
+  }
+  @keyframes wallet-detail-in {
+    from {opacity:.88}
     to {opacity:1}
   }
   @keyframes tab-indicator-in {
     from {background-color:color-mix(in srgb,var(--accent) 84%,var(--shell-bg))}
     to {background-color:var(--accent)}
   }
+}
+
+#toast[data-tone="success"] {
+  background:var(--positive-surface);
+  border-color:var(--positive-line);
+  color:var(--positive);
 }
 
 html.navigation-sheet-open {overflow-y:hidden}
@@ -260,6 +271,13 @@ body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[
   font-size:.85rem;
 }
 #modal[data-variant="transaction"] #fields {display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+@media (prefers-reduced-motion:no-preference) {
+  #modal[open][data-variant="transaction"] #fields.manual-form-entry {animation:manual-form-in 160ms ease-out}
+  @keyframes manual-form-in {
+    from {opacity:.86}
+    to {opacity:1}
+  }
+}
 #modal[data-variant="transaction"] #form-error:empty {display:none}
 #modal[data-variant="transaction"] #form-error:not(:empty) {
   padding:10px;
@@ -486,6 +504,13 @@ body:is([data-surface="home"],[data-surface="wallet"],[data-surface="reports"],[
 .report-column-value {font-variant-numeric:tabular-nums}
 .report-chart time {padding-top:4px}
 .report-chart [aria-current] time {font-weight:800;text-decoration:underline}
+@media (prefers-reduced-motion:no-preference) {
+  .report-chart [aria-current="date"] time.report-month-entry {animation:report-month-in 150ms ease-out}
+  @keyframes report-month-in {
+    from {background-color:var(--accent-surface)}
+    to {background-color:transparent}
+  }
+}
 .report-distribution .dashboard-totals {margin-bottom:10px}
 .report-category-list {display:grid;gap:6px;margin:0;padding:0;list-style:none}
 .wallet-v2 .report-category-button {min-height:48px;padding:8px 10px;background:var(--shell-bg);border-color:var(--shell-line)}

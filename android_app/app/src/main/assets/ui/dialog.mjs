@@ -9,14 +9,17 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
   const submit = dialog.querySelector('#submit');
   let opener;
   let save;
+  let afterSave;
   let saving = false;
 
-  function open(heading, html, onSubmit, label = 'Kaydet', target = captureOpener(), {variant = '', dismissLabel} = {}) {
+  function open(heading, html, onSubmit, label = 'Kaydet', target = captureOpener(), {variant = '', dismissLabel, manualEntry = false, afterSave: onSave} = {}) {
     const replacing = dialog.open;
     if (!replacing) opener = target;
     save = onSubmit;
+    afterSave = onSave;
     title.textContent = heading;
     fields.innerHTML = html;
+    fields.classList.toggle('manual-form-entry',manualEntry);
     error.textContent = '';
     dialog.dataset.variant = variant;
     dismiss.textContent = dismissLabel ?? '×';
@@ -37,7 +40,8 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
   function close() {
     if (!dialog.open) return false;
     const target = opener;
-    opener = save = null;
+    opener = save = afterSave = null;
+    fields.classList.remove('manual-form-entry');
     dialog.classList.remove('navigation-sheet');
     dialog.ownerDocument.documentElement.classList.remove('navigation-sheet-open');
     dialog.close();
@@ -73,14 +77,17 @@ export function createDialog(dialog, {captureOpener, restoreFocus}) {
     event.preventDefault();
     if (!dialog.open || !save || saving) return;
     saving = true;
+    const notifySaved = afterSave;
     try {
       save(new FormData(form));
       close();
     } catch (failure) {
       showError(failure.message);
+      return;
     } finally {
       saving = false;
     }
+    notifySaved?.();
   });
   dialog.addEventListener('keydown', event => {
     if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
