@@ -48,11 +48,11 @@ const reportFilters={months:6,accountId:'',reveal:false};
 const isReportPage=route=>route==='reports'||route==='reportCategory';
 const fixedTabs=NAV_ITEMS.map(([id])=>id);
 const changesFixedTab=(from,to)=>from!==to&&fixedTabs.includes(from)&&fixedTabs.includes(to);
-function notice(message,{error=false}={}){
+function notice(message,{error=false,tone=error?'error':'status'}={}){
  const live=$(error?'error-announcement':'status-announcement');
  live.textContent=message;
  $('toast').textContent=message;
- $('toast').dataset.tone=error?'error':'status';
+ $('toast').dataset.tone=tone;
  $('toast').classList.add('visible');
  clearTimeout(toastTimer);
  toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),7000);
@@ -219,10 +219,18 @@ const {open:modal,openSheet,close:closeModal,showError:showDialogError}=createDi
  captureOpener:()=>focusTarget(actionTrigger||document.activeElement),
  restoreFocus,
 });
-const transactionDialog=(title,fields,save,label)=>modal(title,fields,save,label,undefined,{
- variant:'transaction',
- dismissLabel:save?'Vazgeç':undefined,
-});
+function transactionDialog(title,fields,save,label,{manualEntry=false,savedMessage}={}){
+ if(savedMessage&&$('toast').dataset.tone==='success'){
+  $('toast').classList.remove('visible');
+  $('status-announcement').textContent='';
+ }
+ modal(title,fields,save,label,undefined,{
+  variant:'transaction',
+  dismissLabel:save?'Vazgeç':undefined,
+  manualEntry:manualEntry&&tabMotion.matches,
+  afterSave:savedMessage?()=>notice(savedMessage,{tone:'success'}):undefined,
+ });
+}
 const planDialog=(title,fields,save,label,destructive=false)=>modal(title,fields,save,label,undefined,{
  variant:destructive?'plan-removal':'plan',
  dismissLabel:'Vazgeç',
@@ -313,6 +321,7 @@ function backDestinationTitle(){
 }
 function go(next,id=null,category=null,{recordHistory=true}={}){
  const tabEntry=changesFixedTab(page,next);
+ const walletEntry=page==='wallet'&&next==='account';
  if(next!==page||id!==detailId||category!==expenseCategory){
   if(recordHistory)history.push({
    page,detailId,query,expenseCategory,title:$('main').querySelector('h1')?.textContent.trim(),
@@ -322,7 +331,7 @@ function go(next,id=null,category=null,{recordHistory=true}={}){
   resetBalanceReview(next,id);
  }
  page=next;detailId=id;expenseCategory=category;query='';
- render({tabEntry});window.scrollTo(0,0);focusMain();
+ render({tabEntry,walletEntry});window.scrollTo(0,0);focusMain();
 }
 const empty=(message,title='Buradan başlayalım')=>`<div class="empty"><b>${title}</b><p>${message}</p></div>`;
 function expenseCategorySuggestion(row,lookup=merchant=>C.categorySuggestion(state,merchant)){
@@ -452,20 +461,23 @@ function transactionsView(rows,filteredExpenses,periodControl,modeControl){
 function importCategoryOption(merchant,current,index,selectedCategory,category=C.suggestCategory(state,merchant)){
  return category&&category!==current?`<label class="import-category-choice"><input type="checkbox" data-category-suggestion="${index}" value="${esc(category)}" ${category===selectedCategory?'checked':''}> <span>${esc(merchant)} · Öneriyi seç: ${esc(category)}</span></label>`:'';
 }
-function clearTabEntry({target,animationName}){
+function clearMotionEntry({target,animationName}){
  if(animationName==='tab-content-in'||animationName==='tab-indicator-in')target.classList.remove('tab-entry');
+ if(animationName==='wallet-detail-in')target.classList.remove('wallet-entry');
+ if(animationName==='report-month-in')target.classList.remove('report-month-entry');
 }
-document.addEventListener('animationend',clearTabEntry);
-document.addEventListener('animationcancel',clearTabEntry);
+document.addEventListener('animationend',clearMotionEntry);
+document.addEventListener('animationcancel',clearMotionEntry);
 const tabMotion=matchMedia('(prefers-reduced-motion:no-preference)');
-function clearReducedTabEntry({matches}){
+function clearReducedMotionEntries({matches}){
  if(matches)return;
  // A marker can precede CSS animation creation, so reduction may emit no animationcancel.
- document.querySelectorAll('#main > .tab-entry,#nav .nav-icon.tab-entry').forEach(node=>node.classList.remove('tab-entry'));
+ document.querySelectorAll('#main > :is(.tab-entry,.wallet-entry),#nav .nav-icon.tab-entry,#fields.manual-form-entry,.report-month-entry')
+  .forEach(node=>node.classList.remove('tab-entry','wallet-entry','manual-form-entry','report-month-entry'));
 }
-if(tabMotion.addEventListener)tabMotion.addEventListener('change',clearReducedTabEntry);
-else tabMotion.addListener?.(clearReducedTabEntry);
-function render({tabEntry=false}={}){
+if(tabMotion.addEventListener)tabMotion.addEventListener('change',clearReducedMotionEntries);
+else tabMotion.addListener?.(clearReducedMotionEntries);
+function render({tabEntry=false,walletEntry=false}={}){
  $('nav').innerHTML=renderBottomNavigation(page);
  document.body.dataset.surface=loadFailed?'recovery':activeBottomPage(page);
  if(loadFailed){
@@ -516,6 +528,7 @@ function render({tabEntry=false}={}){
   $('main').firstElementChild?.classList.add('tab-entry');
   $('nav').querySelector('[aria-current="page"] .nav-icon')?.classList.add('tab-entry');
  }
+ if(walletEntry&&tabMotion.matches)$('main').querySelector(':scope > .wallet-detail')?.classList.add('wallet-entry');
  $('main').querySelector('h1')?.setAttribute('tabindex','-1');
  for(const [id,key] of [['view-mode','mode'],['kind-filter','kind'],['account-filter','account']])$('f-'+id)?.addEventListener('change',e=>{if(key==='mode')periodMode=e.target.value;else if(key==='kind')kindFilter=e.target.value;else accountFilter=e.target.value;render();$('f-'+id)?.focus({preventScroll:true});});
  for(const [id,update] of [
@@ -530,7 +543,9 @@ function render({tabEntry=false}={}){
    errorNotice('Geçerli bir takvim ayı seç.');
    return;
   }
+  const highlightMonth=isReportPage(page)&&e.target.value!==period&&tabMotion.matches;
   period=e.target.value;render();$('period')?.focus({preventScroll:true});
+  if(highlightMonth)$('main').querySelector('.report-chart [aria-current="date"] time')?.classList.add('report-month-entry');
  });
  $('search')?.addEventListener('input',e=>{
   query=e.target.value;
@@ -722,6 +737,7 @@ function transactionForm(existing,preset='expense'){
   field('note','Not',existing?.note||'','text','maxlength="2000"')+
   `<label class="transaction-reviewed"><input name="reviewed" type="checkbox" ${existing?.reviewed?'checked':''}><span>İncelendi</span></label>`);
  const remove=existing?`<button type="button" class="danger" data-delete="${esc(existing.id)}">${existing.installmentPlan?'Taksit planını sil':'İşlemi sil'}</button>`:'';
+ const savedMessage=!isEdit?'İşlem kaydedildi.':C.sourceOf(existing)==='manual'?'İşlem güncellendi.':undefined;
  transactionDialog(isEdit?'İşlem ayrıntısı':preset==='income'?'Gelir ekle':preset==='transfer'?'Transfer kaydet':'Gider ekle',
   (existing?transactionSummary(existing):'')+sourceInfo+accounts+entry+classification+notes+remove,f=>{
   const kind=fixed?existing.kind:f.get('kind'),t={...existing,id:existing?.id||C.id(),account:fixed?existing.account:f.get('account'),kind,desc:f.get('desc').trim(),amount:existing&&f.get('amount')===C.decimalMoney(existing.amount)?existing.amount:C.money(f.get('amount')),date:f.get('date'),period:existing&&(locked||existing.date===f.get('date'))?existing.period:f.get('date').slice(0,7),category:['payment','transfer','cardPayment'].includes(kind)?kinds[kind]:f.get('category'),note:f.get('note'),reviewed:f.get('reviewed')==='on'};
@@ -738,7 +754,7 @@ function transactionForm(existing,preset='expense'){
    next=C.saveMerchantRule(next,name,t.category,rule?.id);
   }
   commit(next);
- });
+ },undefined,{manualEntry:!isEdit,savedMessage});
  function updateFields(){
   const kind=$('f-kind').value,current=$('f-account').value,filter=a=>kind==='income'||['payment','transfer'].includes(kind)?a.type!=='card':kind==='cardPayment'?a.type==='card':true;
   $('f-account').innerHTML=accountOptions(filter,current);const account=$('f-account').value;
@@ -803,7 +819,7 @@ function payCardForm(cardId,{sourceId=''}={}){
   rejectFutureCardPaymentDate(date);
   if(!f.get('account'))throw Error('Kaynak hesabı seç.');
   commit(C.addTransaction(state,{id:C.id(),kind:'payment',account:f.get('account'),target:f.get('target'),amount:C.money(f.get('amount')),date,period:date.slice(0,7),desc:accountName(f.get('target'))+' borç ödemesi',category:'Kart ödemesi',note:''}));
- },'Ödemeyi kaydet');
+ },'Ödemeyi kaydet',{savedMessage:'Kart ödemesi kaydedildi.'});
  $('f-target').onchange=()=>{const d=W.cardDetail(state,$('f-target').value);$('f-amount').value=C.decimalMoney(d.statementRemaining>0?d.statementRemaining:d.debt);};
 }
 function attachPaymentForm(tid){const t=state.transactions.find(t=>t.id===tid);if(!t)return;

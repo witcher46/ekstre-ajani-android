@@ -1,4 +1,5 @@
 const openRoute=require('./journey-navigation.cjs');
+const checkFinalMotion=require('./final-motion-journey.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'playwright');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
@@ -237,7 +238,8 @@ async function checkTabMotion(browser){
       const content=main.locator(':scope > :first-child');
       const currentAnimations=()=>content.evaluate(node=>node.getAnimations().length);
       assert.equal(await main.getByRole('heading',{level:1,name:'Sentetik banka'}).isVisible(),true);
-      assert.equal(await currentAnimations(),0,'account entry stays still');
+      assert.equal(await content.evaluate(node=>node.getAnimations().some(animation=>animation.animationName==='tab-content-in')),
+        false,'account entry does not use fixed-tab motion');
       assert.equal(await page.evaluate(()=>window.handleBack()),true);
       assert.equal(await account.evaluate(node=>node===document.activeElement),true);
       assert.equal(await currentAnimations(),0,'return from account stays still');
@@ -1359,6 +1361,11 @@ async function checkDialog(page,opener,expectedTitle,{checkAccountLabel=false}={
       await checkMoreNavigation(browser);
       await checkDashboardLayouts(browser);
     }
+    const finalMotion=process.argv.find(arg=>arg==='--final-motion'||arg.startsWith('--final-motion='));
+    if(finalMotion){
+      await checkFinalMotion(browser,serveWallet,finalMotion.split('=')[1]);
+      return;
+    }
     if(process.argv.includes('--nav-motion')){
       await checkTabMotion(browser);
       return;
@@ -1397,6 +1404,7 @@ async function checkDialog(page,opener,expectedTitle,{checkAccountLabel=false}={
     await checkSlice1();
     await checkTouchFeedback(browser);
     await checkTabMotion(browser);
+    await checkFinalMotion(browser,serveWallet);
     await checkTransactionEmptyStates(browser);
     await checkTransactionForms(browser);
     await checkShowMore(browser);
