@@ -1,4 +1,5 @@
 const openRoute=require('./journey-navigation.cjs');
+const checkPdfCategories=require('./pdf-category-journey.cjs');
 const {selectSummaryMonth}=openRoute;
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const assert = require('node:assert/strict');
@@ -105,6 +106,11 @@ async function run() {
       if(!localStorage.getItem('ekstre-android-v1'))localStorage.setItem('ekstre-android-v1',JSON.stringify(wallet));
     },makeWallet());
     await page.goto('https://wallet.test/');
+    if(process.argv.includes('--pdf-categories')){
+      await checkPdfCategories(page,makeWallet());
+      assert.deepEqual(errors,[]);
+      return;
+    }
     await selectSummaryMonth(page,'2026-10');
 
     const chart=page.getByRole('region',{name:'Kategori bazlı gider dağılımı'});
@@ -498,6 +504,7 @@ async function run() {
     await scaleText(review,1);
     await page.evaluate(()=>window.handleBack());
     assert.equal(await page.evaluate(()=>document.activeElement.dataset.page),'review');
+    await checkPdfCategories(page,makeWallet());
     assert.deepEqual(errors,[]);
     console.log('Statement and expense chart journeys passed; '+checks+' responsive checks');
   } finally {

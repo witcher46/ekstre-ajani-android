@@ -293,6 +293,53 @@ public class WalletJourneyTest {
    JSONArray failures=new JSONArray();for(int i=0;i<reports.length();i++){JSONObject report=reports.getJSONObject(i);if(report.getJSONArray("failures").length()>0)failures.put(report);}assertEquals("All native money, overlap and system bar bounds: "+failures,0,failures.length());assertEquals(57,reports.length());
   }
  }
+ @Test public void pdfMerchantCategoriesUseNativeFilesAndPersist()throws Exception{
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  PDFBoxResourceLoader.init(context);
+  String[][] statements={
+   {"QNB","Hesap Kesim Tarihi: 05/10/2026","Onceki Donem Hesap Ozeti Borcu: 0.00","Donem Borcu: 64.00",
+    "01/10/2026 KOMAGENE 10.00","02/10/2026 YEMEN KAHVESI 20.00","03/10/2026 SENTETIK ECZANESI 30.00","04/10/2026 KOMAGENE MARKET 4.00"},
+   {"YAPI VE KREDI","Hesap Ozeti Tarihi: 05.11.2026","Onceki Hesap Ozeti Borcu (TL): 0,00","Hesap Ozeti Borcu (TL): 64,00",
+    "Islem Tarihi Aciklama Harcama (TL) Worldpuan",
+    "01.11.2026 KOMAGENE 10,00 0,00","02.11.2026 YEMEN KAHVESI 20,00 0,00","03.11.2026 SENTETIK ECZANESI 30,00 0,00","04.11.2026 KOMAGENE MARKET 4,00 0,00"}
+  };
+  String expectedCategories=new JSONArray(new String[]{"Dışarıda yeme","Dışarıda yeme","Sağlık","Diğer"}).toString();
+  try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){
+   waitJs(a,"!!document.querySelector('nav [data-page=wallet]')");
+   openRoute(a,"wallet");
+   waitJs(a,"!!document.querySelector('[data-action=addAccount]')");
+   account(a,"Sentetik kategori kartı","card","0");
+   for(int i=0;i<statements.length;i++){
+    byte[] bytes;
+    try(PDDocument pdf=new PDDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()){
+     PDPage page=new PDPage();pdf.addPage(page);
+     try(PDPageContentStream stream=new PDPageContentStream(pdf,page)){
+      stream.beginText();stream.setFont(PDType1Font.HELVETICA,12);stream.setLeading(18);stream.newLineAtOffset(30,700);
+      for(String line:statements[i]){stream.showText(line);stream.newLine();}
+      stream.endText();
+     }
+     pdf.save(out);bytes=out.toByteArray();
+    }
+    String name="sentetik-pdf-kategori-"+i+".pdf";
+    Uri uri=document(name,"application/pdf",bytes);
+    try{
+     openRoute(a,"import");click(a,"[data-action=pdf]");waitPicker();selectDownload(name);
+     waitJs(a,"!!document.querySelector('[data-action=confirmImport]:enabled')");
+     assertEquals("PDF preview categories",expectedCategories,js(a,
+      "[...document.querySelectorAll('.import-row-category')].map(e=>e.textContent.replace(/^ · /,''))"));
+     click(a,"[data-action=confirmImport]");
+     int count=(i+1)*4;
+     waitJs(a,"!document.querySelector('.statement-preview') && JSON.parse(Android.load()).transactions.length==="+count);
+     String rows="JSON.parse(Android.load()).transactions.slice(-4)";
+     assertEquals("Stored categories",expectedCategories,js(a,rows+".map(row=>row.category)"));
+     assertEquals("Stored cents","[1000,2000,3000,400]",js(a,rows+".map(row=>row.amount)"));
+    }finally{context.getContentResolver().delete(uri,null,null);}
+   }
+   a.recreate();
+   waitJs(a,"JSON.parse(Android.load()).transactions.length===8");
+   assertEquals(expectedCategories,js(a,"JSON.parse(Android.load()).transactions.slice(-4).map(row=>row.category)"));
+  }
+ }
  @Test public void salaryCardPaymentAndIncomePlanStayConsistent()throws Exception{
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
   try(ActivityScenario<MainActivity> a=ActivityScenario.launch(MainActivity.class)){

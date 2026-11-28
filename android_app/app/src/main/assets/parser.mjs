@@ -42,10 +42,30 @@ const categoryRules=[
  ['Ev / Kira','KIRA|AIDAT|IKEA'],
  ['Eğitim','KITAP|OKUL|KURS'],
 ].map(([category,words])=>[category,new RegExp('(?:^| )(?:'+words+')(?: |$)')]);
+const merchantAliasRules=[
+ ['Dışarıda yeme',/(?:^| )(?:KOMAGENE|KAFE|KAFESI|KAHVESI|COFFEE)(?: |$)/],
+ ['Sağlık',/(?:^| )ECZANESI(?: |$)/],
+];
+const nonMerchantAliasContext=/(?:^| )(?:ODEME|TRANSFER|HAVALE|EFT|FAST|NAKIT AVANS|TAHSILAT|KOMISYON|UCRET|UCRETI|IBAN|REF|REFERANS|ISLEM NO|POS NO|KART NO|SIPARIS KODU|MAKINESI)(?: |$)/;
+
+function matchedCategories(rules,name){
+ return rules.filter(([,pattern])=>pattern.test(name)).map(([category])=>category);
+}
+function legacyCategoryMatches(desc){
+ return matchedCategories(categoryRules,merchantKey(clean(desc)));
+}
+function merchantAliasMatches(desc){
+ // Treat unknown PDF glyphs as boundaries. Legacy cleanup and replay keys stay separate.
+ const name=merchantKey(String(desc).replace(/\(cid:\d+\)|[\p{Cc}\p{Cf}]/gu,' '));
+ return nonMerchantAliasContext.test(name)?[]:matchedCategories(merchantAliasRules,name);
+}
+export function pdfMerchantAliasCategory(desc){
+ const aliases=merchantAliasMatches(desc);
+ return aliases.length===1&&!legacyCategoryMatches(desc).length?aliases[0]:null;
+}
 export function categorize(desc){
- const name=merchantKey(clean(desc));
- const matches=categoryRules.filter(([,pattern])=>pattern.test(name));
- return matches.length===1?matches[0][0]:'Diğer';
+ const matches=new Set([...legacyCategoryMatches(desc),...merchantAliasMatches(desc)]);
+ return matches.size===1?matches.values().next().value:'Diğer';
 }
 function displayDescription(s){
  return s.replace(/\u00a0/g,' ')

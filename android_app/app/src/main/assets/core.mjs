@@ -206,15 +206,16 @@ export function categorySuggestion(s,merchant){
   return match;
  });
 }
-function matchCategory(merchant,exactRule,branchMatch){
+function matchCategory(merchant,exactRule,branchMatch,includeConflicts=false){
  const key=merchantKey(merchant),exact=exactRule(key);
  if(exact)return {category:exact.category,match:'merchant',source:'exact'};
  const name=branchMerchantName(key);
  if(!name)return null;
  const branch=branchMatch(name);
+ if(branch===null&&includeConflicts)return {source:'conflict'};
  return branch?.category==null?null:{category:branch.category,match:'branch',source:branch.source};
 }
-export function indexCategorySuggestions(s){
+export function indexCategorySuggestions(s,{includeConflicts=false}={}){
  const rules=new Map(),branches=new Map();
  const record=(name,category,source)=>{
   const previous=branches.get(name);
@@ -227,7 +228,7 @@ export function indexCategorySuggestions(s){
   record(key,rule.category,'parent');
   if(name)record(name,rule.category,'sibling');
  }
- return merchant=>matchCategory(merchant,key=>rules.get(key),name=>branches.get(name));
+ return merchant=>matchCategory(merchant,key=>rules.get(key),name=>branches.get(name),includeConflicts);
 }
 export function saveMerchantRule(s,merchant,category,ruleId){
  const next=structuredClone(s);
@@ -603,12 +604,15 @@ export function updateTransaction(s,t,{allocations}={}){
  if(allocationEdit)updated.transactions.splice(s.transactions.indexOf(old),0,updated.transactions.pop());
  return updated;
 }
-export function setTransactionCategory(s,id,category){
+export function setTransactionCategory(s,id,category,{confirm=false}={}){
  const row=s.transactions.find(t=>t.id===id);
  if(!row||row.linkedTo||!['expense','refund'].includes(row.kind))throw Error('Bu işlemin kategorisi burada değiştirilemez.');
  if(!s.categories.includes(category))throw Error('Geçerli bir gider kategorisi seç.');
- if(row.category===category)return s;
- return validate({...s,transactions:s.transactions.map(t=>t===row?{...t,category}:t)});
+ const categoryConfirmed=confirm&&sourceOf(row)==='pdf';
+ if(row.category===category&&(!categoryConfirmed||row.categoryConfirmed===true))return s;
+ const updated={...row,category};
+ if(categoryConfirmed)updated.categoryConfirmed=true;
+ return validate({...s,transactions:s.transactions.map(t=>t===row?updated:t)});
 }
 function ledgerEffect(t,a){let n=0;if(t.account===a.id)n=a.type==='card'?(t.kind==='expense'?t.amount:['refund','cardPayment'].includes(t.kind)?-t.amount:0):(['income','refund'].includes(t.kind)?t.amount:-t.amount);if(t.target===a.id)n+=a.type==='card'?-t.amount:t.amount;return n;}
 export function cardDates(s,posted){
@@ -960,7 +964,13 @@ export function importStatement(s,p,account){
   const old=priorRows.get(r.importKey);
   const category=old?.category??(['expense','refund'].includes(r.kind)?activeExpenseCategory(s,r.category):r.category);
   const row={...r,id:old?.id||id(),account,statement:key,source:'pdf',merchantName:r.desc,sourceDesc:r.sourceDesc??r.desc,desc:old&&old.desc!==old.sourceDesc?old.desc:r.desc,category,note:old?.note??'',reviewed:old?.reviewed||false};
-  if(old){for(const k of ['matchStatus','matchCandidates','matchReason','linkedTo','previousLinkedTo'])if(old[k]!==undefined)row[k]=old[k];}else markCandidate(row,candidates);next.transactions.push(row);
+  if(old){
+   delete row.categoryConfirmed;
+   for(const k of ['matchStatus','matchCandidates','matchReason','linkedTo','previousLinkedTo','categoryConfirmed']){
+    if(old[k]!==undefined)row[k]=old[k];
+   }
+  }else markCandidate(row,candidates);
+  next.transactions.push(row);
  }
  next.statements=next.statements.filter(x=>x.id!==key);next.statements.push({id:key,account,bank:p.bank,period:p.period,cut:p.cut,due:p.due,debt:p.debt,imported:today(),reconciliationStatus:p.reconciliation?.status==='verified'?'verified':'unverified',importedMovementCount:p.rows.length});return validate(repairReferences(preferPdfAcrossCut(next)));
 }

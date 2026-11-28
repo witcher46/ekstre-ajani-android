@@ -544,7 +544,7 @@ export function statementView(ctx,id) {
       <div class="actions"><button data-card-view="${ctx.esc(statement.account)}">Kredi kartını aç</button>${pending?'<button data-page="review">İnceleme kutusu</button>':''}</div>
     </section>
     <section class="panel" id="statement-transactions"><h2>Belgedeki hareketler · ${ctx.esc(rows.length)}</h2>
-      ${rows.length?ctx.transactionList(newest(rows),{statementSource:true}):noRows('Bu ekstreye bağlı hareket kaydı yok.')}
+      ${rows.length?ctx.transactionList(newest(rows),{statementSource:true,suggestCategories:true}):noRows('Bu ekstreye bağlı hareket kaydı yok.')}
       ${rows.length>ctx.listLimit?'<button type="button" data-action="more" aria-controls="statement-transactions">Daha fazla göster</button>':''}
     </section></div>`);
 }
@@ -559,7 +559,7 @@ const csvKinds = {harcama:'expense',odeme:'cardPayment',indirim:'refund'};
 function importRow(ctx,row,amountValue,extra='') {
   const {esc}=ctx;
   return `<article class="import-row"><div class="statement-movement-row"><div>
-      <strong>${esc(row.desc)}</strong><small>${esc(row.date)}${row.category?' · '+esc(row.category):''}${row.installment?' · '+esc(row.installment):''}</small>
+      <strong>${esc(row.desc)}</strong><small>${esc(row.date)}<span class="import-row-category">${row.category?' · '+esc(row.category):''}</span>${row.installment?' · '+esc(row.installment):''}</small>
     </div><b>${amount(ctx,amountValue)}</b></div>${extra}</article>`;
 }
 
@@ -567,9 +567,11 @@ function pdfMovementGroups(ctx,rows) {
   return movementGroups.map(([kind,label])=>{
     const members=rows.map((row,index)=>({row,index})).filter(({row})=>row.kind===kind);
     if(!members.length)return '';
-    return `<section class="statement-movement-group"><h4>${label} · ${members.length}</h4>${members.map(({row,index})=>
-      importRow(ctx,row,row.amount,statementSource(row.sourceDesc??row.desc)+
-        (kind==='cardPayment'?'':ctx.importCategoryOption(row.desc,row.category,index,ctx.importDraft.suggestions.get(index))))).join('')}</section>`;
+    return `<section class="statement-movement-group"><h4>${label} · ${members.length}</h4>${members.map(({row,index})=>{
+      const {category,defaultCategory,ruleCategory}=ctx.pdfCategory(row,index);
+      return importRow(ctx,{...row,category},row.amount,statementSource(row.sourceDesc??row.desc)+
+        ctx.importCategoryOption(row.desc,defaultCategory,index,ctx.importDraft.suggestions.get(index),ruleCategory));
+    }).join('')}</section>`;
   }).join('');
 }
 
@@ -633,7 +635,7 @@ export function importView(ctx,pending,failure) {
       ${statementDateWarning(pending,rows)}
       <div class="preview-movements"><h3 id="preview-movement-title">Okunan hareketler</h3><div class="preview import-preview" role="region" aria-labelledby="preview-movement-title" tabindex="0">
         ${pdfMovementGroups(ctx,rows) || noRows('Okunmuş hareket yok.')}</div></div>
-      <p class="notice">Aynı kartın aynı dönemini tekrar aktarmak ekstre hareketlerini yeniler. Manuel kayıtlar korunur.</p>
+      <p class="notice">Aynı kartın aynı dönemini tekrar aktarmak ekstre hareketlerini yeniler. Kayıtlı kategoriler ve manuel kayıtlar korunur.</p>
       <p class="warning" id="statement-save-error" hidden></p>
       <div class="preview-actions"><button class="primary" data-action="confirmImport" ${blocked || !cards.length || !rows.length || (needsAcknowledgement && !ctx.importDraft.acknowledged) ? 'disabled' : ''}>Onayla ve kaydet</button><button data-action="cancelImport">Vazgeç</button></div>
     </section>`;
